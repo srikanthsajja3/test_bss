@@ -5,6 +5,7 @@ import { LoginModal } from './components/LoginModal';
 import { PartnerList } from './components/PartnerList';
 import { PartnerDetailsModal } from './components/PartnerDetailsModal';
 import { PartnerFormModal } from './components/PartnerFormModal';
+import { PlanMappingModal } from './components/PlanMappingModal';
 import { ApiSettingsModal } from './components/ApiSettingsModal';
 import { ApiConsole } from './components/ApiConsole';
 import { BssApiClient } from './api/bssApi';
@@ -22,6 +23,8 @@ const DashboardContent: React.FC = () => {
   const [viewPartnerId, setViewPartnerId] = useState<number | null>(null);
   const [viewPartnerData, setViewPartnerData] = useState<Partner | null>(null);
   const [editPartner, setEditPartner] = useState<Partner | null>(null);
+  const [mappingPartner, setMappingPartner] = useState<Partner | null>(null);
+  const [mappingTab, setMappingTab] = useState<'internet' | 'iptv'>('internet');
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isConsoleOpen, setIsConsoleOpen] = useState(false);
@@ -74,6 +77,11 @@ const DashboardContent: React.FC = () => {
     setEditPartner(partner);
   };
 
+  const handleManagePlans = (partner: Partner, tab: 'internet' | 'iptv' = 'internet') => {
+    setMappingPartner(partner);
+    setMappingTab(tab);
+  };
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans pb-24 selection:bg-indigo-500 selection:text-white">
       {/* Navigation */}
@@ -116,6 +124,7 @@ const DashboardContent: React.FC = () => {
           onRoleChange={handleRoleChange}
           onViewPartner={handleViewPartner}
           onEditPartner={handleEditPartner}
+          onManagePlans={handleManagePlans}
           onDirectLookup={handleDirectLookup}
           onOpenCreate={() => setIsCreateOpen(true)}
         />
@@ -138,6 +147,21 @@ const DashboardContent: React.FC = () => {
             setViewPartnerData(null);
             setEditPartner(partner);
           }}
+          onManagePlans={(partner, tab) => {
+            setViewPartnerId(null);
+            setViewPartnerData(null);
+            handleManagePlans(partner, tab);
+          }}
+        />
+      )}
+
+      {/* Plan Catalog & Mapping Modal (Internet & IPTV) */}
+      {mappingPartner && (
+        <PlanMappingModal
+          partner={mappingPartner}
+          initialTab={mappingTab}
+          onClose={() => setMappingPartner(null)}
+          onSuccessToast={(msg) => showToast(msg, 'success')}
         />
       )}
 

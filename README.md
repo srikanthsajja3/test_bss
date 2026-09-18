@@ -59,6 +59,12 @@ You can toggle between the **Vite Dev Proxy** (`/b_bss`) and **Direct Cloud API*
 | `/b_bss/partner.php?id={id}` | `GET` | Fetches full partner record and RADIUS/IPTV configs by ID |
 | `/b_bss/partner.php` | `POST` | Registers a new partner with login credentials and integrations |
 | `/b_bss/partner.php?id={id}` | `PUT` | Updates partner details and mapping configurations |
+| `/b_bss/internet_plan_sync.php?partner_id={id}` | `POST` | Triggers catalog sync from operator RADIUS server |
+| `/b_bss/internet_plan_mapping.php?partner_id={id}` | `GET` | Fetches internet plans and sub-plans with mapping status |
+| `/b_bss/internet_plan_mapping.php` | `POST` | Maps selected internet sub-plans with custom offer prices |
+| `/b_bss/iptv_plan_sync.php?partner_id={id}` | `POST` | Triggers catalog sync from operator IPTV provider |
+| `/b_bss/iptv_plan_mapping.php?partner_id={id}` | `GET` | Fetches IPTV plans, channel bouquets, and mapping status |
+| `/b_bss/iptv_plan_mapping.php` | `POST` | Maps selected IPTV plans and bouquets with custom offer prices |
 
 ### Key Features:
 1. **Interactive Authentication**:
@@ -72,10 +78,15 @@ You can toggle between the **Vite Dev Proxy** (`/b_bss`) and **Direct Cloud API*
 3. **Partner Registration & Updates**:
    - Comprehensive multi-section form (General, Login Credentials, RADIUS mapping, IPTV mapping)
    - 1-click **"Doc Sample"** button to auto-fill sample data from the documentation (`Sai Ram Cable Network`)
-4. **Live API Inspector & cURL Generator**:
+4. **Internet & IPTV Plan Mapping**:
+   - Dedicated modal with tabbed views for Internet Plans (RADIUS) and IPTV Plans
+   - 1-click **Catalog Sync** with live feedback on added/skipped plans
+   - Filter by Mapped / Unmapped / All and search by name/type
+   - Custom offer pricing adjustments and batch saving
+5. **Live API Inspector & cURL Generator**:
    - Built-in live terminal / drawer that logs every outgoing request and response
    - Displays real status codes, latency in ms, and request/response JSON
-   - **One-click "Copy cURL"** button to copy exact cURL command matching the API specification
+   - Copy exact cURL commands matching the API specification
 
 ---
 

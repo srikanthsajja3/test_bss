@@ -89,6 +89,67 @@ export interface ApiResponse<T = unknown> {
   data?: T;
 }
 
+export interface PlanSyncSummary {
+  plans_added?: number;
+  plans_skipped?: number;
+  subplans_added?: number;
+  subplans_skipped?: number;
+  items_skipped_invalid?: number;
+}
+
+export interface PlanSyncResponse {
+  success: boolean;
+  message?: string;
+  summary?: PlanSyncSummary;
+}
+
+export interface InternetSubPlan {
+  sub_plan_id: number;
+  sub_plan_name: string;
+  base_price: string;
+  plan_validity: number;
+  is_mapped: boolean;
+  mapped_price: string | null;
+}
+
+export interface InternetPlan {
+  plan_id: number;
+  plan_name: string;
+  data: string;
+  subplans: InternetSubPlan[];
+}
+
+export interface InternetPlanMappingItem {
+  internet_sub_plan_id: number;
+  price?: number | string;
+}
+
+export interface SaveInternetPlanMappingPayload {
+  partner_id: number;
+  plans: InternetPlanMappingItem[];
+}
+
+export interface IptvPlan {
+  plan_id: number;
+  plan_name: string;
+  type?: string;
+  sub_plan_id: number;
+  base_price: string;
+  plan_validity: number;
+  is_mapped: boolean;
+  mapped_price: string | null;
+}
+
+export interface IptvPlanMappingItem {
+  iptv_sub_plan_id: number;
+  price?: number | string;
+}
+
+export interface SaveIptvPlanMappingPayload {
+  partner_id: number;
+  plans: IptvPlanMappingItem[];
+}
+
 export interface ApiLog {
   id: string;
   timestamp: string;

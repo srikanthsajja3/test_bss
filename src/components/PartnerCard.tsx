@@ -11,15 +11,22 @@ import {
   Edit2,
   Shield,
   CheckCircle2,
+  Layers,
 } from 'lucide-react';
 
 interface PartnerCardProps {
   partner: Partner;
   onView: (partner: Partner) => void;
   onEdit: (partner: Partner) => void;
+  onManagePlans?: (partner: Partner, tab?: 'internet' | 'iptv') => void;
 }
 
-export const PartnerCard: React.FC<PartnerCardProps> = ({ partner, onView, onEdit }) => {
+export const PartnerCard: React.FC<PartnerCardProps> = ({
+  partner,
+  onView,
+  onEdit,
+  onManagePlans,
+}) => {
   const hasInternet = !!(partner.internet_base_url || partner.internet_partner_id);
   const hasIptv = !!(partner.iptv_base_url || partner.iptv_operator_id);
 
@@ -120,18 +127,31 @@ export const PartnerCard: React.FC<PartnerCardProps> = ({ partner, onView, onEdi
       </div>
 
       {/* Action Buttons */}
-      <div className="flex items-center space-x-2 pt-3 border-t border-slate-800">
+      <div className="flex items-center space-x-1.5 pt-3 border-t border-slate-800">
         <button
           onClick={() => onView(partner)}
-          className="flex-1 py-1.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg transition flex items-center justify-center space-x-1"
+          className="flex-1 py-1.5 px-2 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-medium rounded-lg transition flex items-center justify-center space-x-1"
+          title="View full details and RADIUS/IPTV config"
         >
           <Eye className="w-3.5 h-3.5" />
           <span>Details</span>
         </button>
 
+        {onManagePlans && (
+          <button
+            onClick={() => onManagePlans(partner)}
+            className="flex-1 py-1.5 px-2 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 text-xs font-medium rounded-lg transition flex items-center justify-center space-x-1"
+            title="Manage and map Internet & IPTV plans"
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>Plans</span>
+          </button>
+        )}
+
         <button
           onClick={() => onEdit(partner)}
-          className="py-1.5 px-3 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-medium rounded-lg transition flex items-center space-x-1"
+          className="py-1.5 px-2.5 bg-indigo-600/20 hover:bg-indigo-600/30 text-indigo-300 border border-indigo-500/30 text-xs font-medium rounded-lg transition flex items-center space-x-1"
+          title="Edit partner information"
         >
           <Edit2 className="w-3.5 h-3.5" />
           <span>Edit</span>

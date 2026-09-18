@@ -6,6 +6,11 @@ import type {
   UpdatePartnerPayload,
   ApiResponse,
   ApiLog,
+  PlanSyncResponse,
+  InternetPlan,
+  SaveInternetPlanMappingPayload,
+  IptvPlan,
+  SaveIptvPlanMappingPayload,
 } from '../types';
 
 export const DEFAULT_API_BASE = '/b_bss'; // Uses Vite proxy in development
@@ -71,6 +76,15 @@ export class BssApiClient {
     let responseStatus = 0;
     let responseData: any = null;
 
+    const parseBodySafely = (body?: BodyInit | null) => {
+      if (!body || typeof body !== 'string') return undefined;
+      try {
+        return JSON.parse(body);
+      } catch {
+        return body;
+      }
+    };
+
     try {
       const response = await fetch(url, {
         ...options,
@@ -95,7 +109,7 @@ export class BssApiClient {
         url,
         status: responseStatus,
         durationMs,
-        requestBody: options.body ? JSON.parse(options.body as string) : undefined,
+        requestBody: parseBodySafely(options.body),
         responseBody: responseData,
         success: response.ok && responseData?.success !== false,
       });
@@ -116,7 +130,7 @@ export class BssApiClient {
           url,
           status: 0,
           durationMs,
-          requestBody: options.body ? JSON.parse(options.body as string) : undefined,
+          requestBody: parseBodySafely(options.body),
           responseBody: { error: err.message },
           success: false,
         });
@@ -171,6 +185,70 @@ export class BssApiClient {
   ): Promise<ApiResponse> {
     return await this.request(`/partner.php?id=${encodeURIComponent(id)}`, {
       method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // 6. Sync Internet Plans: POST /internet_plan_sync.php
+  static async syncInternetPlans(partnerId?: number | string): Promise<PlanSyncResponse> {
+    const query = partnerId ? `?partner_id=${encodeURIComponent(partnerId)}` : '';
+    const res = await this.request<any>(`/internet_plan_sync.php${query}`, {
+      method: 'POST',
+      body: '',
+    });
+    return res as unknown as PlanSyncResponse;
+  }
+
+  // 7. Get Internet Plan Mapping: GET /internet_plan_mapping.php?partner_id=...
+  static async getInternetPlanMapping(partnerId: number | string): Promise<InternetPlan[]> {
+    const res = await this.request<InternetPlan[]>(
+      `/internet_plan_mapping.php?partner_id=${encodeURIComponent(partnerId)}`,
+      {
+        method: 'GET',
+      }
+    );
+    return (res.data || []) as InternetPlan[];
+  }
+
+  // 8. Save Internet Plan Mapping: POST /internet_plan_mapping.php
+  static async saveInternetPlanMapping(
+    payload: SaveInternetPlanMappingPayload
+  ): Promise<ApiResponse> {
+    return await this.request('/internet_plan_mapping.php', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // 9. Sync IPTV Plans: POST /iptv_plan_sync.php?partner_id=...
+  static async syncIptvPlans(partnerId: number | string): Promise<PlanSyncResponse> {
+    const res = await this.request<any>(
+      `/iptv_plan_sync.php?partner_id=${encodeURIComponent(partnerId)}`,
+      {
+        method: 'POST',
+        body: '',
+      }
+    );
+    return res as unknown as PlanSyncResponse;
+  }
+
+  // 10. Get IPTV Plan Mapping: GET /iptv_plan_mapping.php?partner_id=...
+  static async getIptvPlanMapping(partnerId: number | string): Promise<IptvPlan[]> {
+    const res = await this.request<IptvPlan[]>(
+      `/iptv_plan_mapping.php?partner_id=${encodeURIComponent(partnerId)}`,
+      {
+        method: 'GET',
+      }
+    );
+    return (res.data || []) as IptvPlan[];
+  }
+
+  // 11. Save IPTV Plan Mapping: POST /iptv_plan_mapping.php
+  static async saveIptvPlanMapping(
+    payload: SaveIptvPlanMappingPayload
+  ): Promise<ApiResponse> {
+    return await this.request('/iptv_plan_mapping.php', {
+      method: 'POST',
       body: JSON.stringify(payload),
     });
   }

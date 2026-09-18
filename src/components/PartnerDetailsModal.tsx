@@ -17,6 +17,7 @@ import {
   AlertCircle,
   Hash,
   UserCheck,
+  Layers,
 } from 'lucide-react';
 
 interface PartnerDetailsModalProps {
@@ -24,6 +25,7 @@ interface PartnerDetailsModalProps {
   initialData?: Partner | null;
   onClose: () => void;
   onEdit: (partner: Partner) => void;
+  onManagePlans?: (partner: Partner, tab?: 'internet' | 'iptv') => void;
 }
 
 export const PartnerDetailsModal: React.FC<PartnerDetailsModalProps> = ({
@@ -31,6 +33,7 @@ export const PartnerDetailsModal: React.FC<PartnerDetailsModalProps> = ({
   initialData,
   onClose,
   onEdit,
+  onManagePlans,
 }) => {
   const [partner, setPartner] = useState<Partner | null>(initialData || null);
   const [loading, setLoading] = useState<boolean>(!initialData);
@@ -90,6 +93,16 @@ export const PartnerDetailsModal: React.FC<PartnerDetailsModalProps> = ({
           </div>
 
           <div className="flex items-center space-x-2">
+            {partner && onManagePlans && (
+              <button
+                onClick={() => onManagePlans(partner)}
+                className="flex items-center space-x-1.5 px-3 py-1.5 bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 rounded-lg text-xs font-medium transition"
+                title="Manage Internet & IPTV Plan Mappings"
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>Plans</span>
+              </button>
+            )}
             {partner && (
               <button
                 onClick={() => onEdit(partner)}
@@ -200,11 +213,22 @@ export const PartnerDetailsModal: React.FC<PartnerDetailsModalProps> = ({
 
               {/* Internet Mapping */}
               <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-800">
-                <div className="flex items-center space-x-2 mb-3">
-                  <Wifi className="w-4 h-4 text-cyan-400" />
-                  <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-wider">
-                    Internet Mapping Config
-                  </h4>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center space-x-2">
+                    <Wifi className="w-4 h-4 text-cyan-400" />
+                    <h4 className="text-xs font-bold text-cyan-400 uppercase tracking-wider">
+                      Internet Mapping Config
+                    </h4>
+                  </div>
+                  {onManagePlans && (
+                    <button
+                      onClick={() => onManagePlans(partner, 'internet')}
+                      className="text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center space-x-1 font-medium bg-cyan-950/40 hover:bg-cyan-950/60 px-2 py-1 rounded border border-cyan-800/40 transition"
+                    >
+                      <Layers className="w-3 h-3" />
+                      <span>Internet Plans</span>
+                    </button>
+                  )}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div>
@@ -233,11 +257,22 @@ export const PartnerDetailsModal: React.FC<PartnerDetailsModalProps> = ({
 
               {/* IPTV Mapping */}
               <div className="bg-slate-800/40 rounded-xl p-4 border border-slate-800">
-                <div className="flex items-center space-x-2 mb-3">
-                  <Tv className="w-4 h-4 text-violet-400" />
-                  <h4 className="text-xs font-bold text-violet-400 uppercase tracking-wider">
-                    IPTV Mapping Config
-                  </h4>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center space-x-2">
+                    <Tv className="w-4 h-4 text-violet-400" />
+                    <h4 className="text-xs font-bold text-violet-400 uppercase tracking-wider">
+                      IPTV Mapping Config
+                    </h4>
+                  </div>
+                  {onManagePlans && (
+                    <button
+                      onClick={() => onManagePlans(partner, 'iptv')}
+                      className="text-[11px] text-violet-400 hover:text-violet-300 flex items-center space-x-1 font-medium bg-violet-950/40 hover:bg-violet-950/60 px-2 py-1 rounded border border-violet-800/40 transition"
+                    >
+                      <Layers className="w-3 h-3" />
+                      <span>IPTV Plans</span>
+                    </button>
+                  )}
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
                   <div>

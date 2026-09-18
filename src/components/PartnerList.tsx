@@ -20,6 +20,7 @@ interface PartnerListProps {
   onRoleChange: (role: string) => void;
   onViewPartner: (partner: Partner) => void;
   onEditPartner: (partner: Partner) => void;
+  onManagePlans?: (partner: Partner, tab?: 'internet' | 'iptv') => void;
   onDirectLookup: (id: number) => void;
   onOpenCreate: () => void;
 }
@@ -32,6 +33,7 @@ export const PartnerList: React.FC<PartnerListProps> = ({
   onRoleChange,
   onViewPartner,
   onEditPartner,
+  onManagePlans,
   onDirectLookup,
   onOpenCreate,
 }) => {
@@ -206,6 +208,7 @@ export const PartnerList: React.FC<PartnerListProps> = ({
               partner={partner}
               onView={onViewPartner}
               onEdit={onEditPartner}
+              onManagePlans={onManagePlans}
             />
           ))}
         </div>
