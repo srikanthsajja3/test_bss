@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS_STYLE } from '../constants/theme';
 
@@ -13,8 +13,11 @@ export const Header = ({
   onOpenOnboard,
   onToggleSidebar,
 }) => {
+  const { width } = useWindowDimensions();
+  const isMobile = width < 768;
+
   return (
-    <View style={styles.headerContainer}>
+    <View style={[styles.headerContainer, { paddingHorizontal: isMobile ? 16 : 28 }]}>
       <View style={styles.titleSection}>
         {onToggleSidebar && (
           <TouchableOpacity style={styles.hamburgerBtn} onPress={onToggleSidebar}>

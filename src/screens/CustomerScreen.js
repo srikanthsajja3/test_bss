@@ -285,10 +285,20 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
   };
 
-  // IF A SUBSCRIBER IS SELECTED, RENDER DEDICATED FULL-SCREEN PROFILE & CONTROL VIEW
   if (activeSubProfile) {
     return (
-      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingHorizontal: isMobile ? 12 : 28,
+            paddingVertical: isMobile ? 14 : 24,
+            maxWidth: 1600,
+            alignSelf: 'center',
+          },
+        ]}
+      >
         {toastMsg ? (
           <View style={styles.toastBanner}>
             <Text style={styles.toastText}>{toastMsg}</Text>
@@ -469,9 +479,19 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     );
   }
 
-  // STANDARD SUBSCRIBERS TABLE VIEW
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView
+      style={styles.container}
+      contentContainerStyle={[
+        styles.content,
+        {
+          paddingHorizontal: isMobile ? 12 : 28,
+          paddingVertical: isMobile ? 14 : 24,
+          maxWidth: 1600,
+          alignSelf: 'center',
+        },
+      ]}
+    >
       {toastMsg ? (
         <View style={styles.toastBanner}>
           <Text style={styles.toastText}>{toastMsg}</Text>
@@ -575,9 +595,133 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           </Text>
         </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={true}>
-          <View style={{ minWidth: isMobile ? 850 : '100%' }}>
-            {/* DYNAMIC TABLE HEADERS */}
+        {isMobile ? (
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            <View style={{ minWidth: 850 }}>
+              {viewMode === 'iptv' ? (
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.th, { flex: 2 }]}>STB Serial & MAC Address</Text>
+                  <Text style={[styles.th, { flex: 2 }]}>Subscriber Name & Mobile</Text>
+                  <Text style={[styles.th, { flex: 1.5 }]}>IPTV Channel Package</Text>
+                  <Text style={[styles.th, { flex: 1.5 }]}>STB Model & CAS Pairing</Text>
+                  <Text style={[styles.th, { flex: 1 }]}>Stream IP</Text>
+                  <Text style={[styles.th, { flex: 1 }]}>STB Status</Text>
+                  <Text style={[styles.th, { flex: 0.8, textAlign: 'right' }]}>Actions</Text>
+                </View>
+              ) : (
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.th, { flex: 2 }]}>Subscriber Name & Mobile (Click Profile)</Text>
+                  <Text style={[styles.th, { flex: 2 }]}>RADIUS Username</Text>
+                  <Text style={[styles.th, { flex: 1.5 }]}>Broadband Plan</Text>
+                  <Text style={[styles.th, { flex: 1.5 }]}>IP Address / STB ID</Text>
+                  <Text style={[styles.th, { flex: 1 }]}>e-KYC</Text>
+                  <Text style={[styles.th, { flex: 1 }]}>Status</Text>
+                  <Text style={[styles.th, { flex: 0.8, textAlign: 'right' }]}>Actions</Text>
+                </View>
+              )}
+
+              {filteredCustomers.map((cust) => (
+                <View key={cust.id} style={styles.tr}>
+                  {viewMode === 'iptv' ? (
+                    <>
+                      <View style={{ flex: 2 }}>
+                        <Text style={styles.tdBold}>{cust.stb_id}</Text>
+                        <Text style={styles.tdSub}>MAC: {cust.stb_mac}</Text>
+                      </View>
+
+                      <View style={{ flex: 2 }}>
+                        <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
+                          <Text style={styles.tdClickableName}>{cust.name}</Text>
+                          <Text style={styles.tdClickableMobile}>{cust.mobile}</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      <View style={{ flex: 1.5 }}>
+                        <Text style={[styles.tdBold, { color: '#8b5cf6' }]}>{cust.iptv_package}</Text>
+                        <Text style={styles.tdSub}>Pioneer STB Tier</Text>
+                      </View>
+
+                      <View style={{ flex: 1.5 }}>
+                        <Text style={styles.tdText}>{cust.stb_model}</Text>
+                        <Text style={[styles.tdSub, { color: COLORS.accentEmerald }]}>CAS Paired</Text>
+                      </View>
+
+                      <View style={{ flex: 1 }}>
+                        <Text style={styles.tdSub}>{cust.stream_ip}</Text>
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      <View style={{ flex: 2 }}>
+                        <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
+                          <Text style={styles.tdClickableName}>{cust.name}</Text>
+                          <Text style={styles.tdClickableMobile}>{cust.mobile}</Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      <View style={{ flex: 2 }}>
+                        <Text style={styles.tdBold}>{cust.username}</Text>
+                      </View>
+
+                      <View style={{ flex: 1.5 }}>
+                        <Text style={styles.tdText}>{cust.plan}</Text>
+                      </View>
+
+                      <View style={{ flex: 1.5 }}>
+                        <Text style={styles.tdSub}>{cust.isOnline ? `IP: ${cust.ip}` : `STB: ${cust.stb_id}`}</Text>
+                      </View>
+
+                      <View style={{ flex: 1 }}>
+                        <Text style={[styles.tdSub, { color: COLORS.accentEmerald }]}>{cust.kyc}</Text>
+                      </View>
+                    </>
+                  )}
+
+                  <View style={{ flex: 1 }}>
+                    <View
+                      style={[
+                        styles.statusTag,
+                        cust.status === 'active'
+                          ? styles.tagActive
+                          : cust.status === 'expired'
+                          ? styles.tagExpired
+                          : cust.status === 'suspend'
+                          ? styles.tagWarn
+                          : styles.tagMuted,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.statusTagText,
+                          cust.status === 'active'
+                            ? styles.tagTextActive
+                            : cust.status === 'expired'
+                            ? styles.tagTextExpired
+                            : cust.status === 'suspend'
+                            ? styles.tagTextWarn
+                            : styles.tagTextMuted,
+                        ]}
+                      >
+                        {cust.status.toUpperCase()}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={{ flex: 0.8, alignItems: 'flex-end' }}>
+                    <TouchableOpacity
+                      style={styles.editBtn}
+                      onPress={() => handleOpenEdit(cust)}
+                    >
+                      <Feather name="edit-3" size={13} color={COLORS.primary} />
+                      <Text style={styles.editBtnText}>Edit</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))}
+            </View>
+          </ScrollView>
+        ) : (
+          <View style={{ width: '100%' }}>
             {viewMode === 'iptv' ? (
               <View style={styles.tableHeader}>
                 <Text style={[styles.th, { flex: 2 }]}>STB Serial & MAC Address</Text>
@@ -600,7 +744,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </View>
             )}
 
-            {/* TABLE ROW RENDER */}
             {filteredCustomers.map((cust) => (
               <View key={cust.id} style={styles.tr}>
                 {viewMode === 'iptv' ? (
@@ -658,7 +801,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   </>
                 )}
 
-                {/* STATUS BADGE */}
                 <View style={{ flex: 1 }}>
                   <View
                     style={[
@@ -689,7 +831,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   </View>
                 </View>
 
-                {/* EDIT ACTION BUTTON */}
                 <View style={{ flex: 0.8, alignItems: 'flex-end' }}>
                   <TouchableOpacity
                     style={styles.editBtn}
@@ -702,7 +843,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </View>
             ))}
           </View>
-        </ScrollView>
+        )}
       </View>
 
       {/* EDIT SUBSCRIBER DETAILS MODAL */}

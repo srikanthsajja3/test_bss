@@ -1,10 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 
 export const DashboardScreen = ({ user }) => {
+  const { width } = useWindowDimensions();
+  const isMobile = width < 768;
+
   const currentRole = user?.role ? user.role.toLowerCase() : 'superadmin';
   const currentPartnerId = user?.partner_id || 1000;
 
