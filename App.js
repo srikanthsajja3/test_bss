@@ -90,8 +90,8 @@ export default function App() {
     }
   }, []);
 
-  // Sidebar Auto-Closing / Collapsible State
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Sidebar Auto-Closing / Collapsible State (Defaults to collapsed, expands on hover)
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [sidebarOpenMobile, setSidebarOpenMobile] = useState(false);
 
   const toggleSidebarCollapse = () => {
@@ -164,7 +164,7 @@ export default function App() {
       </View>
       
       <View style={styles.layout}>
-        {/* Sidebar (Supports Collapsible / Auto-closing mode) */}
+        {/* Sidebar (Supports Collapsible / Auto-closing mode on hover) */}
         {(isDesktop || sidebarOpenMobile) && (
           <Sidebar
             activeTab={activeTab}
@@ -176,6 +176,12 @@ export default function App() {
             onLogout={() => setIsLoginVisible(true)}
             isCollapsed={isDesktop && sidebarCollapsed}
             onToggleCollapse={toggleSidebarCollapse}
+            onMouseEnter={() => {
+              if (isDesktop) setSidebarCollapsed(false);
+            }}
+            onMouseLeave={() => {
+              if (isDesktop) setSidebarCollapsed(true);
+            }}
           />
         )}
 

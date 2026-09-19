@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 
-export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, onToggleCollapse }) => {
+export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, onToggleCollapse, onMouseEnter, onMouseLeave }) => {
   const menuItems = [
     { id: 'dashboard', label: 'Dashboard & Telemetry', icon: 'grid' },
     { id: 'customers', label: 'Subscriber Management', icon: 'users' },
@@ -12,7 +12,11 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
   ];
 
   return (
-    <View style={[styles.sidebarContainer, isCollapsed && styles.sidebarCollapsed]}>
+    <View 
+      style={[styles.sidebarContainer, isCollapsed && styles.sidebarCollapsed]}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+    >
       {/* Brand Logo & Collapse Toggle */}
       <View style={[styles.logoSection, isCollapsed && styles.logoSectionCollapsed]}>
         <View style={{ flexDirection: 'row', alignItems: 'center' }}>
