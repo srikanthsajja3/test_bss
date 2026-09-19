@@ -152,10 +152,13 @@ export const ApiConsoleScreen = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    width: '100%',
     backgroundColor: COLORS.bgPrimary,
   },
   content: {
-    padding: 24,
+    width: '100%',
+    paddingHorizontal: '3%',
+    paddingVertical: 20,
   },
   title: {
     fontSize: 22,

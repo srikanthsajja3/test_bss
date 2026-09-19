@@ -16,6 +16,11 @@ export const Header = ({
   return (
     <View style={styles.headerContainer}>
       <View style={styles.titleSection}>
+        {onToggleSidebar && (
+          <TouchableOpacity style={styles.hamburgerBtn} onPress={onToggleSidebar}>
+            <Feather name="menu" size={20} color={COLORS.textMain} />
+          </TouchableOpacity>
+        )}
         <View>
           <Text style={styles.headerTitle}>{title}</Text>
           <Text style={styles.headerSubtitle}>{subtitle}</Text>
@@ -58,11 +63,12 @@ export const Header = ({
 
 const styles = StyleSheet.create({
   headerContainer: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
+    paddingVertical: 14,
+    paddingHorizontal: '3%',
     borderBottomWidth: 1,
     borderBottomColor: COLORS.glassBorder,
     backgroundColor: '#ffffff',

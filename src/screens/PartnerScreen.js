@@ -8,12 +8,16 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Modal,
+  useWindowDimensions,
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 
 export const PartnerScreen = ({ onOpenCreate }) => {
+  const { width } = useWindowDimensions();
+  const isMobile = width < 768;
+
   const [partners, setPartners] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
@@ -230,8 +234,9 @@ export const PartnerScreen = ({ onOpenCreate }) => {
         {loading ? (
           <ActivityIndicator size="large" color={COLORS.primary} style={{ marginVertical: 40 }} />
         ) : (
-          <View style={styles.tableContainer}>
-            {/* TABLE HEADER */}
+          <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+            <View style={[styles.tableContainer, { minWidth: isMobile ? 800 : '100%' }]}>
+              {/* TABLE HEADER */}
             <View style={styles.tableHeader}>
               <Text style={[styles.th, { flex: 0.8 }]}>ID</Text>
               <Text style={[styles.th, { flex: 2.2 }]}>Partner & Company Name</Text>
@@ -333,7 +338,8 @@ export const PartnerScreen = ({ onOpenCreate }) => {
                 );
               })
             )}
-          </View>
+            </View>
+          </ScrollView>
         )}
       </View>
 
@@ -427,10 +433,13 @@ export const PartnerScreen = ({ onOpenCreate }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    width: '100%',
     backgroundColor: COLORS.bgPrimary,
   },
   content: {
-    padding: 24,
+    width: '100%',
+    paddingHorizontal: '3%',
+    paddingVertical: 20,
   },
   toastContainer: {
     flexDirection: 'row',

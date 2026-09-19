@@ -216,15 +216,20 @@ export default function App() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    width: '100%',
+    height: '100%',
     backgroundColor: COLORS.bgPrimary,
   },
   roleBanner: {
+    width: '100%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: '#0f172a',
-    paddingHorizontal: 20,
+    paddingHorizontal: '3%',
     paddingVertical: 8,
+    flexWrap: 'wrap',
+    gap: 8,
   },
   roleBannerText: {
     color: '#94a3b8',
@@ -247,13 +252,17 @@ const styles = StyleSheet.create({
   },
   layout: {
     flex: 1,
+    width: '100%',
     flexDirection: 'row',
   },
   main: {
     flex: 1,
+    width: '100%',
+    minWidth: 0,
     backgroundColor: COLORS.bgPrimary,
   },
   contentArea: {
     flex: 1,
+    width: '100%',
   },
 });

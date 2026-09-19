@@ -211,8 +211,8 @@ export const DashboardScreen = ({ user }) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bgPrimary },
-  content: { padding: 24 },
+  container: { flex: 1, width: '100%', backgroundColor: COLORS.bgPrimary },
+  content: { width: '100%', paddingHorizontal: '3%', paddingVertical: 20 },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 },
   pageTitle: { fontSize: 22, fontWeight: '700', color: COLORS.textMain },
   pageSubtitle: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Modal } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Modal, useWindowDimensions } from 'react-native';
 import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
@@ -117,6 +117,9 @@ const generateBroadbandCustomers = () => {
 };
 
 export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all', onSwitchMode, onAutoCloseSidebar }) => {
+  const { width } = useWindowDimensions();
+  const isMobile = width < 768;
+
   const [viewMode, setViewMode] = useState(isIptvMode ? 'iptv' : 'broadband');
   const [activeFilter, setActiveFilter] = useState(initialFilter);
   const [searchQuery, setSearchQuery] = useState('');
@@ -572,128 +575,134 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           </Text>
         </View>
 
-        {/* DYNAMIC TABLE HEADERS */}
-        {viewMode === 'iptv' ? (
-          <View style={styles.tableHeader}>
-            <Text style={[styles.th, { flex: 2 }]}>STB Serial & MAC Address</Text>
-            <Text style={[styles.th, { flex: 2 }]}>Subscriber Name & Mobile</Text>
-            <Text style={[styles.th, { flex: 1.5 }]}>IPTV Channel Package</Text>
-            <Text style={[styles.th, { flex: 1.5 }]}>STB Model & CAS Pairing</Text>
-            <Text style={[styles.th, { flex: 1 }]}>Stream IP</Text>
-            <Text style={[styles.th, { flex: 1 }]}>STB Status</Text>
-            <Text style={[styles.th, { flex: 0.8, textAlign: 'right' }]}>Actions</Text>
-          </View>
-        ) : (
-          <View style={styles.tableHeader}>
-            <Text style={[styles.th, { flex: 2 }]}>Subscriber Name & Mobile (Click Profile)</Text>
-            <Text style={[styles.th, { flex: 2 }]}>RADIUS Username</Text>
-            <Text style={[styles.th, { flex: 1.5 }]}>Broadband Plan</Text>
-            <Text style={[styles.th, { flex: 1.5 }]}>IP Address / STB ID</Text>
-            <Text style={[styles.th, { flex: 1 }]}>e-KYC</Text>
-            <Text style={[styles.th, { flex: 1 }]}>Status</Text>
-            <Text style={[styles.th, { flex: 0.8, textAlign: 'right' }]}>Actions</Text>
-          </View>
-        )}
-
-        {/* TABLE ROW RENDER */}
-        {filteredCustomers.map((cust) => (
-          <View key={cust.id} style={styles.tr}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={true}>
+          <View style={{ minWidth: isMobile ? 850 : '100%' }}>
+            {/* DYNAMIC TABLE HEADERS */}
             {viewMode === 'iptv' ? (
-              <>
-                <View style={{ flex: 2 }}>
-                  <Text style={styles.tdBold}>{cust.stb_id}</Text>
-                  <Text style={styles.tdSub}>MAC: {cust.stb_mac}</Text>
-                </View>
-
-                {/* CLICKABLE NAME & MOBILE TO OPEN FULL DEDICATED SUBSCRIBER CONTROL SCREEN */}
-                <TouchableOpacity style={{ flex: 2 }} onPress={() => handleOpenSubscriberScreen(cust)}>
-                  <Text style={styles.tdClickableName}>{cust.name}</Text>
-                  <Text style={styles.tdClickableMobile}>{cust.mobile}</Text>
-                </TouchableOpacity>
-
-                <View style={{ flex: 1.5 }}>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.accentEmerald }}>
-                    {cust.plan}
-                  </Text>
-                </View>
-
-                <View style={{ flex: 1.5 }}>
-                  <Text style={styles.tdText}>{cust.stb_model}</Text>
-                  <Text style={{ fontSize: 10, color: COLORS.textMuted }}>{cust.cas_status}</Text>
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.tdSub}>{cust.isOnline ? cust.ip : 'Offline'}</Text>
-                </View>
-              </>
+              <View style={styles.tableHeader}>
+                <Text style={[styles.th, { flex: 2 }]}>STB Serial & MAC Address</Text>
+                <Text style={[styles.th, { flex: 2 }]}>Subscriber Name & Mobile</Text>
+                <Text style={[styles.th, { flex: 1.5 }]}>IPTV Channel Package</Text>
+                <Text style={[styles.th, { flex: 1.5 }]}>STB Model & CAS Pairing</Text>
+                <Text style={[styles.th, { flex: 1 }]}>Stream IP</Text>
+                <Text style={[styles.th, { flex: 1 }]}>STB Status</Text>
+                <Text style={[styles.th, { flex: 0.8, textAlign: 'right' }]}>Actions</Text>
+              </View>
             ) : (
-              <>
-                {/* CLICKABLE NAME & MOBILE TO OPEN FULL DEDICATED SUBSCRIBER CONTROL SCREEN */}
-                <TouchableOpacity style={{ flex: 2 }} onPress={() => handleOpenSubscriberScreen(cust)}>
-                  <Text style={styles.tdClickableName}>{cust.name}</Text>
-                  <Text style={styles.tdClickableMobile}>{cust.mobile}</Text>
-                </TouchableOpacity>
-
-                <View style={{ flex: 2 }}>
-                  <Text style={styles.tdText}>{cust.username}</Text>
-                </View>
-
-                <View style={{ flex: 1.5 }}>
-                  <Text style={styles.tdText}>{cust.plan}</Text>
-                </View>
-
-                <View style={{ flex: 1.5 }}>
-                  <Text style={styles.tdSub}>{cust.isOnline ? `IP: ${cust.ip}` : `STB: ${cust.stb_id}`}</Text>
-                </View>
-
-                <View style={{ flex: 1 }}>
-                  <Text style={{ fontSize: 11, color: COLORS.accentCyan, fontWeight: '600' }}>{cust.kyc}</Text>
-                </View>
-              </>
+              <View style={styles.tableHeader}>
+                <Text style={[styles.th, { flex: 2 }]}>Subscriber Name & Mobile (Click Profile)</Text>
+                <Text style={[styles.th, { flex: 2 }]}>RADIUS Username</Text>
+                <Text style={[styles.th, { flex: 1.5 }]}>Broadband Plan</Text>
+                <Text style={[styles.th, { flex: 1.5 }]}>IP Address / STB ID</Text>
+                <Text style={[styles.th, { flex: 1 }]}>e-KYC</Text>
+                <Text style={[styles.th, { flex: 1 }]}>Status</Text>
+                <Text style={[styles.th, { flex: 0.8, textAlign: 'right' }]}>Actions</Text>
+              </View>
             )}
 
-            <View style={{ flex: 1 }}>
-              <View
-                style={[
-                  styles.statusTag,
-                  cust.status === 'active'
-                    ? styles.tagActive
-                    : cust.status === 'expired'
-                    ? styles.tagExpired
-                    : cust.status === 'suspend'
-                    ? styles.tagWarn
-                    : styles.tagMuted,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.statusTagText,
-                    cust.status === 'active'
-                      ? styles.tagTextActive
-                      : cust.status === 'expired'
-                      ? styles.tagTextExpired
-                      : cust.status === 'suspend'
-                      ? styles.tagTextWarn
-                      : styles.tagTextMuted,
-                  ]}
-                >
-                  {cust.status.toUpperCase()}
-                </Text>
-              </View>
-            </View>
+            {/* TABLE ROW RENDER */}
+            {filteredCustomers.map((cust) => (
+              <View key={cust.id} style={styles.tr}>
+                {viewMode === 'iptv' ? (
+                  <>
+                    <View style={{ flex: 2 }}>
+                      <Text style={styles.tdBold}>{cust.stb_id}</Text>
+                      <Text style={styles.tdSub}>MAC: {cust.stb_mac}</Text>
+                    </View>
 
-            {/* EDIT ACTION BUTTON */}
-            <View style={{ flex: 0.8, alignItems: 'flex-end' }}>
-              <TouchableOpacity
-                style={styles.editBtn}
-                onPress={() => handleOpenEdit(cust)}
-              >
-                <Feather name="edit-3" size={13} color={COLORS.primary} />
-                <Text style={styles.editBtnText}>Edit</Text>
-              </TouchableOpacity>
-            </View>
+                    <View style={{ flex: 2 }}>
+                      <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
+                        <Text style={styles.tdClickableName}>{cust.name}</Text>
+                        <Text style={styles.tdClickableMobile}>{cust.mobile}</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={{ flex: 1.5 }}>
+                      <Text style={[styles.tdBold, { color: '#8b5cf6' }]}>{cust.iptv_package}</Text>
+                      <Text style={styles.tdSub}>Pioneer STB Tier</Text>
+                    </View>
+
+                    <View style={{ flex: 1.5 }}>
+                      <Text style={styles.tdText}>{cust.stb_model}</Text>
+                      <Text style={[styles.tdSub, { color: COLORS.accentEmerald }]}>CAS Paired</Text>
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.tdSub}>{cust.stream_ip}</Text>
+                    </View>
+                  </>
+                ) : (
+                  <>
+                    <View style={{ flex: 2 }}>
+                      <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
+                        <Text style={styles.tdClickableName}>{cust.name}</Text>
+                        <Text style={styles.tdClickableMobile}>{cust.mobile}</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={{ flex: 2 }}>
+                      <Text style={styles.tdBold}>{cust.username}</Text>
+                    </View>
+
+                    <View style={{ flex: 1.5 }}>
+                      <Text style={styles.tdText}>{cust.plan}</Text>
+                    </View>
+
+                    <View style={{ flex: 1.5 }}>
+                      <Text style={styles.tdSub}>{cust.isOnline ? `IP: ${cust.ip}` : `STB: ${cust.stb_id}`}</Text>
+                    </View>
+
+                    <View style={{ flex: 1 }}>
+                      <Text style={[styles.tdSub, { color: COLORS.accentEmerald }]}>{cust.kyc}</Text>
+                    </View>
+                  </>
+                )}
+
+                {/* STATUS BADGE */}
+                <View style={{ flex: 1 }}>
+                  <View
+                    style={[
+                      styles.statusTag,
+                      cust.status === 'active'
+                        ? styles.tagActive
+                        : cust.status === 'expired'
+                        ? styles.tagExpired
+                        : cust.status === 'suspend'
+                        ? styles.tagWarn
+                        : styles.tagMuted,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.statusTagText,
+                        cust.status === 'active'
+                          ? styles.tagTextActive
+                          : cust.status === 'expired'
+                          ? styles.tagTextExpired
+                          : cust.status === 'suspend'
+                          ? styles.tagTextWarn
+                          : styles.tagTextMuted,
+                      ]}
+                    >
+                      {cust.status.toUpperCase()}
+                    </Text>
+                  </View>
+                </View>
+
+                {/* EDIT ACTION BUTTON */}
+                <View style={{ flex: 0.8, alignItems: 'flex-end' }}>
+                  <TouchableOpacity
+                    style={styles.editBtn}
+                    onPress={() => handleOpenEdit(cust)}
+                  >
+                    <Feather name="edit-3" size={13} color={COLORS.primary} />
+                    <Text style={styles.editBtnText}>Edit</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))}
           </View>
-        ))}
+        </ScrollView>
       </View>
 
       {/* EDIT SUBSCRIBER DETAILS MODAL */}
@@ -819,8 +828,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: COLORS.bgPrimary },
-  content: { padding: 24 },
+  container: { flex: 1, width: '100%', backgroundColor: COLORS.bgPrimary },
+  content: { width: '100%', paddingHorizontal: '3%', paddingVertical: 20 },
   toastBanner: {
     padding: 12,
     backgroundColor: 'rgba(16, 185, 129, 0.15)',
