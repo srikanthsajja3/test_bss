@@ -2,6 +2,14 @@
   "name": "onebss_expo",
   "version": "1.0.0",
   "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "build": "expo export -p web",
+    "vite": "expo export -p web"
+  },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
     "expo": "~57.0.24",
@@ -10,12 +18,6 @@
     "react-dom": "19.2.3",
     "react-native": "0.86.3",
     "react-native-web": "^0.21.2"
-  },
-  "scripts": {
-    "start": "expo start",
-    "android": "expo start --android",
-    "ios": "expo start --ios",
-    "web": "expo start --web"
   },
   "private": true
 }
