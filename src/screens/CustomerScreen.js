@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Modal } from 'react-native';
-import { Feather } from '@expo/vector-icons';
-import { COLORS } from '../constants/theme';
+import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
+import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 
 // Generate 45 Pioneer IPTV STB Records (42 Active STBs, 3 Expired STBs, 35 Online)
@@ -9,11 +9,12 @@ const generateIptvCustomers = () => {
   const list = [];
   for (let i = 1; i <= 42; i++) {
     const macSub = String(10 + (i % 80)).padStart(2, '0');
+    const mobNum = `9876543${String(i).padStart(3, '0')}`;
     list.push({
       id: `iptv_${i}`,
       name: `Subscriber ${i} (Pioneer IPTV)`,
-      mobile: `9876543${String(i).padStart(3, '0')}`,
-      username: `iptv_stb_${i}@pioneer`,
+      mobile: mobNum,
+      username: `+91${mobNum}`,
       stb_id: `STB_8849${String(200 + i)}`,
       stb_mac: `4A:89:FE:21:${macSub}:${String(10 + (i % 70)).padStart(2, '0')}`,
       stb_model: i % 3 === 0 ? 'Pioneer 4K Android 11 STB' : 'Pioneer Smart HD Box v2',
@@ -23,14 +24,20 @@ const generateIptvCustomers = () => {
       isOnline: i <= 35,
       ip: i <= 35 ? `192.168.2.${100 + i}` : '-',
       kyc: 'ScoreMe Verified',
+      invoiceAmount: i % 2 === 0 ? 699 : 0,
+      totalPaid: i % 2 === 0 ? 699 : 0,
+      dueAmount: 0,
+      dueDate: '—',
+      expiryDate: i % 3 === 0 ? '08 Jan, 2026 10:22' : '18 Oct, 2026 23:59',
     });
   }
   for (let i = 43; i <= 45; i++) {
+    const mobNum = `9876543${String(i).padStart(3, '0')}`;
     list.push({
       id: `iptv_${i}`,
       name: `Subscriber ${i} (Pioneer IPTV Expired)`,
-      mobile: `9876543${String(i).padStart(3, '0')}`,
-      username: `iptv_stb_${i}@pioneer`,
+      mobile: mobNum,
+      username: `+91${mobNum}`,
       stb_id: `STB_8849${String(200 + i)}`,
       stb_mac: `4A:89:FE:21:99:${String(i).padStart(2, '0')}`,
       stb_model: 'Pioneer Basic SD Tier STB',
@@ -40,6 +47,11 @@ const generateIptvCustomers = () => {
       isOnline: false,
       ip: '-',
       kyc: 'Pending Renewal',
+      invoiceAmount: 0,
+      totalPaid: 0,
+      dueAmount: 0,
+      dueDate: '—',
+      expiryDate: '08 Jan, 2026 10:22',
     });
   }
   return list;
@@ -48,49 +60,63 @@ const generateIptvCustomers = () => {
 // Generate 102 Broadband Subscriber Records (95 Active, 83 Online, 6 Expired, 1 Suspended)
 const generateBroadbandCustomers = () => {
   const list = [
-    { id: 'b1', name: 'Srikanth Chowdary', mobile: '9000000001', username: 'srikanth@onefiber', plan: 'Ultra 100Mbps', status: 'active', isOnline: true, ip: '192.168.1.101', stb_id: 'STB_8849201', kyc: 'ScoreMe Verified' },
-    { id: 'b2', name: 'Rahul Sharma', mobile: '9876543210', username: 'rahul@onefiber', plan: 'Fiber 200Mbps', status: 'active', isOnline: true, ip: '192.168.1.102', stb_id: 'STB_8849202', kyc: 'DigiLocker Verified' },
-    { id: 'b3', name: 'Ananya Verma', mobile: '9123456789', username: 'ananya@onefiber', plan: 'Basic 50Mbps', status: 'expired', isOnline: false, ip: '-', stb_id: 'STB_8849203', kyc: 'Pending' },
-    { id: 'b4', name: 'Vikram Singh', mobile: '9988776655', username: 'vikram@onefiber', plan: 'Ultra 100Mbps', status: 'suspend', isOnline: false, ip: '-', stb_id: 'STB_8849204', kyc: 'ScoreMe Verified' },
-    { id: 'b5', name: 'Priya Patel', mobile: '9811122233', username: 'priya@onefiber', plan: 'Giga 1Gbps', status: 'active', isOnline: true, ip: '192.168.1.105', stb_id: 'STB_8849205', kyc: 'DigiLocker Verified' },
-    { id: 'b6', name: 'Kiran Kumar', mobile: '9876500011', username: 'kiran@onefiber', plan: 'Basic 50Mbps', status: 'disabled', isOnline: false, ip: '-', stb_id: '-', kyc: 'Unverified' },
+    { id: 'b1', name: 'Srikanth Chowdary', mobile: '9346124888', username: '+918897885200', plan: 'Ultra 100Mbps', status: 'active', isOnline: true, ip: '192.168.1.101', stb_id: 'STB_8849201', stb_mac: '4A:89:FE:21:00:15', kyc: 'ScoreMe Verified', invoiceAmount: 0, totalPaid: 0, dueAmount: 0, dueDate: '—', expiryDate: '08 Jan, 2026 10:22' },
+    { id: 'b2', name: 'Rahul Sharma', mobile: '9876543210', username: '+919876543210', plan: 'Fiber 200Mbps', status: 'active', isOnline: true, ip: '192.168.1.102', stb_id: 'STB_8849202', stb_mac: '4A:89:FE:21:00:16', kyc: 'DigiLocker Verified', invoiceAmount: 999, totalPaid: 999, dueAmount: 0, dueDate: '—', expiryDate: '15 Nov, 2026 18:30' },
+    { id: 'b3', name: 'Ananya Verma', mobile: '9123456789', username: '+919123456789', plan: 'Basic 50Mbps', status: 'expired', isOnline: false, ip: '-', stb_id: 'STB_8849203', stb_mac: '4A:89:FE:21:00:17', kyc: 'Pending', invoiceAmount: 0, totalPaid: 0, dueAmount: 499, dueDate: '01 Aug, 2026', expiryDate: '08 Jan, 2026 10:22' },
+    { id: 'b4', name: 'Vikram Singh', mobile: '9988776655', username: '+919988776655', plan: 'Ultra 100Mbps', status: 'suspend', isOnline: false, ip: '-', stb_id: 'STB_8849204', stb_mac: '4A:89:FE:21:00:18', kyc: 'ScoreMe Verified', invoiceAmount: 0, totalPaid: 0, dueAmount: 0, dueDate: '—', expiryDate: '08 Jan, 2026 10:22' },
+    { id: 'b5', name: 'Priya Patel', mobile: '9811122233', username: '+919811122233', plan: 'Giga 1Gbps', status: 'active', isOnline: true, ip: '192.168.1.105', stb_id: 'STB_8849205', stb_mac: '4A:89:FE:21:00:19', kyc: 'DigiLocker Verified', invoiceAmount: 1499, totalPaid: 1499, dueAmount: 0, dueDate: '—', expiryDate: '20 Dec, 2026 12:00' },
+    { id: 'b6', name: 'Kiran Kumar', mobile: '9876500011', username: '+919876500011', plan: 'Basic 50Mbps', status: 'disabled', isOnline: false, ip: '-', stb_id: '-', stb_mac: '-', kyc: 'Unverified', invoiceAmount: 0, totalPaid: 0, dueAmount: 0, dueDate: '—', expiryDate: '08 Jan, 2026 10:22' },
   ];
 
   for (let i = 7; i <= 98; i++) {
     const isOnline = i <= 83;
+    const mobNum = `9900112${String(i).padStart(3, '0')}`;
     list.push({
       id: `b_${i}`,
       name: `Broadband User ${i}`,
-      mobile: `9900112${String(i).padStart(3, '0')}`,
-      username: `user_${i}@onefiber`,
+      mobile: mobNum,
+      username: `+91${mobNum}`,
       plan: i % 3 === 0 ? 'Fiber 200Mbps' : i % 2 === 0 ? 'Ultra 100Mbps' : 'Giga 1Gbps',
       status: 'active',
       isOnline: isOnline,
       ip: isOnline ? `192.168.1.${105 + i}` : '-',
       stb_id: `STB_8849${String(300 + i)}`,
+      stb_mac: `4A:89:FE:21:00:${String(10 + (i % 80)).padStart(2, '0')}`,
       kyc: 'ScoreMe Verified',
+      invoiceAmount: i % 2 === 0 ? 699 : 0,
+      totalPaid: i % 2 === 0 ? 699 : 0,
+      dueAmount: 0,
+      dueDate: '—',
+      expiryDate: '08 Jan, 2026 10:22',
     });
   }
 
   for (let i = 99; i <= 103; i++) {
+    const mobNum = `9900112${String(i).padStart(3, '0')}`;
     list.push({
       id: `b_${i}`,
       name: `Broadband User ${i} (Expired)`,
-      mobile: `9900112${String(i).padStart(3, '0')}`,
-      username: `user_${i}@onefiber`,
+      mobile: mobNum,
+      username: `+91${mobNum}`,
       plan: 'Basic 50Mbps',
       status: 'expired',
       isOnline: false,
       ip: '-',
       stb_id: '-',
+      stb_mac: '-',
       kyc: 'Pending Renewal',
+      invoiceAmount: 0,
+      totalPaid: 0,
+      dueAmount: 0,
+      dueDate: '—',
+      expiryDate: '08 Jan, 2026 10:22',
     });
   }
 
   return list;
 };
 
-export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all', onSwitchMode }) => {
+export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all', onSwitchMode, onAutoCloseSidebar }) => {
   const [viewMode, setViewMode] = useState(isIptvMode ? 'iptv' : 'broadband');
   const [activeFilter, setActiveFilter] = useState(initialFilter);
   const [searchQuery, setSearchQuery] = useState('');
@@ -99,8 +125,11 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [iptvDataset, setIptvDataset] = useState(generateIptvCustomers);
   const [broadbandDataset, setBroadbandDataset] = useState(generateBroadbandCustomers);
 
+  // Dedicated Full-Screen Subscriber Details State (no popup!)
+  const [activeSubProfile, setActiveSubProfile] = useState(null);
+
   // Edit Modal State
-  const [editingCustomer, setEditingCustomer] = useState(null); // customer object or null
+  const [editingCustomer, setEditingCustomer] = useState(null);
   const [editForm, setEditForm] = useState({ name: '', mobile: '', plan: '', status: 'active', stb_id: '', stb_mac: '' });
   const [saving, setSaving] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
@@ -170,8 +199,17 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const handleToggleMode = (newMode) => {
     setViewMode(newMode);
     setActiveFilter('all');
+    setActiveSubProfile(null);
     if (onSwitchMode) {
       onSwitchMode(newMode === 'iptv' ? 'iptv_customers' : 'customers');
+    }
+  };
+
+  // Open Full-Screen Subscriber Control View (No Popup!) & Auto-Close Sidebar
+  const handleOpenSubscriberScreen = (cust) => {
+    setActiveSubProfile(cust);
+    if (onAutoCloseSidebar) {
+      onAutoCloseSidebar();
     }
   };
 
@@ -228,11 +266,15 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         );
       }
 
-      setToastMsg(`✅ Subscriber details updated successfully for ${editForm.name}!`);
+      if (activeSubProfile && activeSubProfile.id === editingCustomer.id) {
+        setActiveSubProfile((prev) => ({ ...prev, ...editForm }));
+      }
+
+      setToastMsg(`✅ Subscriber profile updated for ${editForm.name}!`);
       setTimeout(() => setToastMsg(''), 4000);
       setEditingCustomer(null);
     } catch (e) {
-      setToastMsg(`✅ Subscriber details updated successfully!`);
+      setToastMsg(`✅ Subscriber profile updated!`);
       setTimeout(() => setToastMsg(''), 4000);
       setEditingCustomer(null);
     } finally {
@@ -240,6 +282,191 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
   };
 
+  // IF A SUBSCRIBER IS SELECTED, RENDER DEDICATED FULL-SCREEN PROFILE & CONTROL VIEW
+  if (activeSubProfile) {
+    return (
+      <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+        {toastMsg ? (
+          <View style={styles.toastBanner}>
+            <Text style={styles.toastText}>{toastMsg}</Text>
+          </View>
+        ) : null}
+
+        {/* FULL SCREEN HEADER CONTROL BAR */}
+        <View style={styles.screenControlHeader}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => setActiveSubProfile(null)}>
+            <Feather name="arrow-left" size={16} color={COLORS.textMain} />
+            <Text style={styles.backBtnText}>Back to Subscribers List</Text>
+          </TouchableOpacity>
+
+          <View style={styles.subHeaderInfo}>
+            <Text style={styles.subHeaderTitle}>{activeSubProfile.name}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
+              <View
+                style={[
+                  styles.statusTag,
+                  activeSubProfile.status === 'active'
+                    ? styles.tagActive
+                    : activeSubProfile.status === 'expired'
+                    ? styles.tagExpired
+                    : styles.tagWarn,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.statusTagText,
+                    activeSubProfile.status === 'active'
+                      ? styles.tagTextActive
+                      : activeSubProfile.status === 'expired'
+                      ? styles.tagTextExpired
+                      : styles.tagTextWarn,
+                  ]}
+                >
+                  {(activeSubProfile.status || 'Active').toUpperCase()}
+                </Text>
+              </View>
+
+              <Text style={{ fontSize: 12, fontWeight: '700', color: activeSubProfile.isOnline ? COLORS.accentEmerald : COLORS.textMuted }}>
+                {activeSubProfile.isOnline ? '● Online Session' : '○ Offline'}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* FINANCIAL SUMMARY CARDS GRID (4 METRICS + EXPIRY DATE) */}
+        <View style={styles.financialSectionCard}>
+          <Text style={styles.sectionTitleHeader}>FINANCIAL & BILLING SUMMARY</Text>
+
+          <View style={styles.financialMetricsGrid}>
+            <View style={styles.finCard}>
+              <Text style={styles.finLabel}>Invoice Amount</Text>
+              <Text style={styles.finVal}>{activeSubProfile.invoiceAmount ? `₹ ${activeSubProfile.invoiceAmount}` : '0'}</Text>
+            </View>
+
+            <View style={styles.finCard}>
+              <Text style={styles.finLabel}>Total Paid</Text>
+              <Text style={[styles.finVal, { color: COLORS.accentEmerald }]}>
+                {activeSubProfile.totalPaid ? `₹ ${activeSubProfile.totalPaid}` : '0'}
+              </Text>
+            </View>
+
+            <View style={styles.finCard}>
+              <Text style={styles.finLabel}>Due Amount</Text>
+              <Text style={[styles.finVal, { color: activeSubProfile.dueAmount ? COLORS.accentRose : COLORS.textMain }]}>
+                {activeSubProfile.dueAmount ? `₹ ${activeSubProfile.dueAmount}` : '0'}
+              </Text>
+            </View>
+
+            <View style={styles.finCard}>
+              <Text style={styles.finLabel}>Due Date</Text>
+              <Text style={styles.finVal}>{activeSubProfile.dueDate || '—'}</Text>
+            </View>
+          </View>
+
+          <View style={styles.expiryCard}>
+            <Feather name="clock" size={16} color={COLORS.accentRose} />
+            <View style={{ marginLeft: 8 }}>
+              <Text style={styles.expiryLabel}>ACCOUNT EXPIRY DATE</Text>
+              <Text style={styles.expiryVal}>{activeSubProfile.expiryDate || '08 Jan, 2026 10:22'}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* SUBSCRIBER METADATA & CONTROL PANEL (2 COLUMNS) */}
+        <View style={styles.profileTwoColLayout}>
+          {/* LEFT: NETWORK & SUBSCRIBER TELEMETRY DETAILS */}
+          <View style={[styles.card, { flex: 1.2 }]}>
+            <Text style={styles.cardSectionTitle}>Subscriber Metadata & Telemetry</Text>
+
+            <View style={styles.detailsDataGrid}>
+              <View style={styles.dataRow}>
+                <Text style={styles.dataLabel}>User Name</Text>
+                <Text style={styles.dataValBold}>{activeSubProfile.username || '+918897885200'}</Text>
+              </View>
+
+              <View style={styles.dataRow}>
+                <Text style={styles.dataLabel}>Mobile</Text>
+                <Text style={styles.dataValBold}>{activeSubProfile.mobile || '9346124888'}</Text>
+              </View>
+
+              <View style={styles.dataRow}>
+                <Text style={styles.dataLabel}>Status</Text>
+                <Text style={[styles.dataValBold, { color: activeSubProfile.status === 'active' ? COLORS.accentEmerald : COLORS.accentRose }]}>
+                  {(activeSubProfile.status || 'Active').toUpperCase()} ({activeSubProfile.isOnline ? 'Online' : 'Offline'})
+                </Text>
+              </View>
+
+              <View style={styles.dataRow}>
+                <Text style={styles.dataLabel}>Service Plan</Text>
+                <Text style={[styles.dataValBold, { color: COLORS.accentEmerald }]}>{activeSubProfile.plan}</Text>
+              </View>
+
+              <View style={styles.dataRow}>
+                <Text style={styles.dataLabel}>IP Address / STB Serial</Text>
+                <Text style={styles.dataVal}>
+                  {activeSubProfile.isOnline ? `IP: ${activeSubProfile.ip}` : `STB: ${activeSubProfile.stb_id || 'STB_8849201'}`}
+                </Text>
+              </View>
+
+              {activeSubProfile.stb_mac && (
+                <View style={styles.dataRow}>
+                  <Text style={styles.dataLabel}>STB MAC Address</Text>
+                  <Text style={styles.dataVal}>{activeSubProfile.stb_mac}</Text>
+                </View>
+              )}
+
+              <View style={styles.dataRow}>
+                <Text style={styles.dataLabel}>e-KYC Verification</Text>
+                <Text style={[styles.dataVal, { color: COLORS.accentCyan }]}>{activeSubProfile.kyc}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* RIGHT: ADMINISTRATIVE CONTROLS & ACTIONS */}
+          <View style={[styles.card, { flex: 1 }]}>
+            <Text style={styles.cardSectionTitle}>Subscriber Control & Actions</Text>
+
+            <View style={styles.actionControlsGroup}>
+              <TouchableOpacity style={styles.actionBtnPrimary} onPress={() => handleOpenEdit(activeSubProfile)}>
+                <Feather name="edit-3" size={16} color="#ffffff" />
+                <Text style={styles.actionBtnPrimaryText}>Edit Subscriber Parameters</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.actionBtnAccent} onPress={() => {
+                setToastMsg(`✅ Subscription extended for ${activeSubProfile.name}`);
+                setTimeout(() => setToastMsg(''), 4000);
+              }}>
+                <Feather name="refresh-cw" size={16} color={COLORS.primary} />
+                <Text style={styles.actionBtnAccentText}>Renew & Extend Expiry Date</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.actionBtnWarn} onPress={() => {
+                const newStatus = activeSubProfile.status === 'active' ? 'suspend' : 'active';
+                setActiveSubProfile((prev) => ({ ...prev, status: newStatus }));
+                setToastMsg(`Account status updated to ${newStatus.toUpperCase()}`);
+                setTimeout(() => setToastMsg(''), 4000);
+              }}>
+                <Feather name="shield-off" size={16} color={COLORS.accentAmber} />
+                <Text style={styles.actionBtnWarnText}>
+                  {activeSubProfile.status === 'active' ? 'Suspend RADIUS Session' : 'Re-Activate Account'}
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.actionBtnDark} onPress={() => {
+                setToastMsg(`✅ RADIUS password reset for ${activeSubProfile.username}`);
+                setTimeout(() => setToastMsg(''), 4000);
+              }}>
+                <Feather name="key" size={16} color="#ffffff" />
+                <Text style={styles.actionBtnDarkText}>Reset RADIUS Password</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </ScrollView>
+    );
+  }
+
+  // STANDARD SUBSCRIBERS TABLE VIEW
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       {toastMsg ? (
@@ -358,7 +585,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           </View>
         ) : (
           <View style={styles.tableHeader}>
-            <Text style={[styles.th, { flex: 2 }]}>Subscriber Name & Mobile</Text>
+            <Text style={[styles.th, { flex: 2 }]}>Subscriber Name & Mobile (Click Profile)</Text>
             <Text style={[styles.th, { flex: 2 }]}>RADIUS Username</Text>
             <Text style={[styles.th, { flex: 1.5 }]}>Broadband Plan</Text>
             <Text style={[styles.th, { flex: 1.5 }]}>IP Address / STB ID</Text>
@@ -378,10 +605,11 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   <Text style={styles.tdSub}>MAC: {cust.stb_mac}</Text>
                 </View>
 
-                <View style={{ flex: 2 }}>
-                  <Text style={styles.tdText}>{cust.name}</Text>
-                  <Text style={styles.tdSub}>{cust.mobile}</Text>
-                </View>
+                {/* CLICKABLE NAME & MOBILE TO OPEN FULL DEDICATED SUBSCRIBER CONTROL SCREEN */}
+                <TouchableOpacity style={{ flex: 2 }} onPress={() => handleOpenSubscriberScreen(cust)}>
+                  <Text style={styles.tdClickableName}>{cust.name}</Text>
+                  <Text style={styles.tdClickableMobile}>{cust.mobile}</Text>
+                </TouchableOpacity>
 
                 <View style={{ flex: 1.5 }}>
                   <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.accentEmerald }}>
@@ -400,10 +628,11 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </>
             ) : (
               <>
-                <View style={{ flex: 2 }}>
-                  <Text style={styles.tdBold}>{cust.name}</Text>
-                  <Text style={styles.tdSub}>{cust.mobile}</Text>
-                </View>
+                {/* CLICKABLE NAME & MOBILE TO OPEN FULL DEDICATED SUBSCRIBER CONTROL SCREEN */}
+                <TouchableOpacity style={{ flex: 2 }} onPress={() => handleOpenSubscriberScreen(cust)}>
+                  <Text style={styles.tdClickableName}>{cust.name}</Text>
+                  <Text style={styles.tdClickableMobile}>{cust.mobile}</Text>
+                </TouchableOpacity>
 
                 <View style={{ flex: 2 }}>
                   <Text style={styles.tdText}>{cust.username}</Text>
@@ -669,6 +898,8 @@ const styles = StyleSheet.create({
   tdBold: { fontSize: 13, fontWeight: '600', color: COLORS.textMain },
   tdSub: { fontSize: 11, color: COLORS.textMuted },
   tdText: { fontSize: 12, color: COLORS.textMain },
+  tdClickableName: { fontSize: 13, fontWeight: '700', color: COLORS.primary, textDecorationLine: 'underline' },
+  tdClickableMobile: { fontSize: 11, color: COLORS.accentCyan, fontWeight: '600' },
   statusTag: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, alignSelf: 'flex-start' },
   tagActive: { backgroundColor: 'rgba(16, 185, 129, 0.1)' },
   tagExpired: { backgroundColor: 'rgba(244, 63, 94, 0.1)' },
@@ -692,7 +923,39 @@ const styles = StyleSheet.create({
   },
   editBtnText: { fontSize: 11, fontWeight: '700', color: COLORS.primary },
 
-  // Modal Styles
+  // Full Screen Control & Profile Styles
+  screenControlHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 12 },
+  backBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: COLORS.glassBorder },
+  backBtnText: { fontSize: 12, fontWeight: '700', color: COLORS.textMain },
+  subHeaderInfo: { alignItems: 'flex-end' },
+  subHeaderTitle: { fontSize: 20, fontWeight: '700', color: COLORS.textMain },
+  financialSectionCard: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: COLORS.glassBorder, borderRadius: 14, padding: 18, marginBottom: 20 },
+  sectionTitleHeader: { fontSize: 11, fontWeight: '800', color: COLORS.textMuted, letterSpacing: 0.5, marginBottom: 12 },
+  financialMetricsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 12 },
+  finCard: { flex: 1, minWidth: 120, backgroundColor: COLORS.bgSecondary, padding: 14, borderRadius: 10, borderWidth: 1, borderColor: COLORS.glassBorder },
+  finLabel: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted },
+  finVal: { fontSize: 18, fontWeight: '700', color: COLORS.textMain, marginTop: 4 },
+  expiryCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(244, 63, 94, 0.08)', borderWidth: 1, borderColor: 'rgba(244, 63, 94, 0.2)', padding: 12, borderRadius: 10 },
+  expiryLabel: { fontSize: 9, fontWeight: '800', color: COLORS.accentRose },
+  expiryVal: { fontSize: 14, fontWeight: '700', color: COLORS.textMain, marginTop: 2 },
+  profileTwoColLayout: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
+  cardSectionTitle: { fontSize: 15, fontWeight: '700', color: COLORS.textMain, marginBottom: 14 },
+  detailsDataGrid: { gap: 12 },
+  dataRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.04)' },
+  dataLabel: { fontSize: 11, color: COLORS.textMuted, fontWeight: '600' },
+  dataVal: { fontSize: 12, color: COLORS.textMain, fontWeight: '600' },
+  dataValBold: { fontSize: 13, color: COLORS.textMain, fontWeight: '700' },
+  actionControlsGroup: { gap: 10 },
+  actionBtnPrimary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: COLORS.primary, paddingVertical: 12, borderRadius: 10 },
+  actionBtnPrimaryText: { color: '#ffffff', fontSize: 13, fontWeight: '700' },
+  actionBtnAccent: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(16, 185, 129, 0.1)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.25)', paddingVertical: 12, borderRadius: 10 },
+  actionBtnAccentText: { color: COLORS.primary, fontSize: 13, fontWeight: '700' },
+  actionBtnWarn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.25)', paddingVertical: 12, borderRadius: 10 },
+  actionBtnWarnText: { color: COLORS.accentAmber, fontSize: 13, fontWeight: '700' },
+  actionBtnDark: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#0f172a', paddingVertical: 12, borderRadius: 10 },
+  actionBtnDarkText: { color: '#ffffff', fontSize: 13, fontWeight: '700' },
+
+  // Form Modal Styles
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   modalCard: { width: '100%', maxWidth: 480, backgroundColor: '#ffffff', borderRadius: 14, padding: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 10 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
