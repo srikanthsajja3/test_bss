@@ -164,28 +164,48 @@ export default function App() {
       </View>
       
       <View style={styles.layout}>
-        {/* Sidebar (Supports Collapsible / Auto-closing mode on hover) */}
-        {(isDesktop || sidebarOpenMobile) && (
+        {/* Desktop Sidebar (Inline flex layout) */}
+        {isDesktop && (
           <Sidebar
             activeTab={activeTab}
-            onSelectTab={(tab) => {
-              setActiveTab(tab);
-              if (!isDesktop) setSidebarOpenMobile(false);
-            }}
+            onSelectTab={(tab) => setActiveTab(tab)}
             user={user}
             onLogout={() => setIsLoginVisible(true)}
-            isCollapsed={isDesktop && sidebarCollapsed}
+            isCollapsed={sidebarCollapsed}
             onToggleCollapse={toggleSidebarCollapse}
-            onMouseEnter={() => {
-              if (isDesktop) setSidebarCollapsed(false);
-            }}
-            onMouseLeave={() => {
-              if (isDesktop) setSidebarCollapsed(true);
-            }}
+            onMouseEnter={() => setSidebarCollapsed(false)}
+            onMouseLeave={() => setSidebarCollapsed(true)}
           />
         )}
 
-        {/* Main Display Area (Expands to full width when sidebar is collapsed) */}
+        {/* Mobile Sidebar Drawer (Opens OVER the screen with backdrop overlay) */}
+        {!isDesktop && sidebarOpenMobile && (
+          <View style={styles.mobileDrawerOverlay}>
+            <TouchableOpacity
+              style={styles.mobileBackdrop}
+              activeOpacity={1}
+              onPress={() => setSidebarOpenMobile(false)}
+            />
+            <View style={styles.mobileDrawerContainer}>
+              <Sidebar
+                activeTab={activeTab}
+                onSelectTab={(tab) => {
+                  setActiveTab(tab);
+                  setSidebarOpenMobile(false);
+                }}
+                user={user}
+                onLogout={() => {
+                  setIsLoginVisible(true);
+                  setSidebarOpenMobile(false);
+                }}
+                isCollapsed={false}
+                onToggleCollapse={() => setSidebarOpenMobile(false)}
+              />
+            </View>
+          </View>
+        )}
+
+        {/* Main Display Area */}
         <View style={styles.main}>
           <Header
             title={meta.title}
@@ -254,6 +274,36 @@ const styles = StyleSheet.create({
     flex: 1,
     width: '100%',
     flexDirection: 'row',
+    position: 'relative',
+  },
+  mobileDrawerOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9999,
+    flexDirection: 'row',
+  },
+  mobileBackdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
+  },
+  mobileDrawerContainer: {
+    position: 'relative',
+    width: 270,
+    height: '100%',
+    zIndex: 10000,
+    backgroundColor: COLORS.bgSecondary,
+    shadowColor: '#000',
+    shadowOffset: { width: 4, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 15,
+    elevation: 10,
   },
   main: {
     flex: 1,
