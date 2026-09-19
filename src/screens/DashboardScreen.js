@@ -1,16 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
-import { Feather, Ionicons, MaterialIcons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator } from 'react-native';
+import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 
-export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
+export const DashboardScreen = ({ user }) => {
   const currentRole = user?.role ? user.role.toLowerCase() : 'superadmin';
   const currentPartnerId = user?.partner_id || 1000;
 
   const [telemetry, setTelemetry] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [toastMessage, setToastMessage] = useState('');
 
   const refreshData = async () => {
     setLoading(true);
@@ -40,12 +39,6 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
 
   const inet = telemetry?.internet || { total: 102, active: 95, online: 83, expired: 6, suspend: 1, disabled: 0, new: 0 };
   const iptv = telemetry?.iptv || { total: 45, active: 42, expired: 3 };
-
-  const handleCardClick = (filterKey) => {
-    if (onNavigateToCustomers) {
-      onNavigateToCustomers(filterKey);
-    }
-  };
 
   // CUSTOMER DASHBOARD
   if (currentRole === 'customer') {
@@ -104,17 +97,17 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         </View>
 
         <View style={styles.statsGrid}>
-          <TouchableOpacity style={styles.statCard} onPress={() => handleCardClick('active')}>
-            <Text style={styles.statLabel}>MY SUBSCRIBERS (CLICK TO OPEN DATA)</Text>
+          <View style={styles.statCard}>
+            <Text style={styles.statLabel}>MY SUBSCRIBERS</Text>
             <Text style={styles.statValue}>142</Text>
-            <Text style={styles.statSubtext}>Active Broadband Lines →</Text>
-          </TouchableOpacity>
+            <Text style={styles.statSubtext}>Active Broadband Lines</Text>
+          </View>
 
-          <TouchableOpacity style={styles.statCard} onPress={() => handleCardClick('iptv')}>
-            <Text style={styles.statLabel}>CONNECTED STB (CLICK TO OPEN DATA)</Text>
+          <View style={styles.statCard}>
+            <Text style={styles.statLabel}>CONNECTED STB</Text>
             <Text style={styles.statValue}>45</Text>
-            <Text style={styles.statSubtext}>Pioneer IPTV STBs →</Text>
-          </TouchableOpacity>
+            <Text style={styles.statSubtext}>Pioneer IPTV STBs</Text>
+          </View>
 
           <View style={styles.statCard}>
             <Text style={styles.statLabel}>OPERATOR WALLET</Text>
@@ -132,7 +125,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
               <Text style={styles.ocmName}>{ch}</Text>
               <View style={styles.ocmControls}>
                 <Text style={styles.ocmLcn}>LCN #{19 + idx}</Text>
-                <TouchableOpacity style={styles.btnDisable}><Text style={styles.btnDisableText}>Disable</Text></TouchableOpacity>
+                <View style={styles.btnDisable}><Text style={styles.btnDisableText}>Disable</Text></View>
               </View>
             </View>
           ))}
@@ -141,103 +134,76 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
     );
   }
 
+  // SUPER ADMIN & ADMIN DASHBOARDS (STATIC NON-CLICKABLE TELEMETRY DASHBOARD)
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* CLICKABLE 7-METRIC INTERNET USER STATUS DASHBOARD GRID */}
-      <Text style={styles.sectionHeaderTitle}>Internet Subscriber Telemetry & Status Breakdown (Click to Open Customer Screen)</Text>
+      {/* 7-METRIC INTERNET USER STATUS TELEMETRY GRID */}
+      <Text style={styles.sectionHeaderTitle}>Internet Subscriber Telemetry & Status Breakdown</Text>
       <View style={styles.statsGrid7}>
-        <TouchableOpacity style={styles.statCardMetricClickable} onPress={() => handleCardClick('all')}>
-          <View style={styles.metricHeaderRow}>
-            <Text style={styles.statLabel}>TOTAL USERS</Text>
-            <Feather name="arrow-right" size={12} color={COLORS.primary} />
-          </View>
+        <View style={styles.statCardMetric}>
+          <Text style={styles.statLabel}>TOTAL USERS</Text>
           <Text style={styles.statValueMetric}>{inet.total}</Text>
-          <Text style={styles.statSubtext}>Open Subscribers Page →</Text>
-        </TouchableOpacity>
+        </View>
 
-        <TouchableOpacity style={styles.statCardMetricClickable} onPress={() => handleCardClick('active')}>
-          <View style={styles.metricHeaderRow}>
-            <Text style={styles.statLabel}>ACTIVE USERS</Text>
-            <Feather name="arrow-right" size={12} color={COLORS.accentEmerald} />
-          </View>
+        <View style={styles.statCardMetric}>
+          <Text style={styles.statLabel}>ACTIVE USERS</Text>
           <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>{inet.active}</Text>
-          <Text style={styles.statSubtext}>Open Active Users →</Text>
-        </TouchableOpacity>
+        </View>
 
-        <TouchableOpacity style={styles.statCardMetricClickable} onPress={() => handleCardClick('online')}>
-          <View style={styles.metricHeaderRow}>
-            <Text style={styles.statLabel}>ONLINE USERS</Text>
-            <Feather name="arrow-right" size={12} color="#3b82f6" />
-          </View>
+        <View style={styles.statCardMetric}>
+          <Text style={styles.statLabel}>ONLINE USERS</Text>
           <Text style={[styles.statValueMetric, { color: '#3b82f6' }]}>{inet.online}</Text>
-          <Text style={styles.statSubtext}>Open Online Sessions →</Text>
-        </TouchableOpacity>
+        </View>
 
-        <TouchableOpacity style={styles.statCardMetricClickable} onPress={() => handleCardClick('expired')}>
-          <View style={styles.metricHeaderRow}>
-            <Text style={styles.statLabel}>EXPIRED USERS</Text>
-            <Feather name="arrow-right" size={12} color={COLORS.accentRose} />
-          </View>
+        <View style={styles.statCardMetric}>
+          <Text style={styles.statLabel}>EXPIRED USERS</Text>
           <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>{inet.expired}</Text>
-          <Text style={styles.statSubtext}>Open Expired List →</Text>
-        </TouchableOpacity>
+        </View>
 
-        <TouchableOpacity style={styles.statCardMetricClickable} onPress={() => handleCardClick('suspend')}>
-          <View style={styles.metricHeaderRow}>
-            <Text style={styles.statLabel}>SUSPENDED USERS</Text>
-            <Feather name="arrow-right" size={12} color={COLORS.accentAmber} />
-          </View>
+        <View style={styles.statCardMetric}>
+          <Text style={styles.statLabel}>SUSPENDED USERS</Text>
           <Text style={[styles.statValueMetric, { color: COLORS.accentAmber }]}>{inet.suspend ?? 1}</Text>
-          <Text style={styles.statSubtext}>Open Suspended →</Text>
-        </TouchableOpacity>
+        </View>
 
-        <TouchableOpacity style={styles.statCardMetricClickable} onPress={() => handleCardClick('disabled')}>
-          <View style={styles.metricHeaderRow}>
-            <Text style={styles.statLabel}>DISABLED USERS</Text>
-            <Feather name="arrow-right" size={12} color="#64748b" />
-          </View>
+        <View style={styles.statCardMetric}>
+          <Text style={styles.statLabel}>DISABLED USERS</Text>
           <Text style={[styles.statValueMetric, { color: '#64748b' }]}>{inet.disabled ?? 0}</Text>
-          <Text style={styles.statSubtext}>Open Disabled →</Text>
-        </TouchableOpacity>
+        </View>
 
-        <TouchableOpacity style={styles.statCardMetricClickable} onPress={() => handleCardClick('all')}>
-          <View style={styles.metricHeaderRow}>
-            <Text style={styles.statLabel}>NEW USERS</Text>
-            <Feather name="arrow-right" size={12} color="#8b5cf6" />
-          </View>
+        <View style={styles.statCardMetric}>
+          <Text style={styles.statLabel}>NEW USERS</Text>
           <Text style={[styles.statValueMetric, { color: '#8b5cf6' }]}>{inet.new ?? 0}</Text>
-          <Text style={styles.statSubtext}>Open New Users →</Text>
-        </TouchableOpacity>
+        </View>
       </View>
 
-      {/* CLICKABLE PIONEER IPTV TELEMETRY DATA CARD */}
+      {/* PIONEER IPTV TELEMETRY DATA CARD */}
       <View style={[styles.card, GLASS_CARD_INTERACTIVE]}>
         <View style={styles.cardHeader}>
           <MaterialIcons name="live-tv" size={24} color="#8b5cf6" />
           <View style={{ marginLeft: 10, flex: 1 }}>
-            <Text style={styles.cardTitle}>Pioneer IPTV STB Telemetry (Click to Open IPTV Customer View)</Text>
+            <Text style={styles.cardTitle}>Pioneer IPTV STB Telemetry</Text>
             <Text style={styles.cardSubtitle}>Real-time metrics from Pioneer IPTV Set-Top Box Provider</Text>
           </View>
         </View>
 
         <View style={styles.iptvGrid}>
-          <TouchableOpacity style={styles.iptvCardClickable} onPress={() => handleCardClick('iptv_all')}>
+          <View style={styles.iptvCard}>
             <Text style={styles.iptvLabel}>TOTAL IPTV USERS</Text>
             <Text style={styles.iptvVal}>{iptv.total}</Text>
-            <View style={styles.badgeInfo}><Text style={styles.badgeInfoText}>{iptv.total} OPEN IPTV VIEW →</Text></View>
-          </TouchableOpacity>
+            <View style={styles.badgeInfo}><Text style={styles.badgeInfoText}>{iptv.total} Total STBs</Text></View>
+          </View>
 
-          <TouchableOpacity style={styles.iptvCardClickable} onPress={() => handleCardClick('iptv_active')}>
+          <View style={styles.iptvCard}>
             <Text style={styles.iptvLabel}>ACTIVE IPTV USERS</Text>
             <Text style={[styles.iptvVal, { color: COLORS.accentEmerald }]}>{iptv.active}</Text>
-            <View style={styles.badgeActive}><Text style={styles.badgeActiveText}>{iptv.active} OPEN ACTIVE IPTV →</Text></View>
-          </TouchableOpacity>
+            <View style={styles.badgeActive}><Text style={styles.badgeActiveText}>{iptv.active} Active STBs</Text></View>
+          </View>
 
-          <TouchableOpacity style={styles.iptvCardClickable} onPress={() => handleCardClick('iptv_expired')}>
+          <View style={styles.iptvCard}>
             <Text style={styles.iptvLabel}>EXPIRED IPTV USERS</Text>
             <Text style={[styles.iptvVal, { color: COLORS.accentRose }]}>{iptv.expired}</Text>
-            <View style={styles.badgeExpired}><Text style={styles.badgeExpiredText}>{iptv.expired} OPEN EXPIRED IPTV →</Text></View>
-          </TouchableOpacity>
+            <View style={styles.badgeExpired}><Text style={styles.badgeExpiredText}>{iptv.expired} Expired STBs</Text></View>
+          </View>
         </View>
       </View>
     </ScrollView>
@@ -251,20 +217,16 @@ const styles = StyleSheet.create({
   pageTitle: { fontSize: 22, fontWeight: '700', color: COLORS.textMain },
   pageSubtitle: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
   sectionHeaderTitle: { fontSize: 15, fontWeight: '700', color: COLORS.textMain, marginBottom: 12 },
-  refreshBtn: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: 'rgba(16, 185, 129, 0.1)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.25)', gap: 6 },
-  refreshBtnText: { color: COLORS.primary, fontWeight: '600', fontSize: 12 },
   statsGrid7: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 24 },
-  statCardMetricClickable: { flex: 1, minWidth: 160, padding: 16, borderRadius: 12, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.25)', elevation: 3 },
-  metricHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  statCardMetric: { flex: 1, minWidth: 160, padding: 16, borderRadius: 12, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.25)', elevation: 2 },
   statLabel: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 0.5 },
-  statValueMetric: { fontSize: 24, fontWeight: '700', color: COLORS.textMain, marginTop: 4 },
-  statSubtext: { fontSize: 10, color: COLORS.primary, fontWeight: '600', marginTop: 4 },
+  statValueMetric: { fontSize: 24, fontWeight: '700', color: COLORS.textMain, marginTop: 6 },
   card: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: COLORS.glassBorder, borderRadius: 14, padding: 20, marginBottom: 20 },
   cardHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   cardTitle: { fontSize: 16, fontWeight: '700', color: COLORS.textMain },
   cardSubtitle: { fontSize: 12, color: COLORS.textMuted, marginTop: 2 },
   iptvGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, marginTop: 8 },
-  iptvCardClickable: { flex: 1, minWidth: 180, padding: 16, backgroundColor: COLORS.bgSecondary, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.2)', gap: 6 },
+  iptvCard: { flex: 1, minWidth: 180, padding: 16, backgroundColor: COLORS.bgSecondary, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.2)', gap: 6 },
   iptvLabel: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 0.5 },
   iptvVal: { fontSize: 26, fontWeight: '700', color: COLORS.textMain },
   badgeInfo: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.05)', alignSelf: 'flex-start' },
@@ -285,7 +247,6 @@ const styles = StyleSheet.create({
   btnDisableText: { fontSize: 11, fontWeight: '600', color: COLORS.accentRose },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16, marginBottom: 24 },
   statCard: { flex: 1, minWidth: 200, padding: 18, borderRadius: 12, backgroundColor: '#ffffff', borderWidth: 1, borderColor: COLORS.glassBorder, elevation: 2 },
-  statLabel: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 0.5 },
-  statValue: { fontSize: 28, fontWeight: '700', color: COLORS.textMain },
+  statValue: { fontSize: 28, fontWeight: '700', color: COLORS.textMain, marginTop: 4 },
   statSubtext: { fontSize: 11, color: COLORS.textDim, marginTop: 4 },
 });
