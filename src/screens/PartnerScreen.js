@@ -13,8 +13,9 @@ import {
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
+import { CreateAccountModal } from '../components/CreateAccountModal';
 
-export const PartnerScreen = ({ onOpenCreate }) => {
+export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
@@ -25,6 +26,15 @@ export const PartnerScreen = ({ onOpenCreate }) => {
   const [selectedPartner, setSelectedPartner] = useState(null);
   const [toastMsg, setToastMsg] = useState('');
   const [showSecret, setShowSecret] = useState(false);
+  const [isCreateOpen, setIsCreateOpen] = useState(false);
+  const [createRole, setCreateRole] = useState('admin');
+
+  useEffect(() => {
+    if (initialCreateRole) {
+      setCreateRole(initialCreateRole);
+      setIsCreateOpen(true);
+    }
+  }, [initialCreateRole]);
 
   const fetchPartners = async () => {
     setLoading(true);
@@ -168,6 +178,18 @@ export const PartnerScreen = ({ onOpenCreate }) => {
     );
   };
 
+  const handleOpenCreate = (role = 'admin') => {
+    setCreateRole(role);
+    setIsCreateOpen(true);
+    if (onOpenCreate) onOpenCreate(role);
+  };
+
+  const handleAccountCreated = (newPartner, msg) => {
+    setToastMsg(msg || `New ${newPartner.account_role.toUpperCase()} #${newPartner.partner_id} created successfully!`);
+    fetchPartners();
+    setTimeout(() => setToastMsg(''), 5000);
+  };
+
   return (
     <ScrollView
       style={styles.container}
@@ -189,38 +211,57 @@ export const PartnerScreen = ({ onOpenCreate }) => {
         </View>
       ) : null}
 
-      {/* Header & Add Button */}
-      <View style={styles.topRow}>
+      {/* Header & Add Admin / Add Operator Buttons */}
+      <View style={[styles.topRow, isMobile && { flexDirection: 'column', alignItems: 'stretch', gap: 12 }]}>
         <View>
-          <Text style={styles.title}>Partner & Gateway Console</Text>
+          <Text style={[styles.title, isMobile && { fontSize: 18 }]}>Partner & Gateway Console</Text>
           <Text style={styles.subtitle}>
             Manage telecom operators, RADIUS servers, and IPTV gateway bindings in a structured table
           </Text>
         </View>
-        <TouchableOpacity style={styles.addBtn} onPress={onOpenCreate}>
-          <Feather name="plus" size={16} color="#fff" />
-          <Text style={styles.addBtnText}>Add Partner</Text>
-        </TouchableOpacity>
+        {user?.role !== 'operator' && (
+          <View style={[styles.actionBtnGroup, isMobile && { width: '100%', flexDirection: 'row' }]}>
+            <TouchableOpacity
+              style={[styles.addAdminBtn, isMobile && { flex: 1, justifyContent: 'center' }]}
+              onPress={() => handleOpenCreate('admin')}
+            >
+              <Feather name="shield" size={15} color="#fff" />
+              <Text style={styles.addAdminBtnText}>Add Admin</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.addOperatorBtn, isMobile && { flex: 1, justifyContent: 'center' }]}
+              onPress={() => handleOpenCreate('operator')}
+            >
+              <Feather name="briefcase" size={15} color="#fff" />
+              <Text style={styles.addOperatorBtnText}>Add Operator</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </View>
 
       {/* Filter Controls Row */}
-      <View style={styles.filterRow}>
-        <View style={styles.searchBox}>
-          <Feather name="search" size={14} color={COLORS.textDim} />
+      <View style={[styles.filterRow, isMobile && { flexDirection: 'column', alignItems: 'stretch', gap: 10 }]}>
+        <View style={[styles.searchBox, isMobile && { maxWidth: '100%', width: '100%', height: 42 }]}>
+          <Feather name="search" size={16} color={COLORS.textDim} />
           <TextInput
-            style={styles.searchInput}
-            placeholder="Search by partner name, company, email, mobile, or ID..."
+            style={[styles.searchInput, isMobile && { fontSize: 13 }]}
+            placeholder={isMobile ? "Search partners, email, mobile, ID..." : "Search by partner name, company, email, mobile, or ID..."}
             value={search}
             onChangeText={setSearch}
             placeholderTextColor={COLORS.textDim}
           />
         </View>
 
-        <View style={styles.roleFilters}>
+        <View style={[styles.roleFilters, isMobile && { width: '100%', justifyContent: 'space-between' }]}>
           {['', 'operator', 'admin'].map((role) => (
             <TouchableOpacity
               key={role}
-              style={[styles.roleChip, selectedRole === role && styles.roleChipActive]}
+              style={[
+                styles.roleChip,
+                isMobile && { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 10, paddingHorizontal: 4 },
+                selectedRole === role && styles.roleChipActive,
+              ]}
               onPress={() => setSelectedRole(role)}
             >
               <Text style={[styles.roleChipText, selectedRole === role && styles.roleChipTextActive]}>
@@ -245,103 +286,84 @@ export const PartnerScreen = ({ onOpenCreate }) => {
         {loading ? (
           <ActivityIndicator size="large" color={COLORS.primary} style={{ marginVertical: 40 }} />
         ) : isMobile ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={{ minWidth: 800 }}>
-              <View style={styles.tableHeader}>
-                <Text style={[styles.th, { flex: 0.8 }]}>ID</Text>
-                <Text style={[styles.th, { flex: 2.2 }]}>Partner & Company Name</Text>
-                <Text style={[styles.th, { flex: 2.2 }]}>Contact Info (Mobile / Email)</Text>
-                <Text style={[styles.th, { flex: 1.2 }]}>Account Role</Text>
-                <Text style={[styles.th, { flex: 1.5 }]}>Gateway & RADIUS</Text>
-                <Text style={[styles.th, { flex: 1.2 }]}>Status</Text>
-                <Text style={[styles.th, { flex: 1.6, textAlign: 'right' }]}>Actions</Text>
+          <View style={{ padding: 12, gap: 12 }}>
+            {filteredPartners.length === 0 ? (
+              <View style={styles.emptyContainer}>
+                <Feather name="info" size={24} color={COLORS.textMuted} />
+                <Text style={styles.emptyText}>No partner records matched your filter criteria.</Text>
               </View>
-
-              {filteredPartners.length === 0 ? (
-                <View style={styles.emptyContainer}>
-                  <Feather name="info" size={24} color={COLORS.textMuted} />
-                  <Text style={styles.emptyText}>No partner records matched your filter criteria.</Text>
-                </View>
-              ) : (
-                filteredPartners.map((item) => {
-                  const isEnabled = item.status === 'enabled';
-                  return (
-                    <View key={item.partner_id} style={styles.tr}>
-                      <View style={[{ flex: 0.8 }, styles.td]}>
+            ) : (
+              filteredPartners.map((item) => {
+                const isEnabled = item.status === 'enabled';
+                return (
+                  <View key={item.partner_id} style={styles.mobileCard}>
+                    <View style={styles.mobileCardHeader}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
                         <View style={styles.idBadge}>
                           <Text style={styles.idText}>#{item.partner_id}</Text>
                         </View>
-                      </View>
-
-                      <View style={[{ flex: 2.2 }, styles.td]}>
-                        <TouchableOpacity onPress={() => setSelectedPartner(item)}>
-                          <Text style={styles.partnerNameText}>{item.partner_name}</Text>
-                          <Text style={styles.companyNameText}>{item.company_name}</Text>
+                        <TouchableOpacity onPress={() => setSelectedPartner(item)} style={{ flex: 1 }}>
+                          <Text style={styles.partnerNameText} numberOfLines={1}>{item.partner_name}</Text>
+                          <Text style={styles.companyNameText} numberOfLines={1}>{item.company_name}</Text>
                         </TouchableOpacity>
                       </View>
-
-                      <View style={[{ flex: 2.2 }, styles.td]}>
-                        <View style={styles.contactRow}>
-                          <Feather name="phone" size={12} color={COLORS.textMuted} />
-                          <Text style={styles.contactText}>{item.partner_mobile || 'N/A'}</Text>
-                        </View>
-                        <View style={styles.contactRow}>
-                          <Feather name="mail" size={12} color={COLORS.textMuted} />
-                          <Text style={styles.contactText}>{item.partner_email || 'N/A'}</Text>
-                        </View>
-                      </View>
-
-                      <View style={[{ flex: 1.2 }, styles.td]}>
-                        <View
+                      <View
+                        style={[
+                          styles.roleBadge,
+                          item.account_role === 'admin' ? styles.roleBadgeAdmin : styles.roleBadgeOperator,
+                        ]}
+                      >
+                        <Text
                           style={[
-                            styles.roleBadge,
-                            item.account_role === 'admin' ? styles.roleBadgeAdmin : styles.roleBadgeOperator,
+                            styles.roleBadgeText,
+                            item.account_role === 'admin' ? styles.roleBadgeTextAdmin : styles.roleBadgeTextOperator,
                           ]}
                         >
-                          <Text
-                            style={[
-                              styles.roleBadgeText,
-                              item.account_role === 'admin' ? styles.roleBadgeTextAdmin : styles.roleBadgeTextOperator,
-                            ]}
-                          >
-                            {(item.account_role || 'operator').toUpperCase()}
-                          </Text>
-                        </View>
+                          {(item.account_role || 'operator').toUpperCase()}
+                        </Text>
                       </View>
+                    </View>
 
-                      <View style={[{ flex: 1.5 }, styles.td]}>
+                    <View style={styles.mobileCardBody}>
+                      <View style={styles.contactRow}>
+                        <Feather name="phone" size={12} color={COLORS.textMuted} />
+                        <Text style={styles.contactText}>{item.partner_mobile || 'N/A'}</Text>
+                      </View>
+                      <View style={styles.contactRow}>
+                        <Feather name="mail" size={12} color={COLORS.textMuted} />
+                        <Text style={styles.contactText}>{item.partner_email || 'N/A'}</Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
                         <Text style={styles.monoText}>NAS: {item.nas_ip || '192.168.10.250'}</Text>
                         <Text style={styles.subMonoText}>
                           Sessions: {item.active_sessions !== undefined ? item.active_sessions.toLocaleString() : '1,200'}
                         </Text>
                       </View>
-
-                      <View style={[{ flex: 1.2 }, styles.td]}>
-                        <TouchableOpacity onPress={() => togglePartnerStatus(item.partner_id)}>
-                          <View style={[styles.statusTag, isEnabled ? styles.tagEnabled : styles.tagDisabled]}>
-                            <View style={[styles.statusDot, isEnabled ? styles.dotEnabled : styles.dotDisabled]} />
-                            <Text style={[styles.tagText, isEnabled ? styles.tagTextEnabled : styles.tagTextDisabled]}>
-                              {isEnabled ? 'ENABLED' : 'DISABLED'}
-                            </Text>
-                          </View>
-                        </TouchableOpacity>
-                      </View>
-
-                      <View style={[{ flex: 1.6, flexDirection: 'row', justifyContent: 'flex-end', gap: 6 }, styles.td]}>
-                        <TouchableOpacity
-                          style={styles.btnGatewayConfig}
-                          onPress={() => setSelectedPartner(item)}
-                        >
-                          <Feather name="sliders" size={12} color={COLORS.primary} />
-                          <Text style={styles.btnGatewayConfigText}>Gateways</Text>
-                        </TouchableOpacity>
-                      </View>
                     </View>
-                  );
-                })
-              )}
-            </View>
-          </ScrollView>
+
+                    <View style={styles.mobileCardFooter}>
+                      <TouchableOpacity onPress={() => togglePartnerStatus(item.partner_id)}>
+                        <View style={[styles.statusTag, isEnabled ? styles.tagEnabled : styles.tagDisabled]}>
+                          <View style={[styles.statusDot, isEnabled ? styles.dotEnabled : styles.dotDisabled]} />
+                          <Text style={[styles.tagText, isEnabled ? styles.tagTextEnabled : styles.tagTextDisabled]}>
+                            {isEnabled ? 'ENABLED' : 'DISABLED'}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={styles.btnGatewayConfig}
+                        onPress={() => setSelectedPartner(item)}
+                      >
+                        <Feather name="sliders" size={12} color={COLORS.primary} />
+                        <Text style={styles.btnGatewayConfigText}>Gateways & Details</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })
+            )}
+          </View>
         ) : (
           <View style={{ width: '100%' }}>
             <View style={styles.tableHeader}>
@@ -462,54 +484,90 @@ export const PartnerScreen = ({ onOpenCreate }) => {
               </View>
 
               <ScrollView style={{ padding: 20 }}>
-                <Text style={styles.configSectionTitle}>RADIUS NAS Gateway Parameters</Text>
+                <Text style={styles.configSectionTitle}>Operator Codes & Assignment Parameters</Text>
                 
                 <View style={styles.configGrid}>
                   <View style={styles.configBox}>
-                    <Text style={styles.configLabel}>RADIUS NAS IP Address</Text>
-                    <Text style={styles.configValue}>{selectedPartner.nas_ip || '192.168.10.250'}</Text>
+                    <Text style={styles.configLabel}>Partner ID</Text>
+                    <Text style={styles.configValue}>#{selectedPartner.partner_id}</Text>
                   </View>
 
                   <View style={styles.configBox}>
-                    <Text style={styles.configLabel}>Active RADIUS Sessions</Text>
-                    <Text style={[styles.configValue, { color: COLORS.accentEmerald }]}>
-                      {selectedPartner.active_sessions ? selectedPartner.active_sessions.toLocaleString() : '4,821'} Concurrent
+                    <Text style={styles.configLabel}>Operator Code</Text>
+                    <Text style={[styles.configValue, { color: COLORS.primary }]}>
+                      {selectedPartner.operator_code || `OPT-${selectedPartner.partner_id}`}
                     </Text>
                   </View>
 
-                  <View style={[styles.configBox, { width: '100%' }]}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text style={styles.configLabel}>RADIUS Shared Secret Key</Text>
-                      <TouchableOpacity onPress={() => setShowSecret(!showSecret)}>
-                        <Text style={{ fontSize: 11, color: COLORS.primary, fontWeight: '600' }}>
-                          {showSecret ? 'Hide Key' : 'Show Secret Key'}
-                        </Text>
-                      </TouchableOpacity>
-                    </View>
+                  <View style={styles.configBox}>
+                    <Text style={styles.configLabel}>Internal Branch ID</Text>
                     <Text style={styles.configValue}>
-                      {showSecret ? (selectedPartner.shared_secret || 'AirtelRadSecret2026') : '••••••••••••••••'}
+                      {selectedPartner.internal_branch_id || `BR-${selectedPartner.partner_id}`}
+                    </Text>
+                  </View>
+
+                  <View style={styles.configBox}>
+                    <Text style={styles.configLabel}>Parent Admin Assignment</Text>
+                    <Text style={[styles.configValue, { color: '#8b5cf6' }]}>
+                      Admin #{selectedPartner.parent_admin_id || 1000}
                     </Text>
                   </View>
                 </View>
 
-                <Text style={[styles.configSectionTitle, { marginTop: 20 }]}>Pioneer IPTV STB Middleware Gateway</Text>
+                <Text style={[styles.configSectionTitle, { marginTop: 18 }]}>Internet Service & Gateway Parameters</Text>
                 
                 <View style={styles.configGrid}>
+                  <View style={styles.configBox}>
+                    <Text style={styles.configLabel}>Internet Status</Text>
+                    <Text style={[styles.configValue, { color: selectedPartner.internet_enabled !== false ? COLORS.accentEmerald : COLORS.accentRose }]}>
+                      {selectedPartner.internet_enabled !== false ? 'ENABLED' : 'DISABLED'}
+                    </Text>
+                  </View>
+
+                  <View style={styles.configBox}>
+                    <Text style={styles.configLabel}>Internet Token</Text>
+                    <Text style={[styles.configValue, { fontSize: 11 }]}>
+                      {selectedPartner.internet_token || `inet_tok_${selectedPartner.partner_id}`}
+                    </Text>
+                  </View>
+
+                  <View style={[styles.configBox, { width: '100%' }]}>
+                    <Text style={styles.configLabel}>Base URL Endpoint</Text>
+                    <Text style={[styles.configValue, { color: COLORS.accentCyan, fontSize: 12 }]}>
+                      {selectedPartner.base_url || '-'}
+                    </Text>
+                  </View>
+
+                  <View style={[styles.configBox, { width: '100%' }]}>
+                    <Text style={styles.configLabel}>Physical Address</Text>
+                    <Text style={[styles.configValue, { fontSize: 12 }]}>
+                      {selectedPartner.address || '-'}
+                    </Text>
+                  </View>
+                </View>
+
+                <Text style={[styles.configSectionTitle, { marginTop: 18 }]}>Pioneer IPTV STB Service & Token</Text>
+                
+                <View style={styles.configGrid}>
+                  <View style={styles.configBox}>
+                    <Text style={styles.configLabel}>IPTV Status</Text>
+                    <Text style={[styles.configValue, { color: selectedPartner.iptv_enabled !== false ? COLORS.accentEmerald : COLORS.accentRose }]}>
+                      {selectedPartner.iptv_enabled !== false ? 'ENABLED' : 'DISABLED'}
+                    </Text>
+                  </View>
+
+                  <View style={styles.configBox}>
+                    <Text style={styles.configLabel}>IPTV Token</Text>
+                    <Text style={[styles.configValue, { fontSize: 11, color: '#8b5cf6' }]}>
+                      {selectedPartner.iptv_token || `iptv_tok_${selectedPartner.partner_id}`}
+                    </Text>
+                  </View>
+
                   <View style={[styles.configBox, { width: '100%' }]}>
                     <Text style={styles.configLabel}>IPTV Gateway API Endpoint</Text>
                     <Text style={[styles.configValue, { color: COLORS.accentCyan, fontSize: 12 }]}>
                       {selectedPartner.iptv_gateway || 'https://iptv-gateway.onebss.io/api/v1'}
                     </Text>
-                  </View>
-
-                  <View style={styles.configBox}>
-                    <Text style={styles.configLabel}>Operator Binding Key</Text>
-                    <Text style={styles.configValue}>OPT-BIND-{selectedPartner.partner_id}</Text>
-                  </View>
-
-                  <View style={styles.configBox}>
-                    <Text style={styles.configLabel}>CAS Cryptographic Pair</Text>
-                    <Text style={[styles.configValue, { color: COLORS.accentEmerald }]}>Active & Synced</Text>
                   </View>
                 </View>
 
@@ -524,6 +582,14 @@ export const PartnerScreen = ({ onOpenCreate }) => {
           </View>
         </Modal>
       )}
+
+      {/* CREATE ACCOUNT (ADD ADMIN / ADD OPERATOR) MODAL */}
+      <CreateAccountModal
+        visible={isCreateOpen}
+        onClose={() => setIsCreateOpen(false)}
+        initialRole={createRole}
+        onAccountCreated={handleAccountCreated}
+      />
     </ScrollView>
   );
 };
@@ -572,18 +638,48 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     marginTop: 2,
   },
-  addBtn: {
+  actionBtnGroup: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.primary,
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  addAdminBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#8b5cf6',
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 10,
     gap: 6,
+    shadowColor: '#8b5cf6',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
   },
-  addBtnText: {
+  addAdminBtnText: {
     color: '#ffffff',
-    fontWeight: '600',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  addOperatorBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.accentEmerald,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    gap: 6,
+    shadowColor: COLORS.accentEmerald,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  addOperatorBtnText: {
+    color: '#ffffff',
+    fontWeight: '700',
     fontSize: 13,
   },
   filterRow: {
@@ -898,5 +994,37 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 13,
+  },
+
+  // Mobile card styling
+  mobileCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: COLORS.glassBorder,
+    padding: 14,
+    gap: 10,
+    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.04)',
+    elevation: 2,
+  },
+  mobileCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  mobileCardBody: {
+    backgroundColor: 'rgba(248, 250, 252, 0.8)',
+    borderRadius: 8,
+    padding: 10,
+    gap: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(226, 232, 240, 0.6)',
+  },
+  mobileCardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 2,
   },
 });

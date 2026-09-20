@@ -10,11 +10,17 @@ export const Header = ({
   onViewChange,
   onRefresh,
   onOpenCreate,
-  onOpenOnboard,
+  onOpenCreateAdmin,
+  onOpenCreateOperator,
   onToggleSidebar,
+  user,
 }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
+
+  const isOperator = user?.role === 'operator';
+  const handleAdminClick = onOpenCreateAdmin || (() => onOpenCreate && onOpenCreate('admin'));
+  const handleOperatorClick = onOpenCreateOperator || (() => onOpenCreate && onOpenCreate('operator'));
 
   return (
     <View style={[styles.headerContainer, { paddingHorizontal: isMobile ? 16 : 28 }]}>
@@ -46,17 +52,17 @@ export const Header = ({
           </TouchableOpacity>
         )}
 
-        {onOpenCreate && (
-          <TouchableOpacity style={styles.btnPrimary} onPress={onOpenCreate}>
-            <Feather name="plus" size={16} color="#fff" />
-            <Text style={styles.btnPrimaryText}>Add Partner</Text>
+        {!isOperator && (onOpenCreate || onOpenCreateAdmin) && (
+          <TouchableOpacity style={styles.btnAdmin} onPress={handleAdminClick}>
+            <Feather name="shield" size={14} color="#fff" />
+            <Text style={styles.btnAdminText}>Add Admin</Text>
           </TouchableOpacity>
         )}
 
-        {onOpenOnboard && (
-          <TouchableOpacity style={styles.btnAccent} onPress={onOpenOnboard}>
-            <Feather name="user-plus" size={16} color={COLORS.accentCyan} />
-            <Text style={styles.btnAccentText}>Onboard</Text>
+        {!isOperator && (onOpenCreate || onOpenCreateOperator) && (
+          <TouchableOpacity style={styles.btnOperator} onPress={handleOperatorClick}>
+            <Feather name="briefcase" size={14} color="#fff" />
+            <Text style={styles.btnOperatorText}>Add Operator</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -129,34 +135,32 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     backgroundColor: 'rgba(0,0,0,0.05)',
   },
-  btnPrimary: {
+  btnAdmin: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: COLORS.primary,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    backgroundColor: '#8b5cf6',
+    paddingHorizontal: 12,
+    paddingVertical: 9,
     borderRadius: 10,
     gap: 6,
   },
-  btnPrimaryText: {
+  btnAdminText: {
     color: '#ffffff',
-    fontWeight: '600',
-    fontSize: 13,
+    fontWeight: '700',
+    fontSize: 12,
   },
-  btnAccent: {
+  btnOperator: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.25)',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    backgroundColor: COLORS.accentEmerald,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
     borderRadius: 10,
     gap: 6,
   },
-  btnAccentText: {
-    color: COLORS.accentCyan,
-    fontWeight: '600',
-    fontSize: 13,
+  btnOperatorText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 12,
   },
 });

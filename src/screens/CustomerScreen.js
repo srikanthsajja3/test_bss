@@ -873,7 +873,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   style={styles.formInput}
                   value={editForm.name}
                   onChangeText={(val) => setEditForm((p) => ({ ...p, name: val }))}
-                  placeholder="e.g. Srikanth Chowdary"
                 />
               </View>
 
@@ -884,7 +883,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   value={editForm.mobile}
                   onChangeText={(val) => setEditForm((p) => ({ ...p, mobile: val }))}
                   keyboardType="phone-pad"
-                  placeholder="e.g. 9876543210"
                 />
               </View>
 
@@ -894,7 +892,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   style={styles.formInput}
                   value={editForm.plan}
                   onChangeText={(val) => setEditForm((p) => ({ ...p, plan: val }))}
-                  placeholder="e.g. Premium HD 300+ Pack or Ultra 100Mbps"
                 />
               </View>
 

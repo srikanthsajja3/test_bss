@@ -153,10 +153,7 @@ const styles = StyleSheet.create({
   },
   menuItemActive: {
     backgroundColor: COLORS.primary,
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
+    boxShadow: '0px 4px 10px rgba(16, 185, 129, 0.3)',
     elevation: 4,
   },
   menuText: {

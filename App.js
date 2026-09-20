@@ -53,6 +53,12 @@ export default function App() {
   const [customerInitialFilter, setCustomerInitialFilter] = useState(initialNav.filter);
   const [user, setUserState] = useState(getInitialUserState());
   const [isLoginVisible, setIsLoginVisible] = useState(false);
+  const [partnerCreateRole, setPartnerCreateRole] = useState(null);
+
+  const handleOpenCreateRole = (role) => {
+    setPartnerCreateRole(role);
+    setActiveTab('partners');
+  };
 
   const handleSetUser = (userData) => {
     setUserState(userData);
@@ -115,7 +121,7 @@ export default function App() {
       case 'dashboard':
         return <DashboardScreen user={user} onNavigateToCustomers={handleNavigateToCustomers} />;
       case 'partners':
-        return <PartnerScreen onOpenCreate={() => {}} user={user} />;
+        return <PartnerScreen initialCreateRole={partnerCreateRole} user={user} />;
       case 'customers':
         return <CustomerScreen user={user} isIptvMode={false} initialFilter={customerInitialFilter} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
       case 'iptv_customers':
@@ -212,9 +218,10 @@ export default function App() {
             subtitle={meta.subtitle}
             activeView={activeTab}
             onViewChange={setActiveTab}
-            onOpenCreate={() => setActiveTab('partners')}
-            onOpenOnboard={() => handleNavigateToCustomers('all')}
+            onOpenCreateAdmin={() => handleOpenCreateRole('admin')}
+            onOpenCreateOperator={() => handleOpenCreateRole('operator')}
             onToggleSidebar={toggleSidebarCollapse}
+            user={user}
           />
 
           <View style={styles.contentArea}>
@@ -299,10 +306,7 @@ const styles = StyleSheet.create({
     height: '100%',
     zIndex: 10000,
     backgroundColor: COLORS.bgSecondary,
-    shadowColor: '#000',
-    shadowOffset: { width: 4, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 15,
+    boxShadow: '4px 0px 15px rgba(0, 0, 0, 0.3)',
     elevation: 10,
   },
   main: {

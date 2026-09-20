@@ -45,7 +45,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
   const iptv = telemetry?.iptv || { total: 45, active: 42, expired: 3 };
 
   const handleCardClick = (filterKey) => {
-    if (isSuperAdmin && onNavigateToCustomers) {
+    if (onNavigateToCustomers) {
       onNavigateToCustomers(filterKey);
     }
   };
@@ -101,62 +101,9 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
     );
   }
 
-  // OPERATOR DASHBOARD
-  if (currentRole === 'operator') {
-    return (
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={[
-          styles.content,
-          { paddingHorizontal: isMobile ? 12 : 28, paddingVertical: isMobile ? 14 : 24, maxWidth: 1600, alignSelf: 'center' },
-        ]}
-      >
-        <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.pageTitle}>Operator Control Dashboard</Text>
-            <Text style={styles.pageSubtitle}>Managed Subscribers, Set-Top Boxes & Operator Wallet</Text>
-          </View>
-        </View>
+  const isOperator = currentRole === 'operator';
 
-        <View style={styles.statsGrid}>
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>MY SUBSCRIBERS</Text>
-            <Text style={styles.statValue}>142</Text>
-            <Text style={styles.statSubtext}>Active Broadband Lines</Text>
-          </View>
-
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>CONNECTED STB</Text>
-            <Text style={styles.statValue}>45</Text>
-            <Text style={styles.statSubtext}>Pioneer IPTV STBs</Text>
-          </View>
-
-          <View style={styles.statCard}>
-            <Text style={styles.statLabel}>OPERATOR WALLET</Text>
-            <Text style={styles.statValue}>₹ 4,500.00</Text>
-            <Text style={styles.statSubtext}>Allocated credit balance</Text>
-          </View>
-        </View>
-
-        <View style={[styles.card, { marginTop: 10 }]}>
-          <Text style={styles.cardTitle}>Operator Customer Channel Management (OCM)</Text>
-          <Text style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 14 }}>Enable/Disable local television channels and update LCN numbering.</Text>
-
-          {['B Channel', 'B MAX', 'B INFO', 'SIRI DIGITAL', 'HTV Movies'].map((ch, idx) => (
-            <View key={ch} style={styles.ocmRow}>
-              <Text style={styles.ocmName}>{ch}</Text>
-              <View style={styles.ocmControls}>
-                <Text style={styles.ocmLcn}>LCN #{19 + idx}</Text>
-                <View style={styles.btnDisable}><Text style={styles.btnDisableText}>Disable</Text></View>
-              </View>
-            </View>
-          ))}
-        </View>
-      </ScrollView>
-    );
-  }
-
-  // SUPER ADMIN & ADMIN DASHBOARDS
+  // SUPER ADMIN, ADMIN & OPERATOR DASHBOARDS
   return (
     <ScrollView
       style={styles.container}
@@ -168,16 +115,14 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
       {/* 7-METRIC INTERNET USER STATUS TELEMETRY GRID */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
         <Text style={styles.sectionHeaderTitle}>Internet Subscriber Telemetry & Status Breakdown</Text>
-        {isSuperAdmin && (
-          <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.primary }}>
-            ★ Super Admin Interactive Dashboard (Click any metric card to filter records)
-          </Text>
-        )}
+        <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.primary }}>
+          {isOperator ? '★ Operator Telemetry View' : '★ Interactive Telemetry Dashboard (Click any metric card to filter records)'}
+        </Text>
       </View>
 
       <View style={styles.statsGrid7}>
         {/* TOTAL USERS */}
-        {isSuperAdmin ? (
+        {!isOperator ? (
           <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('all')}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={styles.statLabel}>TOTAL USERS</Text>
@@ -193,7 +138,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         )}
 
         {/* ACTIVE USERS */}
-        {isSuperAdmin ? (
+        {!isOperator ? (
           <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('active')}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={styles.statLabel}>ACTIVE USERS</Text>
@@ -209,7 +154,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         )}
 
         {/* ONLINE USERS */}
-        {isSuperAdmin ? (
+        {!isOperator ? (
           <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('online')}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={styles.statLabel}>ONLINE USERS</Text>
@@ -225,7 +170,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         )}
 
         {/* EXPIRED USERS */}
-        {isSuperAdmin ? (
+        {!isOperator ? (
           <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('expired')}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={styles.statLabel}>EXPIRED USERS</Text>
@@ -241,7 +186,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         )}
 
         {/* SUSPENDED USERS */}
-        {isSuperAdmin ? (
+        {!isOperator ? (
           <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('suspend')}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={styles.statLabel}>SUSPENDED USERS</Text>
@@ -257,7 +202,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         )}
 
         {/* DISABLED USERS */}
-        {isSuperAdmin ? (
+        {!isOperator ? (
           <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('suspend')}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={styles.statLabel}>DISABLED USERS</Text>
@@ -273,7 +218,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         )}
 
         {/* NEW USERS */}
-        {isSuperAdmin ? (
+        {!isOperator ? (
           <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('all')}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={styles.statLabel}>NEW USERS</Text>
@@ -301,7 +246,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
 
         <View style={styles.iptvGrid}>
           {/* TOTAL IPTV USERS */}
-          {isSuperAdmin ? (
+          {!isOperator ? (
             <TouchableOpacity style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('iptv')}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={styles.iptvLabel}>TOTAL IPTV USERS</Text>
@@ -319,7 +264,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
           )}
 
           {/* ACTIVE IPTV USERS */}
-          {isSuperAdmin ? (
+          {!isOperator ? (
             <TouchableOpacity style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('iptv_active')}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={styles.iptvLabel}>ACTIVE IPTV USERS</Text>
@@ -337,7 +282,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
           )}
 
           {/* EXPIRED IPTV USERS */}
-          {isSuperAdmin ? (
+          {!isOperator ? (
             <TouchableOpacity style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('iptv_expired')}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={styles.iptvLabel}>EXPIRED IPTV USERS</Text>
