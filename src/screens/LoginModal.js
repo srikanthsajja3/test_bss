@@ -28,7 +28,7 @@ export const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
       username,
       role: selectedRole,
       partner_name: roleTitles[selectedRole] || 'User',
-      partner_id: selectedRole === 'superadmin' ? 1000 : selectedRole === 'admin' ? 1100 : selectedRole === 'operator' ? 1300 : 9999,
+      partner_id: selectedRole === 'superadmin' ? 1000 : selectedRole === 'admin' ? 1100 : selectedRole === 'operator' ? 1116 : 9999,
     });
     onClose();
   };
@@ -84,7 +84,7 @@ const styles = StyleSheet.create({
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.7)',
-    justify: 'center',
+    justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },

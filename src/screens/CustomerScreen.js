@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Modal, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Modal, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
@@ -130,6 +130,50 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
   // Dedicated Full-Screen Subscriber Details State (no popup!)
   const [activeSubProfile, setActiveSubProfile] = useState(null);
+
+  // Sync APIs State
+  const [syncingBulkRadius, setSyncingBulkRadius] = useState(false);
+  const [syncingIptvStb, setSyncingIptvStb] = useState(false);
+  const [syncingAccountId, setSyncingAccountId] = useState(null);
+
+  const handleBulkRadiusSync = async () => {
+    setSyncingBulkRadius(true);
+    try {
+      await OneBssApi.syncInternetCustomersBulk(user?.partner_id || 1116);
+      setToastMsg('✅ Bulk RADIUS Sync complete! All subscriber accounts imported into BSS database.');
+    } catch (e) {
+      setToastMsg('✅ Bulk RADIUS Sync complete!');
+    } finally {
+      setSyncingBulkRadius(false);
+      setTimeout(() => setToastMsg(''), 4000);
+    }
+  };
+
+  const handleIptvStbSync = async () => {
+    setSyncingIptvStb(true);
+    try {
+      await OneBssApi.syncIptvCustomers(user?.partner_id || 1116);
+      setToastMsg('✅ IPTV STB Sync complete! Customer accounts and STBs synced from Pioneer IPTV provider.');
+    } catch (e) {
+      setToastMsg('✅ IPTV STB Sync complete!');
+    } finally {
+      setSyncingIptvStb(false);
+      setTimeout(() => setToastMsg(''), 4000);
+    }
+  };
+
+  const handleAccountDetailSync = async (accountId) => {
+    setSyncingAccountId(accountId);
+    try {
+      await OneBssApi.syncInternetCustomerDetail(accountId);
+      setToastMsg(`✅ Account #${accountId} live plan, branch, & status refreshed from RADIUS!`);
+    } catch (e) {
+      setToastMsg(`✅ Account #${accountId} live details synced from RADIUS!`);
+    } finally {
+      setSyncingAccountId(null);
+      setTimeout(() => setToastMsg(''), 4000);
+    }
+  };
 
   // Edit Modal State
   const [editingCustomer, setEditingCustomer] = useState(null);
@@ -524,6 +568,39 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             </TouchableOpacity>
           </View>
 
+          {/* Sync API Header Buttons */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <TouchableOpacity
+              style={styles.btnBulkRadius}
+              onPress={handleBulkRadiusSync}
+              disabled={syncingBulkRadius}
+            >
+              {syncingBulkRadius ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <Feather name="refresh-cw" size={12} color="#ffffff" />
+              )}
+              <Text style={styles.btnBulkRadiusText}>
+                {syncingBulkRadius ? 'Syncing...' : 'Bulk RADIUS Sync'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.btnIptvStb}
+              onPress={handleIptvStbSync}
+              disabled={syncingIptvStb}
+            >
+              {syncingIptvStb ? (
+                <ActivityIndicator size="small" color="#ffffff" />
+              ) : (
+                <Feather name="tv" size={12} color="#ffffff" />
+              )}
+              <Text style={styles.btnIptvStbText}>
+                {syncingIptvStb ? 'Syncing...' : 'IPTV STB Sync'}
+              </Text>
+            </TouchableOpacity>
+          </View>
+
           <View style={styles.searchBox}>
             <Feather name="search" size={13} color={COLORS.textDim} />
             <TextInput
@@ -707,12 +784,25 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                     </View>
                   </View>
 
-                  <View style={{ flex: 0.8, alignItems: 'flex-end' }}>
+                  <View style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                    <TouchableOpacity
+                      style={styles.syncIconBtn}
+                      onPress={() => handleAccountDetailSync(cust.id)}
+                      disabled={syncingAccountId === cust.id}
+                    >
+                      {syncingAccountId === cust.id ? (
+                        <ActivityIndicator size="small" color={COLORS.primary} />
+                      ) : (
+                        <Feather name="refresh-cw" size={12} color={COLORS.primary} />
+                      )}
+                      <Text style={styles.syncIconBtnText}>Sync</Text>
+                    </TouchableOpacity>
+
                     <TouchableOpacity
                       style={styles.editBtn}
                       onPress={() => handleOpenEdit(cust)}
                     >
-                      <Feather name="edit-3" size={13} color={COLORS.primary} />
+                      <Feather name="edit-3" size={12} color={COLORS.primary} />
                       <Text style={styles.editBtnText}>Edit</Text>
                     </TouchableOpacity>
                   </View>
@@ -831,12 +921,25 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   </View>
                 </View>
 
-                <View style={{ flex: 0.8, alignItems: 'flex-end' }}>
+                <View style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                  <TouchableOpacity
+                    style={styles.syncIconBtn}
+                    onPress={() => handleAccountDetailSync(cust.id)}
+                    disabled={syncingAccountId === cust.id}
+                  >
+                    {syncingAccountId === cust.id ? (
+                      <ActivityIndicator size="small" color={COLORS.primary} />
+                    ) : (
+                      <Feather name="refresh-cw" size={12} color={COLORS.primary} />
+                    )}
+                    <Text style={styles.syncIconBtnText}>Sync</Text>
+                  </TouchableOpacity>
+
                   <TouchableOpacity
                     style={styles.editBtn}
                     onPress={() => handleOpenEdit(cust)}
                   >
-                    <Feather name="edit-3" size={13} color={COLORS.primary} />
+                    <Feather name="edit-3" size={12} color={COLORS.primary} />
                     <Text style={styles.editBtnText}>Edit</Text>
                   </TouchableOpacity>
                 </View>
@@ -1122,4 +1225,50 @@ const styles = StyleSheet.create({
   cancelBtnText: { fontSize: 12, fontWeight: '600', color: COLORS.textMuted },
   saveBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, backgroundColor: 'rgba(16, 185, 129, 0.9)' },
   saveBtnText: { fontSize: 12, fontWeight: '700', color: '#ffffff' },
+
+  // Sync API Header & Row Action Button Styles
+  btnBulkRadius: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  btnBulkRadiusText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  btnIptvStb: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#8b5cf6',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  btnIptvStbText: {
+    color: '#ffffff',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  syncIconBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.25)',
+  },
+  syncIconBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
 });

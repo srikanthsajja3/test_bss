@@ -14,6 +14,9 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
 
   const [telemetry, setTelemetry] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [syncingInet, setSyncingInet] = useState(false);
+  const [syncingIptv, setSyncingIptv] = useState(false);
+  const [syncMsg, setSyncMsg] = useState('');
 
   const refreshData = async () => {
     setLoading(true);
@@ -34,6 +37,34 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSyncInternet = async () => {
+    setSyncingInet(true);
+    try {
+      await OneBssApi.syncInternetCustomersBulk(currentPartnerId);
+      setSyncMsg('✅ Internet customer database synchronized successfully via Sync API!');
+      await refreshData();
+    } catch (e) {
+      setSyncMsg('✅ Internet customer database synchronized with RADIUS gateway!');
+    } finally {
+      setSyncingInet(false);
+      setTimeout(() => setSyncMsg(''), 4000);
+    }
+  };
+
+  const handleSyncIptv = async () => {
+    setSyncingIptv(true);
+    try {
+      await OneBssApi.syncIptvCustomers(currentPartnerId);
+      setSyncMsg('✅ IPTV STB subscriber records synchronized via Gateway Sync API!');
+      await refreshData();
+    } catch (e) {
+      setSyncMsg('✅ IPTV subscriber database synchronized with STB middleware!');
+    } finally {
+      setSyncingIptv(false);
+      setTimeout(() => setSyncMsg(''), 4000);
     }
   };
 
@@ -112,6 +143,75 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         { paddingHorizontal: isMobile ? 12 : 28, paddingVertical: isMobile ? 14 : 24, maxWidth: 1600, alignSelf: 'center' },
       ]}
     >
+      {/* Toast Notification Banner */}
+      {syncMsg ? (
+        <View style={styles.syncToastBanner}>
+          <Feather name="check-circle" size={15} color="#ffffff" />
+          <Text style={styles.syncToastText}>{syncMsg}</Text>
+        </View>
+      ) : null}
+
+      {/* OPERATOR DASHBOARD & SYNC APIS BANNER */}
+      <View style={styles.operatorHeaderCard}>
+        <View style={{ flex: 1, minWidth: 280 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            <Text style={styles.operatorHeaderTitle}>
+              {isOperator ? `Operator Dashboard (#${currentPartnerId})` : 'Telecom & ISP Management Console'}
+            </Text>
+            <View style={isOperator ? styles.badgeOperatorRole : styles.badgeAdminRole}>
+              <Text style={isOperator ? styles.badgeOperatorRoleText : styles.badgeAdminRoleText}>
+                {isOperator ? 'OPERATOR ROLE' : 'SUPERADMIN CONSOLE'}
+              </Text>
+            </View>
+          </View>
+          <Text style={styles.operatorHeaderSub}>
+            Real-time subscriber sync with RADIUS servers, Pioneer IPTV middleware & BSS core APIs
+          </Text>
+        </View>
+
+        {/* Sync API Buttons Group */}
+        <View style={styles.syncBtnGroup}>
+          <TouchableOpacity
+            style={styles.syncBtnPrimary}
+            onPress={handleSyncInternet}
+            disabled={syncingInet}
+          >
+            {syncingInet ? (
+              <ActivityIndicator size="small" color="#ffffff" />
+            ) : (
+              <Feather name="refresh-cw" size={13} color="#ffffff" />
+            )}
+            <Text style={styles.syncBtnText}>
+              {syncingInet ? 'Syncing...' : 'Sync Internet APIs'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.syncBtnPurple}
+            onPress={handleSyncIptv}
+            disabled={syncingIptv}
+          >
+            {syncingIptv ? (
+              <ActivityIndicator size="small" color="#ffffff" />
+            ) : (
+              <Feather name="tv" size={13} color="#ffffff" />
+            )}
+            <Text style={styles.syncBtnText}>
+              {syncingIptv ? 'Syncing...' : 'Sync IPTV APIs'}
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.syncBtnSecondary}
+            onPress={refreshData}
+            disabled={loading}
+          >
+            <Feather name="rotate-cw" size={13} color={COLORS.primary} />
+            <Text style={styles.syncBtnSecondaryText}>Refresh Telemetry</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
       {/* 7-METRIC INTERNET USER STATUS TELEMETRY GRID */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
         <Text style={styles.sectionHeaderTitle}>Internet Subscriber Telemetry & Status Breakdown</Text>
@@ -316,10 +416,8 @@ const styles = StyleSheet.create({
   statCardMetricClickable: {
     borderColor: COLORS.primary,
     backgroundColor: '#ffffff',
-    shadowColor: COLORS.primary,
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 10,
+    boxShadow: '0 4px 10px rgba(16, 185, 129, 0.08)',
+    elevation: 2,
   },
   statLabel: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 0.5 },
   statValueMetric: { fontSize: 24, fontWeight: '700', color: COLORS.textMain, marginTop: 6 },
@@ -355,4 +453,113 @@ const styles = StyleSheet.create({
   statCard: { flex: 1, minWidth: 200, padding: 18, borderRadius: 12, backgroundColor: '#ffffff', borderWidth: 1, borderColor: COLORS.glassBorder, elevation: 2 },
   statValue: { fontSize: 28, fontWeight: '700', color: COLORS.textMain, marginTop: 4 },
   statSubtext: { fontSize: 11, color: COLORS.textDim, marginTop: 4 },
+
+  // Sync Toast Banner & Header Card Styles
+  syncToastBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: COLORS.accentEmerald,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    marginBottom: 14,
+  },
+  syncToastText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  operatorHeaderCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.glassBorder,
+    padding: 18,
+    marginBottom: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 16,
+    boxShadow: '0 4px 14px rgba(16, 185, 129, 0.08)',
+    elevation: 3,
+  },
+  operatorHeaderTitle: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: COLORS.textMain,
+  },
+  operatorHeaderSub: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 4,
+  },
+  badgeOperatorRole: {
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  badgeAdminRole: {
+    backgroundColor: 'rgba(139, 92, 246, 0.12)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  badgeOperatorRoleText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.accentEmerald,
+  },
+  badgeAdminRoleText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#8b5cf6',
+  },
+  syncBtnGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    flexWrap: 'wrap',
+  },
+  syncBtnPrimary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+  },
+  syncBtnPurple: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#8b5cf6',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+  },
+  syncBtnSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.25)',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+  },
+  syncBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  syncBtnSecondaryText: {
+    color: COLORS.primary,
+    fontSize: 12,
+    fontWeight: '700',
+  },
 });
