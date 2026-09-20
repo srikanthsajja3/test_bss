@@ -1207,7 +1207,7 @@ const styles = StyleSheet.create({
 
   // Form Modal Styles
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 },
-  modalCard: { width: '100%', maxWidth: 480, backgroundColor: '#ffffff', borderRadius: 14, padding: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.15, shadowRadius: 10 },
+  modalCard: { width: '100%', maxWidth: 480, backgroundColor: '#ffffff', borderRadius: 14, padding: 20, boxShadow: '0 4px 10px rgba(0, 0, 0, 0.15)', elevation: 5 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   modalTitle: { fontSize: 16, fontWeight: '700', color: COLORS.textMain },
   modalSub: { fontSize: 11, color: COLORS.textMuted, marginBottom: 16 },
