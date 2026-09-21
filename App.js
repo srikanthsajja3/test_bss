@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { StyleSheet, View, SafeAreaView, StatusBar, useWindowDimensions, Text, TouchableOpacity } from 'react-native';
 import { COLORS } from './src/constants/theme';
+import { setApiConfig } from './src/services/oneBssApi';
 import { Sidebar } from './src/components/Sidebar';
 import { Header } from './src/components/Header';
 import { DashboardScreen } from './src/screens/DashboardScreen';
@@ -21,13 +22,13 @@ export default function App() {
         const hash = window.location.hash.replace('#', '');
         if (hash) {
           const [tab, filter] = hash.split('?filter=');
-          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'apiConsole', 'login'].includes(tab)) {
+          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'apiConsole'].includes(tab)) {
             return { tab, filter: filter || 'all' };
           }
         }
         const savedTab = localStorage.getItem('onebss_active_tab');
         const savedFilter = localStorage.getItem('onebss_filter');
-        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'apiConsole', 'login'].includes(savedTab)) {
+        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'apiConsole'].includes(savedTab)) {
           return { tab: savedTab, filter: savedFilter || 'all' };
         }
       }
@@ -40,11 +41,14 @@ export default function App() {
     try {
       if (typeof window !== 'undefined') {
         const savedUser = localStorage.getItem('onebss_user');
+        const savedToken = localStorage.getItem('onebss_token');
         if (savedUser) {
           const parsed = JSON.parse(savedUser);
-          if (parsed && parsed.role) {
-            if (parsed.token) {
-              setApiConfig(undefined, parsed.token);
+          if (parsed && (parsed.role || parsed.partner_id)) {
+            const token = parsed.token || savedToken;
+            if (token) {
+              parsed.token = token;
+              setApiConfig(undefined, token);
             }
             return parsed;
           }
@@ -144,8 +148,8 @@ export default function App() {
     }
   };
 
-  // If user is not logged in or navigated to login tab, render full screen LoginScreen
-  if (!user || activeTab === 'login') {
+  // If user is not logged in, render full screen LoginScreen
+  if (!user) {
     return (
       <SafeAreaView style={styles.container}>
         <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
@@ -180,19 +184,19 @@ export default function App() {
     switch (activeTab) {
       case 'dashboard':
         return {
-          title: `${user.role.toUpperCase()} Dashboard`,
-          subtitle: `Logged in as ${user.partner_name} (ID: #${user.partner_id || 1000})`,
+          title: 'Dashboard',
+          subtitle: `${user.partner_name || 'Account'} (#${user.partner_id || 1000})`,
         };
       case 'partners':
-        return { title: 'Partner & Gateway Management', subtitle: 'RADIUS & IPTV Operator Bindings & Parent Admin Hierarchy' };
+        return { title: 'Partners', subtitle: 'Gateway Bindings & Hierarchy' };
       case 'customers':
-        return { title: 'Subscriber Management', subtitle: 'RADIUS Broadband & Pioneer IPTV STB Accounts' };
+        return { title: 'Subscribers', subtitle: 'Internet & IPTV Accounts' };
       case 'iptv_customers':
-        return { title: 'Pioneer IPTV STB Telemetry & Management', subtitle: '45 Pioneer STB Accounts, CAS Pairing & Channel Packages' };
+        return { title: 'IPTV Subscribers', subtitle: 'STB Accounts & Packages' };
       case 'apiConsole':
-        return { title: '28-Endpoint API Verification Suite', subtitle: 'Complete Postman Manual Test Runner' };
+        return { title: 'API Console', subtitle: 'Test Suite' };
       default:
-        return { title: 'OneBSS Platform', subtitle: 'Broadband & IPTV BSS Engine' };
+        return { title: 'OneBSS Platform', subtitle: 'Management Portal' };
     }
   };
 
@@ -202,16 +206,6 @@ export default function App() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
 
-      {/* Role Persona Quick Switcher Banner */}
-      <View style={styles.roleBanner}>
-        <Text style={styles.roleBannerText}>
-          ACTIVE ROLE PERSONA: <Text style={{ fontWeight: '800', color: COLORS.primary }}>{user.role.toUpperCase()}</Text> ({user.partner_name})
-        </Text>
-        <TouchableOpacity style={styles.switchRoleBtn} onPress={handleLogout}>
-          <Text style={styles.switchRoleBtnText}>Sign Out / Switch Account</Text>
-        </TouchableOpacity>
-      </View>
-      
       <View style={styles.layout}>
         {/* Desktop Sidebar (Inline flex layout) */}
         {isDesktop && (

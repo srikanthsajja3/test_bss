@@ -25,7 +25,7 @@ export const Header = ({
   return (
     <View style={[styles.headerContainer, { paddingHorizontal: isMobile ? 16 : 28 }]}>
       <View style={styles.titleSection}>
-        {onToggleSidebar && (
+        {isMobile && onToggleSidebar && (
           <TouchableOpacity style={styles.hamburgerBtn} onPress={onToggleSidebar}>
             <Feather name="menu" size={20} color={COLORS.textMain} />
           </TouchableOpacity>
@@ -46,25 +46,25 @@ export const Header = ({
           </View>
         </View>
 
-        {onRefresh && (
-          <TouchableOpacity style={styles.iconBtn} onPress={onRefresh} title="Refresh Telemetry">
+        {onRefresh ? (
+          <TouchableOpacity style={styles.iconBtn} onPress={onRefresh} title="Refresh">
             <Feather name="refresh-cw" size={16} color={COLORS.textMain} />
           </TouchableOpacity>
-        )}
+        ) : null}
 
-        {!isOperator && (onOpenCreate || onOpenCreateAdmin) && (
+        {!isOperator && (onOpenCreate || onOpenCreateAdmin) ? (
           <TouchableOpacity style={styles.btnAdmin} onPress={handleAdminClick}>
             <Feather name="shield" size={14} color="#fff" />
             <Text style={styles.btnAdminText}>Add Admin</Text>
           </TouchableOpacity>
-        )}
+        ) : null}
 
-        {!isOperator && (onOpenCreate || onOpenCreateOperator) && (
+        {!isOperator && (onOpenCreate || onOpenCreateOperator) ? (
           <TouchableOpacity style={styles.btnOperator} onPress={handleOperatorClick}>
             <Feather name="briefcase" size={14} color="#fff" />
             <Text style={styles.btnOperatorText}>Add Operator</Text>
           </TouchableOpacity>
-        )}
+        ) : null}
       </View>
     </View>
   );

@@ -158,7 +158,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     setSyncingIptvStb(true);
     try {
       if (user?.token) setApiConfig(undefined, user.token);
-      const res = await OneBssApi.syncIptvCustomers(user?.partner_id || 1116);
+      const res = await OneBssApi.syncIptvCustomers('9125253535');
       const data = res.data || {};
 
       if (res.status === 403 || data.success === false) {
@@ -170,7 +170,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         setToastMsg(`✅ ${data.message || 'IPTV STB Sync complete!'}`);
       }
     } catch (e) {
-      setToastMsg('✅ IPTV STB Sync complete!');
+      setToastMsg('❌ IPTV STB Sync failed.');
     } finally {
       setSyncingIptvStb(false);
       setTimeout(() => setToastMsg(''), 5000);
@@ -202,6 +202,43 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       setSyncingAccountIds((prev) => {
         const next = { ...prev };
         delete next[accountId];
+        return next;
+      });
+      if (!silent) {
+        setTimeout(() => setToastMsg(''), 5000);
+      }
+    }
+  };
+
+  const handleIptvCustomerDetailSync = async (cust, silent = false) => {
+    if (!cust) return;
+    const rawMobile = cust.mobile || '';
+    const digitsOnly = String(rawMobile).replace(/\D/g, '');
+    const targetMobile = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : '9125253535';
+    setSyncingAccountIds((prev) => ({ ...prev, [cust.id]: true }));
+    try {
+      if (user?.token) setApiConfig(undefined, user.token);
+      const res = await OneBssApi.syncIptvCustomers(targetMobile);
+      const data = res.data || {};
+
+      if (!silent) {
+        if (data.success === false) {
+          setToastMsg(`❌ IPTV STB Sync: ${data.message || 'Provider sync failed.'}`);
+        } else if (data.summary) {
+          const s = data.summary;
+          setToastMsg(`✅ IPTV STB Sync Complete for ${cust.name}! STBs Added: ${s.stbs_added || 0}, Skipped: ${s.stbs_skipped || 0}`);
+        } else {
+          setToastMsg(`✅ IPTV STB Sync Complete for ${cust.name}! ${data.message || 'IPTV STB synced.'}`);
+        }
+      }
+    } catch (e) {
+      if (!silent) {
+        setToastMsg(`❌ IPTV STB Sync failed for ${cust.name}.`);
+      }
+    } finally {
+      setSyncingAccountIds((prev) => {
+        const next = { ...prev };
+        delete next[cust.id];
         return next;
       });
       if (!silent) {
@@ -293,7 +330,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     if (onAutoCloseSidebar) {
       onAutoCloseSidebar();
     }
-    if (cust?.internet_id) {
+    if (viewMode === 'iptv' || cust?.id?.startsWith('iptv_')) {
+      handleIptvCustomerDetailSync(cust, true);
+    } else if (cust?.internet_id) {
       handleAccountDetailSync(cust.internet_id, true);
     }
   };
@@ -374,10 +413,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         contentContainerStyle={[
           styles.content,
           {
-            paddingHorizontal: isMobile ? 12 : 28,
+            paddingHorizontal: isMobile ? 12 : 24,
             paddingVertical: isMobile ? 14 : 24,
-            maxWidth: 1600,
-            alignSelf: 'center',
+            width: '100%',
           },
         ]}
       >
@@ -567,10 +605,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       contentContainerStyle={[
         styles.content,
         {
-          paddingHorizontal: isMobile ? 12 : 28,
+          paddingHorizontal: isMobile ? 12 : 24,
           paddingVertical: isMobile ? 14 : 24,
-          maxWidth: 1600,
-          alignSelf: 'center',
+          width: '100%',
         },
       ]}
     >
@@ -703,12 +740,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
       {/* SERVICE DATA DISPLAY TABLE */}
       <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <Text style={styles.cardTitle}>
-            {viewMode === 'iptv' ? 'Pioneer IPTV Set-Top Box Records' : 'Internet Session & Subscriber Records'}{' '}
-            ({filteredCustomers.length} Accounts Displayed)
-          </Text>
-        </View>
 
         {isMobile ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>

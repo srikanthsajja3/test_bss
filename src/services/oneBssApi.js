@@ -332,10 +332,10 @@ export const OneBssApi = {
     return request(`/internet_customer_detail_sync.php?internet_id=${numericId}`, { method: 'POST' });
   },
 
-  syncIptvCustomers: async (partnerId = 1116, mobile = '9876543210') => {
+  syncIptvCustomers: async (mobile = '9125253535') => {
     return request('/iptv_customer_sync.php', {
       method: 'POST',
-      body: JSON.stringify({ partner_id: partnerId, mobile }),
+      body: JSON.stringify({ mobile: String(mobile) }),
     });
   },
 

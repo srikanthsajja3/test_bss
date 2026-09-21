@@ -69,17 +69,17 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
     setSyncingIptv(true);
     try {
       if (user?.token) setApiConfig(undefined, user.token);
-      const res = await OneBssApi.syncIptvCustomers(currentPartnerId, user?.mobile || '9876543210');
+      const res = await OneBssApi.syncIptvCustomers(user?.mobile || '9125253535');
       const data = res.data || {};
 
       if (res.status === 502 || data.success === false) {
-        setSyncMsg(`⚠️ IPTV STB Sync: ${data.message || 'Pioneer IPTV STB Gateway requires external middleware configuration.'}`);
+        setSyncMsg(`⚠️ IPTV STB Sync: ${data.message || 'Pioneer IPTV STB Gateway returned an error.'}`);
       } else {
-        setSyncMsg('✅ IPTV STB subscriber records synchronized via Gateway Sync API!');
+        setSyncMsg(`✅ IPTV STB subscriber records synchronized via Gateway Sync API!`);
         await refreshData();
       }
     } catch (e) {
-      setSyncMsg('✅ IPTV subscriber database synchronized with STB middleware!');
+      setSyncMsg('❌ IPTV subscriber sync failed.');
     } finally {
       setSyncingIptv(false);
       setTimeout(() => setSyncMsg(''), 5000);
@@ -117,7 +117,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         style={styles.container}
         contentContainerStyle={[
           styles.content,
-          { paddingHorizontal: isMobile ? 12 : 28, paddingVertical: isMobile ? 14 : 24, maxWidth: 1600, alignSelf: 'center' },
+          { paddingHorizontal: isMobile ? 12 : 24, paddingVertical: isMobile ? 14 : 24, width: '100%' },
         ]}
       >
         <View style={styles.headerRow}>
@@ -169,7 +169,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
       style={styles.container}
       contentContainerStyle={[
         styles.content,
-        { paddingHorizontal: isMobile ? 12 : 28, paddingVertical: isMobile ? 14 : 24, maxWidth: 1600, alignSelf: 'center' },
+        { paddingHorizontal: isMobile ? 12 : 24, paddingVertical: isMobile ? 14 : 24, width: '100%' },
       ]}
     >
       {/* Toast Notification Banner */}
@@ -180,24 +180,8 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         </View>
       ) : null}
 
-      {/* OPERATOR DASHBOARD & SYNC APIS BANNER */}
+      {/* SYNC ACTIONS CONTROL BAR */}
       <View style={styles.operatorHeaderCard}>
-        <View style={{ flex: 1, minWidth: 280 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <Text style={styles.operatorHeaderTitle}>
-              {isOperator ? `Operator Dashboard (#${currentPartnerId})` : 'Telecom & ISP Management Console'}
-            </Text>
-            <View style={isOperator ? styles.badgeOperatorRole : styles.badgeAdminRole}>
-              <Text style={isOperator ? styles.badgeOperatorRoleText : styles.badgeAdminRoleText}>
-                {isOperator ? 'OPERATOR ROLE' : 'SUPERADMIN CONSOLE'}
-              </Text>
-            </View>
-          </View>
-          <Text style={styles.operatorHeaderSub}>
-            Real-time subscriber sync with RADIUS servers, Pioneer IPTV middleware & BSS core APIs
-          </Text>
-        </View>
-
         {/* Sync API Buttons Group */}
         <View style={styles.syncBtnGroup}>
           <TouchableOpacity
@@ -211,7 +195,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
               <Feather name="refresh-cw" size={13} color="#ffffff" />
             )}
             <Text style={styles.syncBtnText}>
-              {syncingInet ? 'Syncing...' : 'Sync Internet APIs'}
+              {syncingInet ? 'Syncing...' : 'Sync Internet'}
             </Text>
           </TouchableOpacity>
 
@@ -226,7 +210,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
               <Feather name="tv" size={13} color="#ffffff" />
             )}
             <Text style={styles.syncBtnText}>
-              {syncingIptv ? 'Syncing...' : 'Sync IPTV APIs'}
+              {syncingIptv ? 'Syncing...' : 'Sync IPTV'}
             </Text>
           </TouchableOpacity>
 
@@ -236,17 +220,14 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
             disabled={loading}
           >
             <Feather name="rotate-cw" size={13} color={COLORS.primary} />
-            <Text style={styles.syncBtnSecondaryText}>Refresh Telemetry</Text>
+            <Text style={styles.syncBtnSecondaryText}>Refresh</Text>
           </TouchableOpacity>
         </View>
       </View>
 
-      {/* 7-METRIC INTERNET USER STATUS TELEMETRY GRID */}
+      {/* INTERNET TELEMETRY GRID */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-        <Text style={styles.sectionHeaderTitle}>Internet Subscriber Telemetry & Status Breakdown</Text>
-        <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.primary }}>
-          {isOperator ? '★ Operator Telemetry View' : '★ Interactive Telemetry Dashboard (Click any metric card to filter records)'}
-        </Text>
+        <Text style={styles.sectionHeaderTitle}>Subscriber Telemetry</Text>
       </View>
 
       <View style={styles.statsGrid7}>
@@ -363,13 +344,12 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         )}
       </View>
 
-      {/* PIONEER IPTV TELEMETRY DATA CARD */}
+      {/* IPTV TELEMETRY DATA CARD */}
       <View style={[styles.card, GLASS_CARD_INTERACTIVE]}>
         <View style={styles.cardHeader}>
           <MaterialIcons name="live-tv" size={24} color="#8b5cf6" />
           <View style={{ marginLeft: 10, flex: 1 }}>
-            <Text style={styles.cardTitle}>Pioneer IPTV STB Telemetry</Text>
-            <Text style={styles.cardSubtitle}>Real-time metrics from Pioneer IPTV Set-Top Box Provider</Text>
+            <Text style={styles.cardTitle}>IPTV Telemetry</Text>
           </View>
         </View>
 
@@ -382,13 +362,11 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
                 <Feather name="arrow-up-right" size={13} color="#8b5cf6" />
               </View>
               <Text style={styles.iptvVal}>{iptv.total}</Text>
-              <View style={styles.badgeInfo}><Text style={styles.badgeInfoText}>{iptv.total} Total STBs</Text></View>
             </TouchableOpacity>
           ) : (
             <View style={styles.iptvCard}>
               <Text style={styles.iptvLabel}>TOTAL IPTV USERS</Text>
               <Text style={styles.iptvVal}>{iptv.total}</Text>
-              <View style={styles.badgeInfo}><Text style={styles.badgeInfoText}>{iptv.total} Total STBs</Text></View>
             </View>
           )}
 
@@ -400,13 +378,11 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
                 <Feather name="arrow-up-right" size={13} color={COLORS.accentEmerald} />
               </View>
               <Text style={[styles.iptvVal, { color: COLORS.accentEmerald }]}>{iptv.active}</Text>
-              <View style={styles.badgeActive}><Text style={styles.badgeActiveText}>{iptv.active} Active STBs</Text></View>
             </TouchableOpacity>
           ) : (
             <View style={styles.iptvCard}>
               <Text style={styles.iptvLabel}>ACTIVE IPTV USERS</Text>
               <Text style={[styles.iptvVal, { color: COLORS.accentEmerald }]}>{iptv.active}</Text>
-              <View style={styles.badgeActive}><Text style={styles.badgeActiveText}>{iptv.active} Active STBs</Text></View>
             </View>
           )}
 
@@ -418,13 +394,11 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
                 <Feather name="arrow-up-right" size={13} color={COLORS.accentRose} />
               </View>
               <Text style={[styles.iptvVal, { color: COLORS.accentRose }]}>{iptv.expired}</Text>
-              <View style={styles.badgeExpired}><Text style={styles.badgeExpiredText}>{iptv.expired} Expired STBs</Text></View>
             </TouchableOpacity>
           ) : (
             <View style={styles.iptvCard}>
               <Text style={styles.iptvLabel}>EXPIRED IPTV USERS</Text>
               <Text style={[styles.iptvVal, { color: COLORS.accentRose }]}>{iptv.expired}</Text>
-              <View style={styles.badgeExpired}><Text style={styles.badgeExpiredText}>{iptv.expired} Expired STBs</Text></View>
             </View>
           )}
         </View>

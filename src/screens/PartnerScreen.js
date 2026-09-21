@@ -103,10 +103,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       contentContainerStyle={[
         styles.content,
         {
-          paddingHorizontal: isMobile ? 12 : 28,
+          paddingHorizontal: isMobile ? 12 : 24,
           paddingVertical: isMobile ? 14 : 24,
-          maxWidth: 1600,
-          alignSelf: 'center',
+          width: '100%',
         },
       ]}
     >

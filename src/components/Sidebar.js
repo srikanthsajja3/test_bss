@@ -4,13 +4,19 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 
 export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, onToggleCollapse, onMouseEnter, onMouseLeave }) => {
-  const menuItems = [
-    { id: 'dashboard', label: 'Dashboard & Telemetry', icon: 'grid' },
-    { id: 'customers', label: 'Subscriber Management', icon: 'users' },
-    { id: 'partners', label: 'Partners & Gateways', icon: 'briefcase' },
-    { id: 'apiConsole', label: '28-API Test Suite', icon: 'terminal' },
-    { id: 'login', label: 'Login & Roles', icon: 'log-in' },
-  ];
+  const isOperator = user?.role === 'operator';
+  const menuItems = isOperator
+    ? [
+        { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
+        { id: 'customers', label: 'Subscribers', icon: 'users' },
+      ]
+    : [
+        { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
+        { id: 'customers', label: 'Subscribers', icon: 'users' },
+        { id: 'partners', label: 'Partners', icon: 'briefcase' },
+        { id: 'apiConsole', label: 'API Console', icon: 'terminal' },
+        { id: 'login', label: 'Login', icon: 'log-in' },
+      ];
 
   return (
     <View 
@@ -25,7 +31,6 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
           {!isCollapsed && (
             <View style={{ marginLeft: 8 }}>
               <Text style={styles.logoText}>OneBSS</Text>
-              <Text style={styles.logoSubtext}>TELECOM BSS ENGINE</Text>
             </View>
           )}
         </View>
