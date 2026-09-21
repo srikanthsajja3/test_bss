@@ -77,9 +77,9 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
           {!isCollapsed && (
             <View style={{ flex: 1, marginLeft: 10 }}>
               <Text style={styles.username} numberOfLines={1}>
-                {user?.partner_name || 'Admin'}
+                {user?.partner_name || user?.username || 'Operator Account'}
               </Text>
-              <Text style={styles.userrole}>{user?.role || 'SuperAdmin'}</Text>
+              <Text style={styles.userrole}>{user?.role ? user.role.toUpperCase() : 'OPERATOR'}</Text>
             </View>
           )}
 

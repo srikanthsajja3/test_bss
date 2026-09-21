@@ -3,12 +3,19 @@
 
 let BASE_URL = 'https://demo.onebss.in/b_bss';
 let FALLBACK_URL = 'https://demo.onebss.in/b_bss';
-let AUTH_TOKEN = 'token_onebss_authenticated_session_2026';
+let AUTH_TOKEN = '';
 
 export const getApiConfig = () => ({ baseUrl: BASE_URL, authToken: AUTH_TOKEN });
 export const setApiConfig = (url, token) => {
   if (url) BASE_URL = url;
-  if (token !== undefined) AUTH_TOKEN = token;
+  if (token) {
+    AUTH_TOKEN = token;
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('onebss_token', token);
+      }
+    } catch (e) {}
+  }
 };
 
 // In-Memory Hierarchical Partners Store
@@ -24,21 +31,21 @@ let HIERARCHY_PARTNERS = [
 ];
 
 const getActiveToken = () => {
-  if (AUTH_TOKEN && AUTH_TOKEN.length > 10 && !AUTH_TOKEN.includes('token_onebss_authenticated_session')) {
-    return AUTH_TOKEN;
+  if (AUTH_TOKEN && AUTH_TOKEN.length > 10) {
+    return AUTH_TOKEN.trim();
   }
   try {
     if (typeof window !== 'undefined') {
       const savedToken = localStorage.getItem('onebss_token');
-      if (savedToken) return savedToken;
+      if (savedToken && savedToken.length > 10) return savedToken.trim();
       const savedUser = localStorage.getItem('onebss_user');
       if (savedUser) {
         const u = JSON.parse(savedUser);
-        if (u?.token) return u.token;
+        if (u?.token && u.token.length > 10) return u.token.trim();
       }
     }
   } catch (e) {}
-  return AUTH_TOKEN;
+  return AUTH_TOKEN ? AUTH_TOKEN.trim() : '';
 };
 
 const request = async (endpoint, options = {}) => {
@@ -215,10 +222,16 @@ export const OneBssApi = {
   getPartners: async (search = '', status = '', page = 1, limit = 20) => {
     const query = `search=${encodeURIComponent(search)}&status=${encodeURIComponent(status)}&limit=${limit}&page=${page}`;
     const res = await request(`/partner.php?${query}`, { method: 'GET' });
+    if (res.data && res.data.success && Array.isArray(res.data.data)) {
+      return { ok: true, status: 200, data: res.data.data };
+    }
+    if (res.data && res.data.success && res.data.data && typeof res.data.data === 'object' && !Array.isArray(res.data.data)) {
+      return { ok: true, status: 200, data: [res.data.data] };
+    }
     if (res.data && Array.isArray(res.data)) {
       return res;
     }
-    return { ok: true, status: 200, data: HIERARCHY_PARTNERS };
+    return res;
   },
 
   getPartnerById: async (partnerId) => {
@@ -330,6 +343,13 @@ export const OneBssApi = {
   },
 
   // Module 6 & 7: Customer Management & Provisioning
+  getCustomersList: async (page = 1, limit = 100, type = '', search = '') => {
+    let query = `page=${page}&limit=${limit}`;
+    if (type) query += `&type=${encodeURIComponent(type)}`;
+    if (search) query += `&search=${encodeURIComponent(search)}`;
+    return request(`/customers_list.php?${query}`, { method: 'GET' });
+  },
+
   customerLookup: async (mobile = '9000000001') => {
     return request(`/customer_lookup.php?mobile=${mobile}`, { method: 'GET' });
   },

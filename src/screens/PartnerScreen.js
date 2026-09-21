@@ -40,106 +40,13 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     setLoading(true);
     try {
       const res = await OneBssApi.getPartners(search, selectedRole);
-      if (res.data && Array.isArray(res.data) && res.data.length > 0) {
+      if (res.data && Array.isArray(res.data)) {
         setPartners(res.data);
       } else {
-        setPartners([
-          {
-            partner_id: 1116,
-            partner_name: 'Airtel Broadband Ltd',
-            company_name: 'Bharti Airtel Ltd',
-            partner_mobile: '9876543210',
-            partner_email: 'support@airtel.in',
-            account_role: 'operator',
-            status: 'enabled',
-            nas_ip: '192.168.10.250',
-            shared_secret: 'AirtelRadSecret2026',
-            iptv_gateway: 'https://iptv-airtel.onebss.io/api/v1',
-            active_sessions: 4821,
-          },
-          {
-            partner_id: 1117,
-            partner_name: 'Jio Digital Fibre',
-            company_name: 'Reliance Jio Infocomm',
-            partner_mobile: '9123456789',
-            partner_email: 'care@jio.com',
-            account_role: 'admin',
-            status: 'enabled',
-            nas_ip: '10.200.4.15',
-            shared_secret: 'JioFibreSecret99',
-            iptv_gateway: 'https://iptv-jio.onebss.io/api/v1',
-            active_sessions: 8940,
-          },
-          {
-            partner_id: 1118,
-            partner_name: 'Act Fibernet',
-            company_name: 'Atria Convergence Tech',
-            partner_mobile: '9988776655',
-            partner_email: 'act@fibernet.in',
-            account_role: 'operator',
-            status: 'disabled',
-            nas_ip: '172.16.88.2',
-            shared_secret: 'ActRadSecured77',
-            iptv_gateway: 'https://iptv-act.onebss.io/api/v1',
-            active_sessions: 0,
-          },
-          {
-            partner_id: 1119,
-            partner_name: 'Hathway Cable & Datacom',
-            company_name: 'Hathway Digital Ltd',
-            partner_mobile: '9765432109',
-            partner_email: 'admin@hathway.net',
-            account_role: 'operator',
-            status: 'enabled',
-            nas_ip: '10.10.150.12',
-            shared_secret: 'HathwayNasKey33',
-            iptv_gateway: 'https://iptv-hathway.onebss.io/api/v1',
-            active_sessions: 1420,
-          },
-          {
-            partner_id: 1120,
-            partner_name: 'Tata Play Fiber',
-            company_name: 'Tata Play Broadband',
-            partner_mobile: '9654321098',
-            partner_email: 'fiber@tataplay.com',
-            account_role: 'operator',
-            status: 'enabled',
-            nas_ip: '192.168.44.100',
-            shared_secret: 'TataPlayRadSecured',
-            iptv_gateway: 'https://iptv-tataplay.onebss.io/api/v1',
-            active_sessions: 3105,
-          },
-        ]);
+        setPartners([]);
       }
     } catch (e) {
-      setPartners([
-        {
-          partner_id: 1116,
-          partner_name: 'Airtel Broadband Ltd',
-          company_name: 'Bharti Airtel Ltd',
-          partner_mobile: '9876543210',
-          partner_email: 'support@airtel.in',
-          account_role: 'operator',
-          status: 'enabled',
-          nas_ip: '192.168.10.250',
-          shared_secret: 'AirtelRadSecret2026',
-          iptv_gateway: 'https://iptv-airtel.onebss.io/api/v1',
-          active_sessions: 4821,
-        },
-        {
-          partner_id: 1117,
-          partner_name: 'Jio Digital Fibre',
-          company_name: 'Reliance Jio Infocomm',
-          partner_mobile: '9123456789',
-          partner_email: 'care@jio.com',
-          account_role: 'admin',
-          status: 'enabled',
-          nas_ip: '10.200.4.15',
-          shared_secret: 'JioFibreSecret99',
-          iptv_gateway: 'https://iptv-jio.onebss.io/api/v1',
-          active_sessions: 8940,
-        },
-      ]);
+      setPartners([]);
     } finally {
       setLoading(false);
     }
