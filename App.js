@@ -42,7 +42,12 @@ export default function App() {
         const savedUser = localStorage.getItem('onebss_user');
         if (savedUser) {
           const parsed = JSON.parse(savedUser);
-          if (parsed && parsed.role) return parsed;
+          if (parsed && parsed.role) {
+            if (parsed.token) {
+              setApiConfig(undefined, parsed.token);
+            }
+            return parsed;
+          }
         }
       }
     } catch (e) {}
@@ -65,9 +70,16 @@ export default function App() {
     setUserState(userData);
     try {
       if (typeof window !== 'undefined') {
-        localStorage.setItem('onebss_user', JSON.stringify(userData));
-        if (userData?.token) {
-          localStorage.setItem('onebss_token', userData.token);
+        if (userData) {
+          localStorage.setItem('onebss_user', JSON.stringify(userData));
+          if (userData.token) {
+            localStorage.setItem('onebss_token', userData.token);
+            setApiConfig(undefined, userData.token);
+          }
+        } else {
+          localStorage.removeItem('onebss_user');
+          localStorage.removeItem('onebss_token');
+          setApiConfig(undefined, '');
         }
       }
     } catch (e) {}
