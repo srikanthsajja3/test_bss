@@ -12,6 +12,8 @@ const mapCustomersListToBroadbandRow = (item, index) => {
 
   return {
     id: String(item.cust_id || index + 1),
+    cust_id: item.cust_id,
+    internet_id: intAcc.internet_id || null,
     name: item.full_name || `Subscriber #${item.cust_id}`,
     mobile: item.mobile || '9876543210',
     username: intAcc.username || item.email || `+91${item.mobile}`,
@@ -291,8 +293,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     if (onAutoCloseSidebar) {
       onAutoCloseSidebar();
     }
-    if (cust?.id) {
-      handleAccountDetailSync(cust.id, true);
+    if (cust?.internet_id) {
+      handleAccountDetailSync(cust.internet_id, true);
     }
   };
 
