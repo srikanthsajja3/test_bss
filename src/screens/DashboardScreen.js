@@ -103,9 +103,6 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 40 }]}>
         <ActivityIndicator size="large" color={COLORS.primary} />
-        <Text style={{ marginTop: 14, color: COLORS.textMuted, fontSize: 13, fontWeight: '600' }}>
-          Loading live telemetry metrics from backend API...
-        </Text>
       </View>
     );
   }
