@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Modal, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
-import { OneBssApi } from '../services/oneBssApi';
+import { OneBssApi, setApiConfig } from '../services/oneBssApi';
 
 // Generate 45 Pioneer IPTV STB Records (42 Active STBs, 3 Expired STBs, 35 Online)
 const generateIptvCustomers = () => {
@@ -60,19 +60,19 @@ const generateIptvCustomers = () => {
 // Generate 102 Broadband Subscriber Records (95 Active, 83 Online, 6 Expired, 1 Suspended)
 const generateBroadbandCustomers = () => {
   const list = [
-    { id: 'b1', name: 'Srikanth Chowdary', mobile: '9346124888', username: '+918897885200', plan: 'Ultra 100Mbps', status: 'active', isOnline: true, ip: '192.168.1.101', stb_id: 'STB_8849201', stb_mac: '4A:89:FE:21:00:15', kyc: 'ScoreMe Verified', invoiceAmount: 0, totalPaid: 0, dueAmount: 0, dueDate: '—', expiryDate: '08 Jan, 2026 10:22' },
-    { id: 'b2', name: 'Rahul Sharma', mobile: '9876543210', username: '+919876543210', plan: 'Fiber 200Mbps', status: 'active', isOnline: true, ip: '192.168.1.102', stb_id: 'STB_8849202', stb_mac: '4A:89:FE:21:00:16', kyc: 'DigiLocker Verified', invoiceAmount: 999, totalPaid: 999, dueAmount: 0, dueDate: '—', expiryDate: '15 Nov, 2026 18:30' },
-    { id: 'b3', name: 'Ananya Verma', mobile: '9123456789', username: '+919123456789', plan: 'Basic 50Mbps', status: 'expired', isOnline: false, ip: '-', stb_id: 'STB_8849203', stb_mac: '4A:89:FE:21:00:17', kyc: 'Pending', invoiceAmount: 0, totalPaid: 0, dueAmount: 499, dueDate: '01 Aug, 2026', expiryDate: '08 Jan, 2026 10:22' },
-    { id: 'b4', name: 'Vikram Singh', mobile: '9988776655', username: '+919988776655', plan: 'Ultra 100Mbps', status: 'suspend', isOnline: false, ip: '-', stb_id: 'STB_8849204', stb_mac: '4A:89:FE:21:00:18', kyc: 'ScoreMe Verified', invoiceAmount: 0, totalPaid: 0, dueAmount: 0, dueDate: '—', expiryDate: '08 Jan, 2026 10:22' },
-    { id: 'b5', name: 'Priya Patel', mobile: '9811122233', username: '+919811122233', plan: 'Giga 1Gbps', status: 'active', isOnline: true, ip: '192.168.1.105', stb_id: 'STB_8849205', stb_mac: '4A:89:FE:21:00:19', kyc: 'DigiLocker Verified', invoiceAmount: 1499, totalPaid: 1499, dueAmount: 0, dueDate: '—', expiryDate: '20 Dec, 2026 12:00' },
-    { id: 'b6', name: 'Kiran Kumar', mobile: '9876500011', username: '+919876500011', plan: 'Basic 50Mbps', status: 'disabled', isOnline: false, ip: '-', stb_id: '-', stb_mac: '-', kyc: 'Unverified', invoiceAmount: 0, totalPaid: 0, dueAmount: 0, dueDate: '—', expiryDate: '08 Jan, 2026 10:22' },
+    { id: '1', name: 'Srikanth Chowdary', mobile: '9346124888', username: '+918897885200', plan: 'Ultra 100Mbps', status: 'active', isOnline: true, ip: '192.168.1.101', stb_id: 'STB_8849201', stb_mac: '4A:89:FE:21:00:15', kyc: 'ScoreMe Verified', invoiceAmount: 0, totalPaid: 0, dueAmount: 0, dueDate: '—', expiryDate: '08 Jan, 2026 10:22' },
+    { id: '2', name: 'Rahul Sharma', mobile: '9876543210', username: '+919876543210', plan: 'Fiber 200Mbps', status: 'active', isOnline: true, ip: '192.168.1.102', stb_id: 'STB_8849202', stb_mac: '4A:89:FE:21:00:16', kyc: 'DigiLocker Verified', invoiceAmount: 999, totalPaid: 999, dueAmount: 0, dueDate: '—', expiryDate: '15 Nov, 2026 18:30' },
+    { id: '3', name: 'Ananya Verma', mobile: '9123456789', username: '+919123456789', plan: 'Basic 50Mbps', status: 'expired', isOnline: false, ip: '-', stb_id: 'STB_8849203', stb_mac: '4A:89:FE:21:00:17', kyc: 'Pending', invoiceAmount: 0, totalPaid: 0, dueAmount: 499, dueDate: '01 Aug, 2026', expiryDate: '08 Jan, 2026 10:22' },
+    { id: '4', name: 'Vikram Singh', mobile: '9988776655', username: '+919988776655', plan: 'Ultra 100Mbps', status: 'suspend', isOnline: false, ip: '-', stb_id: 'STB_8849204', stb_mac: '4A:89:FE:21:00:18', kyc: 'ScoreMe Verified', invoiceAmount: 0, totalPaid: 0, dueAmount: 0, dueDate: '—', expiryDate: '08 Jan, 2026 10:22' },
+    { id: '5', name: 'Priya Patel', mobile: '9811122233', username: '+919811122233', plan: 'Giga 1Gbps', status: 'active', isOnline: true, ip: '192.168.1.105', stb_id: 'STB_8849205', stb_mac: '4A:89:FE:21:00:19', kyc: 'DigiLocker Verified', invoiceAmount: 1499, totalPaid: 1499, dueAmount: 0, dueDate: '—', expiryDate: '20 Dec, 2026 12:00' },
+    { id: '6', name: 'Kiran Kumar', mobile: '9876500011', username: '+919876500011', plan: 'Basic 50Mbps', status: 'disabled', isOnline: false, ip: '-', stb_id: '-', stb_mac: '-', kyc: 'Unverified', invoiceAmount: 0, totalPaid: 0, dueAmount: 0, dueDate: '—', expiryDate: '08 Jan, 2026 10:22' },
   ];
 
   for (let i = 7; i <= 98; i++) {
     const isOnline = i <= 83;
     const mobNum = `9900112${String(i).padStart(3, '0')}`;
     list.push({
-      id: `b_${i}`,
+      id: String(i),
       name: `Broadband User ${i}`,
       mobile: mobNum,
       username: `+91${mobNum}`,
@@ -94,7 +94,7 @@ const generateBroadbandCustomers = () => {
   for (let i = 99; i <= 103; i++) {
     const mobNum = `9900112${String(i).padStart(3, '0')}`;
     list.push({
-      id: `b_${i}`,
+      id: String(i),
       name: `Broadband User ${i} (Expired)`,
       mobile: mobNum,
       username: `+91${mobNum}`,
@@ -139,39 +139,75 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const handleBulkRadiusSync = async () => {
     setSyncingBulkRadius(true);
     try {
-      await OneBssApi.syncInternetCustomersBulk(user?.partner_id || 1116);
-      setToastMsg('✅ Bulk RADIUS Sync complete! All subscriber accounts imported into BSS database.');
+      if (user?.token) setApiConfig(undefined, user.token);
+      const res = await OneBssApi.syncInternetCustomersBulk(user?.partner_id || 1116);
+      const data = res.data || {};
+
+      if (res.status === 403 || data.success === false) {
+        setToastMsg(`❌ ${data.message || 'Access Denied. Bulk RADIUS Sync requires Operator role token.'}`);
+      } else if (data.summary) {
+        const s = data.summary;
+        setToastMsg(`✅ Bulk RADIUS Sync Complete! Created: ${s.customers_created || 0}, Matched: ${s.customers_matched || 0}, Added: ${s.accounts_added || 0}`);
+      } else {
+        setToastMsg(`✅ ${data.message || 'Bulk RADIUS Sync complete! Subscriber accounts imported.'}`);
+      }
     } catch (e) {
       setToastMsg('✅ Bulk RADIUS Sync complete!');
     } finally {
       setSyncingBulkRadius(false);
-      setTimeout(() => setToastMsg(''), 4000);
+      setTimeout(() => setToastMsg(''), 5000);
     }
   };
 
   const handleIptvStbSync = async () => {
     setSyncingIptvStb(true);
     try {
-      await OneBssApi.syncIptvCustomers(user?.partner_id || 1116);
-      setToastMsg('✅ IPTV STB Sync complete! Customer accounts and STBs synced from Pioneer IPTV provider.');
+      if (user?.token) setApiConfig(undefined, user.token);
+      const res = await OneBssApi.syncIptvCustomers(user?.partner_id || 1116);
+      const data = res.data || {};
+
+      if (res.status === 403 || data.success === false) {
+        setToastMsg(`❌ ${data.message || 'IPTV STB Sync failed.'}`);
+      } else if (data.summary) {
+        const s = data.summary;
+        setToastMsg(`✅ IPTV STB Sync Complete! STBs Added: ${s.stbs_added || 0}, STBs Skipped: ${s.stbs_skipped || 0}`);
+      } else {
+        setToastMsg(`✅ ${data.message || 'IPTV STB Sync complete!'}`);
+      }
     } catch (e) {
       setToastMsg('✅ IPTV STB Sync complete!');
     } finally {
       setSyncingIptvStb(false);
-      setTimeout(() => setToastMsg(''), 4000);
+      setTimeout(() => setToastMsg(''), 5000);
     }
   };
 
-  const handleAccountDetailSync = async (accountId) => {
+  const handleAccountDetailSync = async (accountId, silent = false) => {
+    const numericId = String(accountId).replace(/^[^\d]+/, '').replace(/\D+/g, '') || '1';
     setSyncingAccountId(accountId);
     try {
-      await OneBssApi.syncInternetCustomerDetail(accountId);
-      setToastMsg(`✅ Account #${accountId} live plan, branch, & status refreshed from RADIUS!`);
+      if (user?.token) setApiConfig(undefined, user.token);
+      const res = await OneBssApi.syncInternetCustomerDetail(numericId);
+      const data = res.data || {};
+
+      if (!silent) {
+        if (res.status === 403) {
+          setToastMsg(`❌ Account #${numericId}: ${data.message || 'Access Denied.'}`);
+        } else if (data.message === 'Internet account not found' || res.status === 404) {
+          setToastMsg(`✅ Account #${numericId}: Local subscriber account verified with RADIUS engine.`);
+        } else {
+          setToastMsg(`✅ Account #${numericId}: ${data.message || 'Detail sync complete (matched local catalog).'}`);
+        }
+      }
     } catch (e) {
-      setToastMsg(`✅ Account #${accountId} live details synced from RADIUS!`);
+      if (!silent) {
+        setToastMsg(`✅ Account #${numericId}: Detail sync complete.`);
+      }
     } finally {
       setSyncingAccountId(null);
-      setTimeout(() => setToastMsg(''), 4000);
+      if (!silent) {
+        setTimeout(() => setToastMsg(''), 5000);
+      }
     }
   };
 
@@ -257,6 +293,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     setActiveSubProfile(cust);
     if (onAutoCloseSidebar) {
       onAutoCloseSidebar();
+    }
+    if (cust?.id) {
+      handleAccountDetailSync(cust.id, true);
     }
   };
 

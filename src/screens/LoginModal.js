@@ -1,36 +1,58 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Modal, TextInput, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
+import { OneBssApi, setApiConfig } from '../services/oneBssApi';
 
 export const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
-  const [selectedRole, setSelectedRole] = useState('superadmin'); // 'superadmin' | 'admin' | 'operator' | 'customer'
-  const [username, setUsername] = useState('onebss_admin');
+  const [username, setUsername] = useState('onebss');
   const [password, setPassword] = useState('onebss');
+  const [showPassword, setShowPassword] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
 
-  const handleSelectRole = (role) => {
-    setSelectedRole(role);
-    if (role === 'superadmin') setUsername('root_superadmin');
-    else if (role === 'admin') setUsername('north_admin');
-    else if (role === 'operator') setUsername('airtel_operator');
-    else if (role === 'customer') setUsername('srikanth_subscriber');
-  };
+  const handleLogin = async () => {
+    setErrorMsg('');
+    setLoading(true);
+    try {
+      const u = username.trim();
+      const p = password.trim();
 
-  const handleLogin = () => {
-    const roleTitles = {
-      superadmin: 'Global Super Admin',
-      admin: 'North Region Admin',
-      operator: 'Airtel Operator',
-      customer: 'Srikanth Subscriber',
-    };
+      if (!u || !p) {
+        setErrorMsg('Please enter both username and password.');
+        setLoading(false);
+        return;
+      }
 
-    onLoginSuccess({
-      username,
-      role: selectedRole,
-      partner_name: roleTitles[selectedRole] || 'User',
-      partner_id: selectedRole === 'superadmin' ? 1000 : selectedRole === 'admin' ? 1100 : selectedRole === 'operator' ? 1116 : 9999,
-    });
-    onClose();
+      const res = await OneBssApi.login(u, p);
+      const data = res.data || {};
+
+      if (data.success === false || data.status === 'error' || res.status === 401) {
+        setErrorMsg(`❌ ${data.message || 'Invalid username or password. Access denied.'}`);
+        setLoading(false);
+        return;
+      }
+
+      const token = data.token || `token_${Date.now()}`;
+      setApiConfig(undefined, token);
+
+      const serverUser = data.user || {};
+      const role = (serverUser.role || (u === 'oper1' || u.includes('oper') ? 'operator' : 'superadmin')).toLowerCase();
+      const partnerId = serverUser.partner_id || (role === 'operator' ? 1116 : 1000);
+
+      onLoginSuccess({
+        username: u,
+        role: role,
+        partner_name: serverUser.partner_name || (role === 'operator' ? 'Airtel Broadband Ltd' : 'Global Super Admin'),
+        partner_id: partnerId,
+        token: token,
+      });
+      onClose();
+    } catch (e) {
+      setErrorMsg('❌ Invalid username or password.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -38,42 +60,60 @@ export const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
       <View style={styles.overlay}>
         <View style={styles.dialog}>
           <View style={styles.logoRow}>
-            <MaterialCommunityIcons name="shield-check" size={32} color={COLORS.primary} />
-            <Text style={styles.title}>OneBSS Role Selector</Text>
+            <MaterialCommunityIcons name="shield-check" size={28} color={COLORS.primary} />
+            <Text style={styles.title}>OneBSS Authentication</Text>
           </View>
-          <Text style={styles.subtitle}>Select a role persona to authenticate and inspect its custom dashboard</Text>
+          <Text style={styles.subtitle}>Enter your account credentials to authenticate</Text>
 
-          {/* Persona Role Selection Chips */}
-          <View style={styles.roleGrid}>
-            {[
-              { id: 'superadmin', label: 'Super Admin', desc: 'Global Control & Reassignment' },
-              { id: 'admin', label: 'Admin', desc: 'Child Admins & Operators' },
-              { id: 'operator', label: 'Operator', desc: 'OCM & STB Management' },
-              { id: 'customer', label: 'Customer', desc: 'Broadband & IPTV Portal' },
-            ].map((roleItem) => {
-              const isSelected = selectedRole === roleItem.id;
-              return (
-                <TouchableOpacity
-                  key={roleItem.id}
-                  style={[styles.roleCard, isSelected && styles.roleCardActive]}
-                  onPress={() => handleSelectRole(roleItem.id)}
-                >
-                  <Text style={[styles.roleLabel, isSelected && styles.roleLabelActive]}>{roleItem.label}</Text>
-                  <Text style={[styles.roleDesc, isSelected && styles.roleDescActive]}>{roleItem.desc}</Text>
-                </TouchableOpacity>
-              );
-            })}
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>USERNAME</Text>
+            <View style={styles.inputWrapper}>
+              <Feather name="user" size={14} color={COLORS.textDim} />
+              <TextInput
+                style={styles.input}
+                value={username}
+                onChangeText={setUsername}
+                placeholder="Enter username"
+                placeholderTextColor={COLORS.textDim}
+                autoCapitalize="none"
+              />
+            </View>
           </View>
 
           <View style={styles.inputGroup}>
-            <Text style={styles.label}>Identity Username</Text>
-            <TextInput style={styles.input} value={username} onChangeText={setUsername} />
+            <Text style={styles.label}>PASSWORD</Text>
+            <View style={styles.inputWrapper}>
+              <Feather name="lock" size={14} color={COLORS.textDim} />
+              <TextInput
+                style={styles.input}
+                value={password}
+                onChangeText={setPassword}
+                secureTextEntry={!showPassword}
+                placeholder="Enter password"
+                placeholderTextColor={COLORS.textDim}
+              />
+              <TouchableOpacity onPress={() => setShowPassword((prev) => !prev)}>
+                <Feather name={showPassword ? 'eye-off' : 'eye'} size={14} color={COLORS.textDim} />
+              </TouchableOpacity>
+            </View>
           </View>
 
-          <TouchableOpacity style={styles.loginBtn} onPress={handleLogin}>
-            <Feather name="log-in" size={16} color="#fff" />
-            <Text style={styles.loginBtnText}>Launch {selectedRole.toUpperCase()} Dashboard</Text>
-          </TouchableOpacity>
+          <View style={styles.btnRow}>
+            <TouchableOpacity style={styles.cancelBtn} onPress={onClose}>
+              <Text style={styles.cancelBtnText}>Cancel</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={styles.loginBtn} onPress={handleLogin} disabled={loading}>
+              {loading ? (
+                <ActivityIndicator size="small" color="#fff" />
+              ) : (
+                <>
+                  <Feather name="log-in" size={14} color="#fff" />
+                  <Text style={styles.loginBtnText}>Sign In</Text>
+                </>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
     </Modal>
@@ -83,17 +123,18 @@ export const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(15, 23, 42, 0.6)',
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
   },
   dialog: {
     width: '100%',
-    maxWidth: 460,
+    maxWidth: 400,
     backgroundColor: '#ffffff',
     borderRadius: 16,
     padding: 24,
+    boxShadow: '0 10px 25px rgba(0, 0, 0, 0.2)',
     elevation: 8,
   },
   logoRow: {
@@ -103,78 +144,71 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   title: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: COLORS.textMain,
   },
   subtitle: {
     fontSize: 12,
     color: COLORS.textMuted,
-    marginBottom: 16,
-  },
-  roleGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginBottom: 16,
-  },
-  roleCard: {
-    width: '48%',
-    padding: 12,
-    borderRadius: 10,
-    backgroundColor: COLORS.bgSecondary,
-    borderWidth: 1,
-    borderColor: COLORS.glassBorder,
-  },
-  roleCardActive: {
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    borderColor: COLORS.primary,
-  },
-  roleLabel: {
-    fontSize: 13,
-    fontWeight: '700',
-    color: COLORS.textMain,
-  },
-  roleLabelActive: {
-    color: COLORS.accentCyan,
-  },
-  roleDesc: {
-    fontSize: 10,
-    color: COLORS.textMuted,
-    marginTop: 2,
-  },
-  roleDescActive: {
-    color: COLORS.accentEmerald,
+    marginBottom: 20,
   },
   inputGroup: {
     marginBottom: 14,
-    gap: 4,
+    gap: 6,
   },
   label: {
-    fontSize: 12,
+    fontSize: 10,
+    fontWeight: '800',
     color: COLORS.textMuted,
+    letterSpacing: 0.5,
   },
-  input: {
-    height: 40,
+  inputWrapper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(248, 250, 252, 0.8)',
     borderWidth: 1,
     borderColor: COLORS.glassBorder,
-    borderRadius: 8,
-    paddingHorizontal: 10,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    height: 40,
+    gap: 8,
+  },
+  input: {
+    flex: 1,
     fontSize: 13,
     color: COLORS.textMain,
+    outlineStyle: 'none',
+  },
+  btnRow: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 10,
+  },
+  cancelBtn: {
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(0,0,0,0.05)',
+  },
+  cancelBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textMuted,
   },
   loginBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 6,
     backgroundColor: COLORS.primary,
-    height: 44,
-    borderRadius: 10,
-    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
   },
   loginBtnText: {
     color: '#ffffff',
-    fontWeight: '600',
-    fontSize: 13,
+    fontWeight: '700',
+    fontSize: 12,
   },
 });

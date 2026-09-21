@@ -19,12 +19,14 @@ const API_ENDPOINTS = [
 
   // Module 3 & 4: Internet & IPTV Plans
   { id: '3.1', name: 'GET /plan_mapping.php?partner_id=1116', method: 'GET', module: 'Module 3: Internet Plans', payload: '', action: () => OneBssApi.getInternetPlans(1116) },
-  { id: '3.2', name: 'POST /plan_mapping.php', method: 'POST', module: 'Module 3: Internet Plans', payload: JSON.stringify({ partner_id: 1116, plan_name: 'Ultra 100Mbps', package_id: 101, sub_plan_id: 201, price: 699, validity_days: 30 }, null, 2), action: (p) => OneBssApi.createInternetPlan(p ? JSON.parse(p) : {}) },
-  { id: '3.3', name: 'PUT /plan_mapping.php', method: 'PUT', module: 'Module 3: Internet Plans', payload: JSON.stringify({ id: 1, price: 799 }, null, 2), action: (p) => OneBssApi.updateInternetPlan(p ? JSON.parse(p) : {}) },
-  { id: '3.4', name: 'DELETE /plan_mapping.php?id=1', method: 'DELETE', module: 'Module 3: Internet Plans', payload: '', action: () => OneBssApi.deleteInternetPlan(1) },
+  { id: '3.2', name: 'POST /internet_plan_sync.php?partner_id=1116', method: 'POST', module: 'Module 3: Internet Plans', payload: '', action: () => OneBssApi.syncInternetPlans(1116) },
+  { id: '3.3', name: 'POST /plan_mapping.php', method: 'POST', module: 'Module 3: Internet Plans', payload: JSON.stringify({ partner_id: 1116, plan_name: 'Ultra 100Mbps', package_id: 101, sub_plan_id: 201, price: 699, validity_days: 30 }, null, 2), action: (p) => OneBssApi.createInternetPlan(p ? JSON.parse(p) : {}) },
+  { id: '3.4', name: 'PUT /plan_mapping.php', method: 'PUT', module: 'Module 3: Internet Plans', payload: JSON.stringify({ id: 1, price: 799 }, null, 2), action: (p) => OneBssApi.updateInternetPlan(p ? JSON.parse(p) : {}) },
+  { id: '3.5', name: 'DELETE /plan_mapping.php?id=1', method: 'DELETE', module: 'Module 3: Internet Plans', payload: '', action: () => OneBssApi.deleteInternetPlan(1) },
 
   { id: '4.1', name: 'GET /iptv_plan_mapping.php?partner_id=1116', method: 'GET', module: 'Module 4: IPTV Plans', payload: '', action: () => OneBssApi.getIptvPlans(1116) },
-  { id: '4.2', name: 'POST /iptv_plan_mapping.php', method: 'POST', module: 'Module 4: IPTV Plans', payload: JSON.stringify({ partner_id: 1116, plan_name: 'Premium HD 300+', plan_id: 501, sub_plan_id: 601, price: 299, validity_days: 30 }, null, 2), action: (p) => OneBssApi.createIptvPlan(p ? JSON.parse(p) : {}) },
+  { id: '4.2', name: 'POST /iptv_plan_sync.php?partner_id=1111 (SuperAdmin Only)', method: 'POST', module: 'Module 4: IPTV Plans', payload: '', action: () => OneBssApi.syncIptvPlans(1111) },
+  { id: '4.3', name: 'POST /iptv_plan_mapping.php', method: 'POST', module: 'Module 4: IPTV Plans', payload: JSON.stringify({ partner_id: 1116, plan_name: 'Premium HD 300+', plan_id: 501, sub_plan_id: 601, price: 299, validity_days: 30 }, null, 2), action: (p) => OneBssApi.createIptvPlan(p ? JSON.parse(p) : {}) },
 
   // Module 5: Aadhaar e-KYC
   { id: '5.1', name: 'POST /digilocker_initialize.php', method: 'POST', module: 'Module 5: Aadhaar e-KYC', payload: JSON.stringify({ partner_id: 1116 }, null, 2), action: () => OneBssApi.digilockerInitialize(1116) },

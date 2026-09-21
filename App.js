@@ -7,6 +7,7 @@ import { DashboardScreen } from './src/screens/DashboardScreen';
 import { PartnerScreen } from './src/screens/PartnerScreen';
 import { CustomerScreen } from './src/screens/CustomerScreen';
 import { ApiConsoleScreen } from './src/screens/ApiConsoleScreen';
+import { LoginScreen } from './src/screens/LoginScreen';
 import { LoginModal } from './src/screens/LoginModal';
 
 export default function App() {
@@ -20,13 +21,13 @@ export default function App() {
         const hash = window.location.hash.replace('#', '');
         if (hash) {
           const [tab, filter] = hash.split('?filter=');
-          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'apiConsole'].includes(tab)) {
+          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'apiConsole', 'login'].includes(tab)) {
             return { tab, filter: filter || 'all' };
           }
         }
         const savedTab = localStorage.getItem('onebss_active_tab');
         const savedFilter = localStorage.getItem('onebss_filter');
-        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'apiConsole'].includes(savedTab)) {
+        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'apiConsole', 'login'].includes(savedTab)) {
           return { tab: savedTab, filter: savedFilter || 'all' };
         }
       }
@@ -45,7 +46,7 @@ export default function App() {
         }
       }
     } catch (e) {}
-    return { partner_name: 'Global Root Admin', role: 'superadmin', partner_id: 1000 };
+    return null;
   };
 
   const initialNav = getInitialNavigationState();
@@ -65,8 +66,23 @@ export default function App() {
     try {
       if (typeof window !== 'undefined') {
         localStorage.setItem('onebss_user', JSON.stringify(userData));
+        if (userData?.token) {
+          localStorage.setItem('onebss_token', userData.token);
+        }
       }
     } catch (e) {}
+  };
+
+  const handleLogout = () => {
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('onebss_user');
+        localStorage.removeItem('onebss_token');
+        localStorage.removeItem('onebss_active_tab');
+      }
+    } catch (e) {}
+    setUserState(null);
+    setActiveTabState('login');
   };
 
   // Wrapper to update active tab and sync storage/hash
@@ -116,6 +132,21 @@ export default function App() {
     }
   };
 
+  // If user is not logged in or navigated to login tab, render full screen LoginScreen
+  if (!user || activeTab === 'login') {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#0f172a" />
+        <LoginScreen
+          onLoginSuccess={(userData) => {
+            handleSetUser(userData);
+            setActiveTab('dashboard');
+          }}
+        />
+      </SafeAreaView>
+    );
+  }
+
   const renderActiveScreen = () => {
     switch (activeTab) {
       case 'dashboard':
@@ -164,8 +195,8 @@ export default function App() {
         <Text style={styles.roleBannerText}>
           ACTIVE ROLE PERSONA: <Text style={{ fontWeight: '800', color: COLORS.primary }}>{user.role.toUpperCase()}</Text> ({user.partner_name})
         </Text>
-        <TouchableOpacity style={styles.switchRoleBtn} onPress={() => setIsLoginVisible(true)}>
-          <Text style={styles.switchRoleBtnText}>Switch Role Dashboard</Text>
+        <TouchableOpacity style={styles.switchRoleBtn} onPress={handleLogout}>
+          <Text style={styles.switchRoleBtnText}>Sign Out / Switch Account</Text>
         </TouchableOpacity>
       </View>
       
@@ -176,7 +207,7 @@ export default function App() {
             activeTab={activeTab}
             onSelectTab={(tab) => setActiveTab(tab)}
             user={user}
-            onLogout={() => setIsLoginVisible(true)}
+            onLogout={handleLogout}
             isCollapsed={sidebarCollapsed}
             onToggleCollapse={toggleSidebarCollapse}
             onMouseEnter={() => setSidebarCollapsed(false)}
@@ -201,8 +232,8 @@ export default function App() {
                 }}
                 user={user}
                 onLogout={() => {
-                  setIsLoginVisible(true);
                   setSidebarOpenMobile(false);
+                  handleLogout();
                 }}
                 isCollapsed={false}
                 onToggleCollapse={() => setSidebarOpenMobile(false)}

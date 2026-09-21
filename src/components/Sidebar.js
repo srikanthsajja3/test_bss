@@ -9,6 +9,7 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
     { id: 'customers', label: 'Subscriber Management', icon: 'users' },
     { id: 'partners', label: 'Partners & Gateways', icon: 'briefcase' },
     { id: 'apiConsole', label: '28-API Test Suite', icon: 'terminal' },
+    { id: 'login', label: 'Login & Roles', icon: 'log-in' },
   ];
 
   return (
@@ -83,7 +84,7 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
           )}
 
           {!isCollapsed && (
-            <TouchableOpacity style={styles.logoutBtn} onPress={onLogout}>
+            <TouchableOpacity style={styles.logoutBtn} onPress={onLogout || (() => onSelectTab && onSelectTab('login'))}>
               <Feather name="log-out" size={16} color={COLORS.accentRose} />
             </TouchableOpacity>
           )}
