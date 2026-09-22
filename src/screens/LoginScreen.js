@@ -49,10 +49,25 @@ export const LoginScreen = ({ onLoginSuccess }) => {
       const token = data.token || `token_${Date.now()}_authenticated_session`;
       setApiConfig(undefined, token);
 
+      let decoded = null;
+      try {
+        const base64Url = token.split('.')[1];
+        if (base64Url) {
+          const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+          const jsonPayload = decodeURIComponent(
+            atob(base64)
+              .split('')
+              .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+              .join('')
+          );
+          decoded = JSON.parse(jsonPayload);
+        }
+      } catch (e) {}
+
       const serverUser = data.user || {};
-      const role = (serverUser.role || (u === 'oper1' || u.includes('oper') ? 'operator' : 'superadmin')).toLowerCase();
-      const partnerId = serverUser.partner_id || (role === 'operator' ? 1116 : 1000);
-      const partnerName = serverUser.partner_name || (role === 'operator' ? 'Airtel Broadband Ltd' : 'Global Super Admin');
+      const role = (decoded?.role || serverUser.role || (u === 'oper1' || u.includes('oper') ? 'operator' : 'superadmin')).toLowerCase();
+      const partnerId = decoded?.partner_id || serverUser.partner_id || 1112;
+      const partnerName = decoded?.partner_name || serverUser.partner_name || (role === 'operator' ? 'Airtel Broadband Ltd' : 'Global Super Admin');
 
       onLoginSuccess({
         username: u,

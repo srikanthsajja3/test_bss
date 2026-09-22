@@ -36,14 +36,29 @@ export const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
       const token = data.token || `token_${Date.now()}`;
       setApiConfig(undefined, token);
 
+      let decoded = null;
+      try {
+        const base64Url = token.split('.')[1];
+        if (base64Url) {
+          const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+          const jsonPayload = decodeURIComponent(
+            atob(base64)
+              .split('')
+              .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+              .join('')
+          );
+          decoded = JSON.parse(jsonPayload);
+        }
+      } catch (e) {}
+
       const serverUser = data.user || {};
-      const role = (serverUser.role || (u === 'oper1' || u.includes('oper') ? 'operator' : 'superadmin')).toLowerCase();
-      const partnerId = serverUser.partner_id || (role === 'operator' ? 1116 : 1000);
+      const role = (decoded?.role || serverUser.role || (u === 'oper1' || u.includes('oper') ? 'operator' : 'superadmin')).toLowerCase();
+      const partnerId = decoded?.partner_id || serverUser.partner_id || 1112;
 
       onLoginSuccess({
         username: u,
         role: role,
-        partner_name: serverUser.partner_name || (role === 'operator' ? 'Airtel Broadband Ltd' : 'Global Super Admin'),
+        partner_name: decoded?.partner_name || serverUser.partner_name || (role === 'operator' ? 'Airtel Broadband Ltd' : 'Global Super Admin'),
         partner_id: partnerId,
         token: token,
       });

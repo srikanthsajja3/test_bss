@@ -7,7 +7,6 @@ import { Header } from './src/components/Header';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { PartnerScreen } from './src/screens/PartnerScreen';
 import { CustomerScreen } from './src/screens/CustomerScreen';
-import { ApiConsoleScreen } from './src/screens/ApiConsoleScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { LoginModal } from './src/screens/LoginModal';
 
@@ -22,13 +21,13 @@ export default function App() {
         const hash = window.location.hash.replace('#', '');
         if (hash) {
           const [tab, filter] = hash.split('?filter=');
-          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'apiConsole'].includes(tab)) {
+          if (['dashboard', 'partners', 'customers', 'iptv_customers'].includes(tab)) {
             return { tab, filter: filter || 'all' };
           }
         }
         const savedTab = localStorage.getItem('onebss_active_tab');
         const savedFilter = localStorage.getItem('onebss_filter');
-        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'apiConsole'].includes(savedTab)) {
+        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers'].includes(savedTab)) {
           return { tab: savedTab, filter: savedFilter || 'all' };
         }
       }
@@ -177,8 +176,6 @@ export default function App() {
         return <CustomerScreen user={user} isIptvMode={false} initialFilter={customerInitialFilter} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
       case 'iptv_customers':
         return <CustomerScreen user={user} isIptvMode={true} initialFilter={customerInitialFilter} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
-      case 'apiConsole':
-        return <ApiConsoleScreen />;
       default:
         return <DashboardScreen user={user} onNavigateToCustomers={handleNavigateToCustomers} />;
     }
@@ -197,8 +194,6 @@ export default function App() {
         return { title: 'Subscribers', subtitle: 'Internet & IPTV Accounts' };
       case 'iptv_customers':
         return { title: 'IPTV Subscribers', subtitle: 'STB Accounts & Packages' };
-      case 'apiConsole':
-        return { title: 'API Console', subtitle: 'Test Suite' };
       default:
         return { title: 'OneBSS Platform', subtitle: 'Management Portal' };
     }

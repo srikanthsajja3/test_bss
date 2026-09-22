@@ -10,7 +10,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
 
   const currentRole = user?.role ? user.role.toLowerCase() : 'superadmin';
   const isSuperAdmin = currentRole === 'superadmin';
-  const currentPartnerId = user?.partner_id || 1000;
+  const currentPartnerId = user?.partner_id || 1112;
 
   const [telemetry, setTelemetry] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -27,14 +27,14 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         setTelemetry(data);
       } else {
         setTelemetry({
-          internet: { total: 102, active: 95, online: 83, expired: 6, suspend: 1, disabled: 0, new: 0 },
-          iptv: { total: 45, active: 42, expired: 3 },
+          internet: { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 },
+          iptv: { total: 0, active: 0, expired: 0 },
         });
       }
     } catch (e) {
       setTelemetry({
-        internet: { total: 102, active: 95, online: 83, expired: 6, suspend: 1, disabled: 0, new: 0 },
-        iptv: { total: 45, active: 42, expired: 3 },
+        internet: { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 },
+        iptv: { total: 0, active: 0, expired: 0 },
       });
     } finally {
       setLoading(false);

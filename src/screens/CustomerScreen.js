@@ -140,10 +140,10 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [activeFilter, setActiveFilter] = useState(initialFilter);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Initial datasets loaded with default mapped raw customers
-  const [iptvDataset, setIptvDataset] = useState(() => DEFAULT_RAW_CUSTOMERS.map(mapCustomersListToIptvRow));
-  const [broadbandDataset, setBroadbandDataset] = useState(() => DEFAULT_RAW_CUSTOMERS.map(mapCustomersListToBroadbandRow));
-  const [loadingData, setLoadingData] = useState(false);
+  // Live datasets loaded from API
+  const [iptvDataset, setIptvDataset] = useState([]);
+  const [broadbandDataset, setBroadbandDataset] = useState([]);
+  const [loadingData, setLoadingData] = useState(true);
 
   const loadCustomerDataFromApi = async () => {
     setLoadingData(true);
@@ -157,30 +157,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       if (rawCustomers.length > 0) {
         setBroadbandDataset(rawCustomers.map(mapCustomersListToBroadbandRow));
         setIptvDataset(rawCustomers.map(mapCustomersListToIptvRow));
-      } else {
-        // Fallback to partner entity fetch
-        let partnerRes;
-        if (user?.partner_id && user?.role === 'operator') {
-          partnerRes = await OneBssApi.getPartnerById(user.partner_id);
-        } else {
-          partnerRes = await OneBssApi.getPartners();
-        }
-
-        let rawPartners = [];
-        if (partnerRes && partnerRes.data) {
-          if (Array.isArray(partnerRes.data)) {
-            rawPartners = partnerRes.data;
-          } else if (partnerRes.data.data) {
-            rawPartners = Array.isArray(partnerRes.data.data) ? partnerRes.data.data : [partnerRes.data.data];
-          } else if (typeof partnerRes.data === 'object' && partnerRes.data.partner_id) {
-            rawPartners = [partnerRes.data];
-          }
-        }
-
-        if (rawPartners.length > 0) {
-          setBroadbandDataset(rawPartners.map((p, idx) => mapCustomersListToBroadbandRow(p, idx)));
-          setIptvDataset(rawPartners.map((p, idx) => mapCustomersListToIptvRow(p, idx)));
-        }
       }
     } catch (e) {
       console.log('Error loading API customer records:', e);

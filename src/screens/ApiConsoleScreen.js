@@ -5,47 +5,43 @@ import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 
 const API_ENDPOINTS = [
-  // Module 1: Auth & Security
-  { id: '1.1', name: 'POST /login.php', method: 'POST', module: 'Module 1: Auth', payload: JSON.stringify({ username: 'onebss', password: 'onebss' }, null, 2), action: () => OneBssApi.login() },
-  { id: '1.2', name: 'POST /logout.php', method: 'POST', module: 'Module 1: Auth', payload: '{}', action: () => OneBssApi.logout() },
+  // 1. Authentication (1 API)
+  { id: '1.1', name: 'POST /login.php', method: 'POST', module: '1. Authentication', payload: JSON.stringify({ username: 'onebss', password: 'onebss' }, null, 2), action: (p) => { const body = p ? JSON.parse(p) : {}; return OneBssApi.login(body.username, body.password); } },
 
-  // Module 2: Partner CRUD & Gateways
-  { id: '2.1', name: 'GET /partner.php (List)', method: 'GET', module: 'Module 2: Partners', payload: '', action: () => OneBssApi.getPartners('', '', 1, 20) },
-  { id: '2.2', name: 'GET /partner.php?id=1116', method: 'GET', module: 'Module 2: Partners', payload: '', action: () => OneBssApi.getPartnerById(1116) },
-  { id: '2.3', name: 'POST /partner.php (Create)', method: 'POST', module: 'Module 2: Partners', payload: JSON.stringify({ partner_name: 'Airtel Partner Corp', company_name: 'Airtel Networks Ltd', partner_mobile: '9876543210', partner_email: 'contact@airtel.in', account_role: 'partner', status: 'enabled' }, null, 2), action: (p) => OneBssApi.createPartner(p ? JSON.parse(p) : {}) },
-  { id: '2.4', name: 'PUT /partner.php (Update)', method: 'PUT', module: 'Module 2: Partners', payload: JSON.stringify({ partner_id: 1116, partner_name: 'Airtel Updated Corp' }, null, 2), action: (p) => OneBssApi.updatePartner(p ? JSON.parse(p) : {}) },
-  { id: '2.5', name: 'DELETE /partner.php?id=1116', method: 'DELETE', module: 'Module 2: Partners', payload: '', action: () => OneBssApi.deletePartner(1116) },
-  { id: '2.6', name: 'GET /get_gateway_partners_branches.php', method: 'GET', module: 'Module 2: Partners', payload: '', action: () => OneBssApi.getGatewayBranches(1116) },
+  // 2. Partner Management (5 APIs)
+  { id: '2.1', name: 'GET /partner.php (List Partners)', method: 'GET', module: '2. Partner Management', payload: '', action: () => OneBssApi.getPartners('operator', 'enabled') },
+  { id: '2.2', name: 'GET /partner.php?id=1116 (Get Partner)', method: 'GET', module: '2. Partner Management', payload: '', action: () => OneBssApi.getPartnerById(1116) },
+  { id: '2.3', name: 'POST /partner.php (Create Partner)', method: 'POST', module: '2. Partner Management', payload: JSON.stringify({ partner_name: 'Sai Ram', company_name: 'Sai Ram Cable Network', partner_mobile: '9876543210', partner_email: 'sai.ram789@gmail.com', partner_region: 'Vijayawada', login: { username: 'oper1', password: 'oper1', role: 'operator' }, internet_mapping: { internet_base_url: 'https://radius.vrplay.in', internet_token: 'sdfghjkluytresa', internet_partner_id: '222', internet_branch_id: '111' } }, null, 2), action: (p) => OneBssApi.createPartner(p ? JSON.parse(p) : {}) },
+  { id: '2.4', name: 'PUT /partner.php?id=1116 (Update Partner)', method: 'PUT', module: '2. Partner Management', payload: JSON.stringify({ internet_mapping: { internet_base_url: 'https://radius.vrplay.in', internet_token: 'sdfghjkluytresa', internet_partner_id: '222', internet_branch_id: '111' } }, null, 2), action: (p) => OneBssApi.updatePartner(1116, p ? JSON.parse(p) : {}) },
+  { id: '2.5', name: 'DELETE /partner.php?id=1120 (Delete Partner)', method: 'DELETE', module: '2. Partner Management', payload: '', action: () => OneBssApi.deletePartner(1120) },
 
-  // Module 3 & 4: Internet & IPTV Plans
-  { id: '3.1', name: 'GET /plan_mapping.php?partner_id=1116', method: 'GET', module: 'Module 3: Internet Plans', payload: '', action: () => OneBssApi.getInternetPlans(1116) },
-  { id: '3.2', name: 'POST /internet_plan_sync.php?partner_id=1116', method: 'POST', module: 'Module 3: Internet Plans', payload: '', action: () => OneBssApi.syncInternetPlans(1116) },
-  { id: '3.3', name: 'POST /plan_mapping.php', method: 'POST', module: 'Module 3: Internet Plans', payload: JSON.stringify({ partner_id: 1116, plan_name: 'Ultra 100Mbps', package_id: 101, sub_plan_id: 201, price: 699, validity_days: 30 }, null, 2), action: (p) => OneBssApi.createInternetPlan(p ? JSON.parse(p) : {}) },
-  { id: '3.4', name: 'PUT /plan_mapping.php', method: 'PUT', module: 'Module 3: Internet Plans', payload: JSON.stringify({ id: 1, price: 799 }, null, 2), action: (p) => OneBssApi.updateInternetPlan(p ? JSON.parse(p) : {}) },
-  { id: '3.5', name: 'DELETE /plan_mapping.php?id=1', method: 'DELETE', module: 'Module 3: Internet Plans', payload: '', action: () => OneBssApi.deleteInternetPlan(1) },
+  // 3. Internet Gateway Setup (2 APIs)
+  { id: '3.1', name: 'POST /internet_partners_fetch.php', method: 'POST', module: '3. Internet Gateway Setup', payload: JSON.stringify({ internet_base_url: 'https://radius.vrplay.in', internet_token: 'OsFKjvkV8hJpPxilaG3kplsrBOd8WqxA' }, null, 2), action: (p) => { const body = p ? JSON.parse(p) : {}; return OneBssApi.fetchInternetPartners(body.internet_token, body.internet_base_url); } },
+  { id: '3.2', name: 'POST /internet_branches_fetch.php', method: 'POST', module: '3. Internet Gateway Setup', payload: JSON.stringify({ internet_base_url: 'https://radius.vrplay.in', internet_token: 'OsFKjvkV8hJpPxilaG3kplsrBOd8WqxA', partner_id: 292 }, null, 2), action: (p) => { const body = p ? JSON.parse(p) : {}; return OneBssApi.fetchInternetBranches(body.internet_token, body.internet_base_url, body.partner_id); } },
 
-  { id: '4.1', name: 'GET /iptv_plan_mapping.php?partner_id=1116', method: 'GET', module: 'Module 4: IPTV Plans', payload: '', action: () => OneBssApi.getIptvPlans(1116) },
-  { id: '4.2', name: 'POST /iptv_plan_sync.php?partner_id=1111 (SuperAdmin Only)', method: 'POST', module: 'Module 4: IPTV Plans', payload: '', action: () => OneBssApi.syncIptvPlans(1111) },
-  { id: '4.3', name: 'POST /iptv_plan_mapping.php', method: 'POST', module: 'Module 4: IPTV Plans', payload: JSON.stringify({ partner_id: 1116, plan_name: 'Premium HD 300+', plan_id: 501, sub_plan_id: 601, price: 299, validity_days: 30 }, null, 2), action: (p) => OneBssApi.createIptvPlan(p ? JSON.parse(p) : {}) },
+  // 4. Internet Plan Catalog (3 APIs)
+  { id: '4.1', name: 'POST /internet_plan_sync.php?partner_id=1116', method: 'POST', module: '4. Internet Plan Catalog', payload: '', action: () => OneBssApi.syncInternetPlans(1116) },
+  { id: '4.2', name: 'GET /internet_plan_mapping.php?partner_id=1116', method: 'GET', module: '4. Internet Plan Catalog', payload: '', action: () => OneBssApi.getInternetPlans(1116) },
+  { id: '4.3', name: 'POST /internet_plan_mapping.php (Map Plans)', method: 'POST', module: '4. Internet Plan Catalog', payload: JSON.stringify({ partner_id: 1116, plans: [{ internet_sub_plan_id: 12, price: 499 }, { internet_sub_plan_id: 13 }] }, null, 2), action: (p) => { const body = p ? JSON.parse(p) : {}; return OneBssApi.mapInternetPlansToOperator(body.partner_id, body.plans); } },
 
-  // Module 5: Aadhaar e-KYC
-  { id: '5.1', name: 'POST /digilocker_initialize.php', method: 'POST', module: 'Module 5: Aadhaar e-KYC', payload: JSON.stringify({ partner_id: 1116 }, null, 2), action: () => OneBssApi.digilockerInitialize(1116) },
-  { id: '5.2', name: 'POST /digilocker_download_aadhaar.php', method: 'POST', module: 'Module 5: Aadhaar e-KYC', payload: JSON.stringify({ partner_id: 1116, client_id: 'dl_cli_001' }, null, 2), action: () => OneBssApi.digilockerDownloadAadhaar(1116, 'dl_cli_001') },
-  { id: '5.3', name: 'POST /scoreme_send_otp.php', method: 'POST', module: 'Module 5: Aadhaar e-KYC', payload: JSON.stringify({ partner_id: 1116, aadhar_number: '234567890123' }, null, 2), action: () => OneBssApi.scoremeSendOtp(1116, '234567890123') },
-  { id: '5.4', name: 'POST /scoreme_verify_otp.php', method: 'POST', module: 'Module 5: Aadhaar e-KYC', payload: JSON.stringify({ partner_id: 1116, otp: '123456' }, null, 2), action: () => OneBssApi.scoremeVerifyOtp(1116, '123456') },
+  // 5. IPTV Plan Catalog (3 APIs)
+  { id: '5.1', name: 'POST /iptv_plan_sync.php?partner_id=1111 (SuperAdmin)', method: 'POST', module: '5. IPTV Plan Catalog', payload: '', action: () => OneBssApi.syncIptvPlans(1111) },
+  { id: '5.2', name: 'GET /iptv_plan_mapping.php?partner_id=1116', method: 'GET', module: '5. IPTV Plan Catalog', payload: '', action: () => OneBssApi.getIptvPlans(1116) },
+  { id: '5.3', name: 'POST /iptv_plan_mapping.php (Map Plans)', method: 'POST', module: '5. IPTV Plan Catalog', payload: JSON.stringify({ partner_id: 1116, plans: [{ iptv_sub_plan_id: 494, price: 25 }, { iptv_sub_plan_id: 495 }] }, null, 2), action: (p) => { const body = p ? JSON.parse(p) : {}; return OneBssApi.mapIptvPlansToOperator(body.partner_id, body.plans); } },
 
-  // Module 6 & 7: Customer Provisioning
-  { id: '6.1', name: 'GET /customer_lookup.php?mobile=9000000001', method: 'GET', module: 'Module 6: Subscribers', payload: '', action: () => OneBssApi.customerLookup('9000000001') },
-  { id: '6.2', name: 'POST /internet_customer_sync.php', method: 'POST', module: 'Module 6: Subscribers', payload: JSON.stringify({ partner_id: 1116 }, null, 2), action: () => OneBssApi.syncInternetCustomersBulk(1116) },
-  { id: '6.3', name: 'POST /internet_customer_detail_sync.php?internet_id=1', method: 'POST', module: 'Module 6: Subscribers', payload: '', action: () => OneBssApi.syncInternetCustomerDetail(1) },
-  { id: '6.4', name: 'POST /iptv_customer_sync.php', method: 'POST', module: 'Module 6: Subscribers', payload: JSON.stringify({ partner_id: 1116 }, null, 2), action: () => OneBssApi.syncIptvCustomers(1116) },
-  { id: '6.5', name: 'POST /add_internet_customer.php', method: 'POST', module: 'Module 6: Subscribers', payload: JSON.stringify({ partner_id: 1116, username: 'sub99@onefiber' }, null, 2), action: (p) => OneBssApi.addInternetCustomer(p ? JSON.parse(p) : {}) },
+  // 6. Aadhaar KYC Verification (4 APIs)
+  { id: '6.1', name: 'POST /digilocker_initialize.php', method: 'POST', module: '6. Aadhaar KYC Verification', payload: '{}', action: () => OneBssApi.digilockerInitialize() },
+  { id: '6.2', name: 'POST /digilocker_download_aadhaar.php', method: 'POST', module: '6. Aadhaar KYC Verification', payload: JSON.stringify({ client_id: 'dl_client_123' }, null, 2), action: (p) => { const body = p ? JSON.parse(p) : {}; return OneBssApi.digilockerDownloadAadhaar(body.client_id, body.user_id); } },
+  { id: '6.3', name: 'POST /scoreme_send_otp.php', method: 'POST', module: '6. Aadhaar KYC Verification', payload: JSON.stringify({ aadhaar_number: '123456789012', operator_id: 1116 }, null, 2), action: (p) => { const body = p ? JSON.parse(p) : {}; return OneBssApi.scoremeSendOtp(body.aadhaar_number, body.operator_id); } },
+  { id: '6.4', name: 'POST /scoreme_verify_otp.php', method: 'POST', module: '6. Aadhaar KYC Verification', payload: JSON.stringify({ aadhaar_number: '123456789012', otp: '123456', operator_id: 1116 }, null, 2), action: (p) => { const body = p ? JSON.parse(p) : {}; return OneBssApi.scoremeVerifyOtp(body.aadhaar_number, body.otp, body.operator_id, body.user_id); } },
 
-  // Module 8: Telemetry & KYC Mapping
-  { id: '8.1', name: 'GET /kyc_provider_mapping.php?partner_id=1116', method: 'GET', module: 'Module 8: Telemetry', payload: '', action: () => OneBssApi.getKycProviderMapping(1116) },
-  { id: '8.2', name: 'POST /kyc_provider_mapping.php', method: 'POST', module: 'Module 8: Telemetry', payload: JSON.stringify({ partner_id: 1116, providers: ['digilocker', 'scoreme'] }, null, 2), action: () => OneBssApi.assignKycProviders(1116, ['digilocker', 'scoreme']) },
-  { id: '8.3', name: 'DELETE /kyc_provider_mapping.php', method: 'DELETE', module: 'Module 8: Telemetry', payload: JSON.stringify({ partner_id: 1116, providers: ['scoreme'] }, null, 2), action: () => OneBssApi.unassignKycProviders(1116, ['scoreme']) },
-  { id: '8.4', name: 'GET /dashboard.php?partner_id=1116', method: 'GET', module: 'Module 8: Telemetry', payload: '', action: () => OneBssApi.getDashboardTelemetry(1116) },
+  // 7. Customer Management (6 APIs)
+  { id: '7.1', name: 'POST /add_internet_customer.php (Aadhaar-Verified)', method: 'POST', module: '7. Customer Management', payload: JSON.stringify({ user_id: 12, operator_id: 1116, package_id: 1, sub_plan_id: 1, username: 'sridevi_k', password: 'SecurePass123', mobile: '9125253535', installation_address: 'Pedda Avutapalli' }, null, 2), action: (p) => OneBssApi.addInternetCustomer(p ? JSON.parse(p) : {}) },
+  { id: '7.2', name: 'POST /add_internet_customer_manual.php (Manual)', method: 'POST', module: '7. Customer Management', payload: JSON.stringify({ operator_id: 1116, package_id: 1, sub_plan_id: 1, username: 'walkin_cust', password: 'SecurePass123', mobile: '9999888877', first_name: 'Ravi', last_name: 'Kumar', dob: '1990-05-15', billing_address: 'Telaprolu', installation_address: 'Telaprolu' }, null, 2), action: (p) => OneBssApi.addInternetCustomerManual(p ? JSON.parse(p) : {}) },
+  { id: '7.3', name: 'POST /internet_customer_sync.php (Bulk Sync)', method: 'POST', module: '7. Customer Management', payload: '', action: () => OneBssApi.syncInternetCustomersBulk() },
+  { id: '7.4', name: 'POST /internet_customer_detail_sync.php?internet_id=3', method: 'POST', module: '7. Customer Management', payload: '', action: () => OneBssApi.syncInternetCustomerDetail(3) },
+  { id: '7.5', name: 'POST /iptv_customer_sync.php', method: 'POST', module: '7. Customer Management', payload: JSON.stringify({ mobile: '9125253535' }, null, 2), action: (p) => { const body = p ? JSON.parse(p) : {}; return OneBssApi.syncIptvCustomers(body.mobile); } },
+  { id: '7.6', name: 'GET /customer_lookup.php?mobile=9125253535', method: 'GET', module: '7. Customer Management', payload: '', action: () => OneBssApi.customerLookup('9125253535') },
 ];
 
 export const ApiConsoleScreen = () => {
@@ -74,8 +70,8 @@ export const ApiConsoleScreen = () => {
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>28-API Endpoint Verification Suite</Text>
-      <Text style={styles.subtitle}>Execute and inspect all 28 endpoints from OneBSS API Documentation Manual</Text>
+      <Text style={styles.title}>24-API Endpoint Verification Suite</Text>
+      <Text style={styles.subtitle}>Execute and inspect all 24 endpoints from OneBSS API Documentation Manual</Text>
 
       {/* Endpoint Dropdown Selector */}
       <View style={styles.card}>
