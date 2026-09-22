@@ -9,6 +9,7 @@ import { PartnerScreen } from './src/screens/PartnerScreen';
 import { CustomerScreen } from './src/screens/CustomerScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { LoginModal } from './src/screens/LoginModal';
+import { ToastContainer } from 'react-toastify';
 
 export default function App() {
   const { width } = useWindowDimensions();
@@ -162,6 +163,7 @@ export default function App() {
             setActiveTab('dashboard');
           }}
         />
+        <ToastContainer position="top-right" autoClose={3500} theme="colored" />
       </SafeAreaView>
     );
   }
@@ -271,6 +273,8 @@ export default function App() {
         onClose={() => setIsLoginVisible(false)}
         onLoginSuccess={(userData) => handleSetUser(userData)}
       />
+
+      <ToastContainer position="top-right" autoClose={3500} theme="colored" />
     </SafeAreaView>
   );
 }

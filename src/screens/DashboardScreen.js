@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi, setApiConfig } from '../services/oneBssApi';
+import { toast } from 'react-toastify';
 
 export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
   const { width } = useWindowDimensions();
@@ -49,19 +50,18 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
       const data = res.data || {};
 
       if (res.status === 403 || data.success === false) {
-        setSyncMsg(`❌ ${data.message || 'Access Denied. Bulk RADIUS Sync requires Operator role token.'}`);
+        toast.error(data.message || 'Access Denied. Bulk RADIUS Sync requires Operator role token.');
       } else if (data.summary) {
         const s = data.summary;
-        setSyncMsg(`✅ Bulk RADIUS Sync Complete! Created: ${s.customers_created || 0}, Matched: ${s.customers_matched || 0}, Added: ${s.accounts_added || 0}`);
+        toast.success(`Bulk RADIUS Sync Complete! Created: ${s.customers_created || 0}, Matched: ${s.customers_matched || 0}, Added: ${s.accounts_added || 0}`);
       } else {
-        setSyncMsg('✅ Internet customer database synchronized successfully via Sync API!');
+        toast.success('Internet customer database synchronized successfully!');
       }
       await refreshData();
     } catch (e) {
-      setSyncMsg('✅ Internet customer database synchronized with RADIUS gateway!');
+      toast.success('Internet customer database synchronized with RADIUS gateway!');
     } finally {
       setSyncingInet(false);
-      setTimeout(() => setSyncMsg(''), 5000);
     }
   };
 
@@ -73,16 +73,15 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
       const data = res.data || {};
 
       if (res.status === 502 || data.success === false) {
-        setSyncMsg(`⚠️ IPTV STB Sync: ${data.message || 'Pioneer IPTV STB Gateway returned an error.'}`);
+        toast.warn(`IPTV STB Sync: ${data.message || 'Pioneer IPTV STB Gateway returned an error.'}`);
       } else {
-        setSyncMsg(`✅ IPTV STB subscriber records synchronized via Gateway Sync API!`);
+        toast.success('IPTV STB subscriber records synchronized via Gateway Sync API!');
         await refreshData();
       }
     } catch (e) {
-      setSyncMsg('❌ IPTV subscriber sync failed.');
+      toast.error('IPTV subscriber sync failed.');
     } finally {
       setSyncingIptv(false);
-      setTimeout(() => setSyncMsg(''), 5000);
     }
   };
 

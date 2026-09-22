@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, useWin
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
+import { toast } from 'react-toastify';
 
 export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator', onAccountCreated }) => {
   const { width } = useWindowDimensions();
@@ -21,7 +22,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
-  // 3. RADIUS Internet Mapping Block
+  // 3. RADIUS Internet Mapping Block (Dynamic from API)
   const [internetBaseUrl, setInternetBaseUrl] = useState('');
   const [internetToken, setInternetToken] = useState('');
   const [internetPartnerId, setInternetPartnerId] = useState('');
@@ -32,6 +33,8 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
   const [partnerList, setPartnerList] = useState([]);
   const [fetchingBranches, setFetchingBranches] = useState(false);
   const [branchList, setBranchList] = useState([]);
+  const [apiError, setApiError] = useState('');
+  const [manualMode, setManualMode] = useState(false);
 
   // Dropdown Open/Close states for custom web select pickers
   const [partnerDropdownOpen, setPartnerDropdownOpen] = useState(false);
@@ -45,6 +48,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
+  // Reset all fields whenever the modal opens
   useEffect(() => {
     if (visible) {
       setRole(initialRole || 'operator');
@@ -62,6 +66,8 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       setInternalBranchId('');
       setPartnerList([]);
       setBranchList([]);
+      setApiError('');
+      setManualMode(false);
       setIptvBaseUrl('');
       setIptvKey('');
       setIptvOperatorId('');
@@ -72,105 +78,204 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
 
   if (!visible) return null;
 
-  // Step 2: Fetch Upstream RADIUS Partners (POST /internet_partners_fetch.php)
-  const handleFetchRadiusPartners = async () => {
-    if (!internetToken.trim() || !internetBaseUrl.trim()) {
-      setError('Please enter Internet Base URL and Internet Token first');
+  // Auto-fetch Upstream RADIUS Partners & Branches dynamically from API when Base URL and Token are entered
+  useEffect(() => {
+    const url = internetBaseUrl.trim();
+    const token = internetToken.trim();
+
+    if (!url || !token || url.length < 8 || token.length < 4) {
+      setPartnerList([]);
+      setBranchList([]);
+      setInternetPartnerId('');
+      setInternalBranchId('');
+      setApiError('');
       return;
     }
-    setFetchingPartners(true);
-    setError('');
-    try {
-      const res = await OneBssApi.fetchInternetPartners(internetToken.trim(), internetBaseUrl.trim());
-      const data = res.data?.data || res.data || [];
-      if (Array.isArray(data) && data.length > 0) {
-        setPartnerList(data.map((p) => ({
-          id: String(p.id || p.partner_id),
-          name: p.name || p.partner_name || `Partner #${p.id || p.partner_id}`,
-        })));
-      } else {
-        setPartnerList([
-          { id: '292', name: 'Partner #292 - Sai Ram Network (Vijayawada)' },
-          { id: '295', name: 'Partner #295 - VR Play Communications' },
-          { id: '300', name: 'Partner #300 - Pioneer Fiber Tech' },
-        ]);
-      }
-    } catch (e) {
-      setPartnerList([
-        { id: '292', name: 'Partner #292 - Sai Ram Network (Vijayawada)' },
-        { id: '295', name: 'Partner #295 - VR Play Communications' },
-        { id: '300', name: 'Partner #300 - Pioneer Fiber Tech' },
-      ]);
-    } finally {
-      setFetchingPartners(false);
-      setPartnerDropdownOpen(true);
-    }
-  };
 
-  // Step 3: Select RADIUS Partner & Fetch Upstream Branches (POST /internet_branches_fetch.php)
-  const handleSelectRadiusPartner = async (partnerIdVal) => {
+    let isCancelled = false;
+    const timer = setTimeout(async () => {
+      setFetchingPartners(true);
+      setError('');
+      setApiError('');
+      try {
+        const res = await OneBssApi.fetchInternetPartners(token, url);
+        if (!res.ok || res.status >= 400 || res.data?.success === false) {
+          const msg = res.data?.message || res.data?.data?.message || `Gateway returned HTTP ${res.status || 'Error'}`;
+          if (isCancelled) return;
+          setApiError(msg);
+          toast.error(`RADIUS Gateway API Error: ${msg}`);
+          setPartnerList([]);
+          setInternetPartnerId('');
+          setBranchList([]);
+          setInternalBranchId('');
+          return;
+        }
+
+        const data = res.data?.data || res.data || [];
+        let pList = [];
+        if (Array.isArray(data) && data.length > 0) {
+          pList = data.map((p) => ({
+            id: String(p.id || p.partner_id),
+            name: p.name || p.partner_name || `Partner #${p.id || p.partner_id}`,
+          }));
+        }
+
+        if (isCancelled) return;
+
+        if (pList.length > 0) {
+          setPartnerList(pList);
+          setApiError('');
+          toast.success(`Successfully loaded ${pList.length} upstream RADIUS partners!`);
+          const chosenPartnerId = pList[0].id;
+          setInternetPartnerId(chosenPartnerId);
+
+          // Auto-fetch Upstream Branches for the first partner
+          setFetchingBranches(true);
+          try {
+            const branchRes = await OneBssApi.fetchInternetBranches(token, url, chosenPartnerId);
+            if (!branchRes.ok || branchRes.status >= 400 || branchRes.data?.success === false) {
+              const bMsg = branchRes.data?.message || 'Unable to fetch branches for selected partner.';
+              toast.warn(`Branch Warning: ${bMsg}`);
+              setBranchList([]);
+              setInternalBranchId('');
+              return;
+            }
+            const bData = branchRes.data?.data || branchRes.data || [];
+            let bList = [];
+            if (Array.isArray(bData) && bData.length > 0) {
+              bList = bData.map((b) => ({
+                id: String(b.id || b.branch_id),
+                name: b.name || b.branch_name || `Branch #${b.id || b.branch_id}`,
+              }));
+            }
+            if (isCancelled) return;
+            setBranchList(bList);
+            setInternalBranchId(bList.length > 0 ? bList[0].id : '');
+          } catch (e) {
+            if (isCancelled) return;
+            toast.error(`Branch API Error: ${e.message || 'Failed to fetch branches'}`);
+            setBranchList([]);
+            setInternalBranchId('');
+          } finally {
+            if (!isCancelled) setFetchingBranches(false);
+          }
+        } else {
+          const emptyMsg = 'Gateway reachable, but no upstream partners were returned.';
+          setApiError(emptyMsg);
+          toast.warn(emptyMsg);
+          setPartnerList([]);
+          setInternetPartnerId('');
+          setBranchList([]);
+          setInternalBranchId('');
+        }
+      } catch (err) {
+        if (isCancelled) return;
+        const errMsg = err.message || 'Network connection failed. Verify Base URL & Token.';
+        setApiError(errMsg);
+        toast.error(`RADIUS Gateway API Error: ${errMsg}`);
+        setPartnerList([]);
+        setInternetPartnerId('');
+        setBranchList([]);
+        setInternalBranchId('');
+      } finally {
+        if (!isCancelled) setFetchingPartners(false);
+      }
+    }, 600);
+
+    return () => {
+      isCancelled = true;
+      clearTimeout(timer);
+    };
+  }, [internetBaseUrl, internetToken]);
+
+  // Handle manual selection from auto-fetched Partner dropdown
+  const handleSelectPartner = async (partnerIdVal) => {
     setInternetPartnerId(partnerIdVal);
     setPartnerDropdownOpen(false);
+    setBranchList([]);
+    setInternalBranchId('');
+
+    const url = internetBaseUrl.trim();
+    const token = internetToken.trim();
+    if (!url || !token) return;
+
     setFetchingBranches(true);
     try {
-      const res = await OneBssApi.fetchInternetBranches(internetToken.trim(), internetBaseUrl.trim(), partnerIdVal);
-      const data = res.data?.data || res.data || [];
-      if (Array.isArray(data) && data.length > 0) {
-        const mappedBranches = data.map((b) => ({
+      const branchRes = await OneBssApi.fetchInternetBranches(token, url, partnerIdVal);
+      if (!branchRes.ok || branchRes.status >= 400 || branchRes.data?.success === false) {
+        const bMsg = branchRes.data?.message || 'Failed to fetch branches from RADIUS gateway';
+        toast.error(`Branch API Error: ${bMsg}`);
+        setBranchList([]);
+        setInternalBranchId('');
+        return;
+      }
+      const bData = branchRes.data?.data || branchRes.data || [];
+      if (Array.isArray(bData) && bData.length > 0) {
+        const liveList = bData.map((b) => ({
           id: String(b.id || b.branch_id),
           name: b.name || b.branch_name || `Branch #${b.id || b.branch_id}`,
         }));
-        setBranchList(mappedBranches);
-        if (mappedBranches[0]) setInternalBranchId(mappedBranches[0].id);
+        setBranchList(liveList);
+        if (liveList[0]) setInternalBranchId(liveList[0].id);
       } else {
-        const defaultBranches = [
-          { id: '328', name: 'Branch #328 - Vijayawada Main Branch' },
-          { id: '329', name: 'Branch #329 - Guntur Central Branch' },
-          { id: '330', name: 'Branch #330 - Vizag Regional Hub' },
-        ];
-        setBranchList(defaultBranches);
-        setInternalBranchId('328');
+        toast.warn(`No branches available for partner #${partnerIdVal}`);
+        setBranchList([]);
+        setInternalBranchId('');
       }
     } catch (e) {
-      const defaultBranches = [
-        { id: '328', name: 'Branch #328 - Vijayawada Main Branch' },
-        { id: '329', name: 'Branch #329 - Guntur Central Branch' },
-        { id: '330', name: 'Branch #330 - Vizag Regional Hub' },
-      ];
-      setBranchList(defaultBranches);
-      setInternalBranchId('328');
+      toast.error(`Branch API Error: ${e.message || 'Connection failed'}`);
+      setBranchList([]);
+      setInternalBranchId('');
     } finally {
       setFetchingBranches(false);
     }
   };
 
+  // Handle manual selection from auto-fetched Branch dropdown
+  const handleSelectBranch = (branchIdVal) => {
+    setInternalBranchId(branchIdVal);
+    setBranchDropdownOpen(false);
+  };
+
   const handleSubmit = async () => {
     if (!partnerName.trim()) {
-      setError('Please enter Partner / Operator Name');
+      toast.error('Please enter Partner / Operator Name');
       return;
     }
     if (!companyName.trim()) {
-      setError('Please enter Company Name');
+      toast.error('Please enter Company Name');
       return;
     }
     if (!mobile.trim() || mobile.trim().length < 10) {
-      setError('Please enter 10-digit Primary Mobile Number');
+      toast.error('Please enter 10-digit Primary Mobile Number');
       return;
     }
     if (!email.trim()) {
-      setError('Please enter Email Address');
+      toast.error('Please enter Email Address');
       return;
     }
     if (!region.trim()) {
-      setError('Please enter City / Region');
+      toast.error('Please enter City / Region');
       return;
     }
     if (!username.trim()) {
-      setError('Please enter Login Username');
+      toast.error('Please enter Login Username');
       return;
     }
     if (!password.trim()) {
-      setError('Please enter Login Password');
+      toast.error('Please enter Login Password');
+      return;
+    }
+    if (!internetBaseUrl.trim() || !internetToken.trim()) {
+      toast.error('Please enter Internet Base URL and Internet Token first');
+      return;
+    }
+    if (!internetPartnerId.trim()) {
+      toast.error('Please select an Upstream RADIUS Partner');
+      return;
+    }
+    if (!internetBranchId.trim()) {
+      toast.error('Please select an Upstream RADIUS Branch');
       return;
     }
 
@@ -207,7 +312,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       const resData = res.data || {};
 
       if (res.status === 400 || res.status === 409 || resData.success === false) {
-        setError(resData.message || resData.data?.message || 'Failed to create operator. Please check input parameters.');
+        toast.error(resData.message || resData.data?.message || 'Failed to create operator. Please check input parameters.');
       } else {
         const createdPartner = resData.data || {
           partner_id: resData.partner_id || Math.floor(1100 + Math.random() * 8800),
@@ -228,6 +333,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
           status: 'enabled',
         });
 
+        toast.success(resData.message || `Operator "${partnerName.trim()}" registered successfully!`);
         if (onAccountCreated) {
           onAccountCreated(createdPartner, resData.message || `Operator "${partnerName.trim()}" registered successfully!`);
         }
@@ -242,6 +348,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
         account_role: role,
         status: 'enabled',
       };
+      toast.success(`Operator "${partnerName.trim()}" registered successfully!`);
       if (onAccountCreated) {
         onAccountCreated(localPartner, `Operator "${partnerName.trim()}" registered successfully!`);
       }
@@ -278,13 +385,6 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       </View>
 
       <ScrollView style={styles.fullScreenContent} contentContainerStyle={{ paddingHorizontal: isMobile ? 14 : 28, paddingVertical: 20 }}>
-        {error ? (
-          <View style={styles.errorBox}>
-            <Feather name="alert-circle" size={18} color="#ef4444" />
-            <Text style={styles.errorText}>{error}</Text>
-          </View>
-        ) : null}
-
         {/* Role Type Selector */}
         <View style={styles.sectionCard}>
           <Text style={styles.sectionCardTitle}>ACCOUNT ROLE REGISTRATION TYPE</Text>
@@ -320,7 +420,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
               <Text style={styles.label}>PARTNER NAME (DISPLAY NAME) *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g. Sai Ram Network"
+                placeholder="Enter Partner / Operator Name"
                 value={partnerName}
                 onChangeText={setPartnerName}
                 placeholderTextColor={COLORS.textDim}
@@ -331,7 +431,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
               <Text style={styles.label}>REGISTERED COMPANY NAME *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g. Sai Ram Cable Network"
+                placeholder="Enter Registered Company Name"
                 value={companyName}
                 onChangeText={setCompanyName}
                 placeholderTextColor={COLORS.textDim}
@@ -344,7 +444,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
               <Text style={styles.label}>PRIMARY MOBILE (10 DIGITS) *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g. 9876543299"
+                placeholder="Enter 10-digit mobile number"
                 value={mobile}
                 onChangeText={setMobile}
                 keyboardType="phone-pad"
@@ -356,7 +456,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
               <Text style={styles.label}>EMAIL ADDRESS *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g. sairam_test_02@gmail.com"
+                placeholder="Enter operator email address"
                 value={email}
                 onChangeText={setEmail}
                 keyboardType="email-address"
@@ -368,7 +468,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
               <Text style={styles.label}>CITY / REGION *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g. Vijayawada"
+                placeholder="Enter operational city or region"
                 value={region}
                 onChangeText={setRegion}
                 placeholderTextColor={COLORS.textDim}
@@ -386,7 +486,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
               <Text style={styles.label}>LOGIN USERNAME *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g. oper_sairam_02"
+                placeholder="Enter login username"
                 value={username}
                 onChangeText={setUsername}
                 placeholderTextColor={COLORS.textDim}
@@ -397,7 +497,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
               <Text style={styles.label}>LOGIN PASSWORD *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="e.g. SecurePassword123!"
+                placeholder="Enter login password"
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
@@ -409,14 +509,25 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
 
         {/* Section 3: RADIUS Internet Mapping */}
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionCardTitle}>3. INTERNET MAPPING (RADIUS GATEWAY SETTINGS)</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+            <Text style={styles.sectionCardTitle}>3. INTERNET MAPPING (RADIUS GATEWAY SETTINGS)</Text>
+            <TouchableOpacity
+              style={styles.toggleModeBtn}
+              onPress={() => setManualMode(!manualMode)}
+            >
+              <Feather name={manualMode ? "list" : "edit-3"} size={13} color={COLORS.primary} />
+              <Text style={styles.toggleModeBtnText}>
+                {manualMode ? "Switch to Auto-Fetch Dropdown" : "Enter IDs Manually"}
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           <View style={[styles.row, isMobile && styles.rowMobile]}>
             <View style={[styles.inputGroup, { flex: 1 }]}>
               <Text style={styles.label}>INTERNET BASE URL *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="https://radius.vrplay.in"
+                placeholder="https://radius.domain.com"
                 value={internetBaseUrl}
                 onChangeText={setInternetBaseUrl}
                 placeholderTextColor={COLORS.textDim}
@@ -427,7 +538,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
               <Text style={styles.label}>INTERNET TOKEN *</Text>
               <TextInput
                 style={styles.input}
-                placeholder="OsFKjvkV8hJpPxilaG3kplsrBOd8WqxA"
+                placeholder="Enter RADIUS Gateway Token"
                 value={internetToken}
                 onChangeText={setInternetToken}
                 placeholderTextColor={COLORS.textDim}
@@ -435,102 +546,181 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
             </View>
           </View>
 
-          <TouchableOpacity
-            style={styles.btnFetchPartners}
-            onPress={handleFetchRadiusPartners}
-            disabled={fetchingPartners}
-          >
-            {fetchingPartners ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Feather name="download-cloud" size={16} color="#fff" />
-            )}
-            <Text style={styles.btnFetchPartnersText}>
-              {fetchingPartners ? 'Fetching Upstream RADIUS Partners...' : 'Fetch Upstream RADIUS Partners'}
-            </Text>
-          </TouchableOpacity>
-
-          {/* STEP 2: FULL-WIDTH RADIUS PARTNER DROPDOWN SELECTOR */}
-          <View style={[styles.inputGroup, { marginTop: 16 }]}>
-            <Text style={styles.label}>STEP 2: SELECT UPSTREAM RADIUS PARTNER (POST /internet_partners_fetch.php) *</Text>
-
-            <TouchableOpacity
-              style={styles.dropdownSelectTrigger}
-              onPress={() => setPartnerDropdownOpen(!partnerDropdownOpen)}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                <Feather name="users" size={16} color={COLORS.primary} />
-                <Text style={styles.dropdownSelectValueText}>
-                  {selectedPartnerObj ? selectedPartnerObj.name : 'Select RADIUS Partner'}
-                </Text>
-              </View>
-              <Feather name={partnerDropdownOpen ? "chevron-up" : "chevron-down"} size={18} color={COLORS.textMuted} />
-            </TouchableOpacity>
-
-            {partnerDropdownOpen && (
-              <View style={styles.dropdownMenuBox}>
-                {partnerList.map((p) => {
-                  const isSelected = String(internetPartnerId) === String(p.id);
-                  return (
-                    <TouchableOpacity
-                      key={p.id}
-                      style={[styles.dropdownMenuItem, isSelected && styles.dropdownMenuItemActive]}
-                      onPress={() => handleSelectRadiusPartner(p.id)}
-                    >
-                      <Feather name={isSelected ? "check-circle" : "circle"} size={16} color={isSelected ? COLORS.primary : COLORS.textMuted} />
-                      <Text style={[styles.dropdownMenuItemText, isSelected && styles.dropdownMenuItemTextActive]}>
-                        {p.name}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-          </View>
-
-          {/* STEP 3: FULL-WIDTH RADIUS BRANCH DROPDOWN SELECTOR */}
-          <View style={[styles.inputGroup, { marginTop: 16 }]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
-              <Text style={styles.label}>STEP 3: SELECT UPSTREAM RADIUS BRANCH (POST /internet_branches_fetch.php) *</Text>
-              {fetchingBranches && <ActivityIndicator size="small" color={COLORS.primary} />}
+          {/* Auto-fetching status indicator when Base URL and Token are entered */}
+          {(fetchingPartners || fetchingBranches) ? (
+            <View style={styles.autoFetchStatusCard}>
+              <ActivityIndicator size="small" color={COLORS.primary} />
+              <Text style={styles.autoFetchStatusText}>
+                {fetchingPartners
+                  ? 'Auto-fetching upstream RADIUS partners from gateway...'
+                  : 'Auto-fetching upstream RADIUS branches from gateway...'}
+              </Text>
             </View>
+          ) : null}
 
-            <TouchableOpacity
-              style={styles.dropdownSelectTrigger}
-              onPress={() => setBranchDropdownOpen(!branchDropdownOpen)}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                <Feather name="git-branch" size={16} color="#8b5cf6" />
-                <Text style={styles.dropdownSelectValueText}>
-                  {selectedBranchObj ? selectedBranchObj.name : 'Select RADIUS Branch'}
+          {/* If API is not correct: Display visual warning card with Switch to Manual option */}
+          {Boolean(apiError) ? (
+            <View style={styles.apiErrorBanner}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                <Feather name="alert-triangle" size={16} color="#ef4444" />
+                <Text style={styles.apiErrorBannerText}>
+                  Gateway API Error: {apiError}
                 </Text>
               </View>
-              <Feather name={branchDropdownOpen ? "chevron-up" : "chevron-down"} size={18} color={COLORS.textMuted} />
-            </TouchableOpacity>
+              {!manualMode ? (
+                <TouchableOpacity
+                  style={styles.apiErrorActionBtn}
+                  onPress={() => setManualMode(true)}
+                >
+                  <Text style={styles.apiErrorActionBtnText}>Enter IDs Manually</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : null}
 
-            {branchDropdownOpen && (
-              <View style={styles.dropdownMenuBox}>
-                {branchList.map((b) => {
-                  const isSelected = String(internetBranchId) === String(b.id);
-                  return (
-                    <TouchableOpacity
-                      key={b.id}
-                      style={[styles.dropdownMenuItem, isSelected && styles.dropdownMenuItemActivePurple]}
-                      onPress={() => {
-                        setInternalBranchId(b.id);
-                        setBranchDropdownOpen(false);
-                      }}
-                    >
-                      <Feather name={isSelected ? "check-circle" : "circle"} size={16} color={isSelected ? "#8b5cf6" : COLORS.textMuted} />
-                      <Text style={[styles.dropdownMenuItemText, isSelected && styles.dropdownMenuItemTextActivePurple]}>
-                        {b.name}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
+          {/* If manual mode is active: allow direct text inputs */}
+          {manualMode ? (
+            <View style={{ marginTop: 14 }}>
+              <View style={[styles.row, isMobile && styles.rowMobile]}>
+                <View style={[styles.inputGroup, { flex: 1 }]}>
+                  <Text style={styles.label}>UPSTREAM RADIUS PARTNER ID *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. 292"
+                    value={internetPartnerId}
+                    onChangeText={setInternetPartnerId}
+                    placeholderTextColor={COLORS.textDim}
+                  />
+                </View>
+
+                <View style={[styles.inputGroup, { flex: 1 }]}>
+                  <Text style={styles.label}>UPSTREAM RADIUS BRANCH ID *</Text>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="e.g. 328"
+                    value={internetBranchId}
+                    onChangeText={setInternalBranchId}
+                    placeholderTextColor={COLORS.textDim}
+                  />
+                </View>
               </View>
-            )}
-          </View>
+              <Text style={styles.manualModeHelpText}>
+                💡 Manual entry mode active: Specify the partner and branch IDs directly if the upstream RADIUS API is unreachable or returns errors.
+              </Text>
+            </View>
+          ) : (
+            <>
+              {/* RADIUS PARTNER DROPDOWN - Dynamic & User Selectable */}
+              <View style={[styles.inputGroup, { marginTop: 14 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.label}>SELECT UPSTREAM RADIUS PARTNER *</Text>
+                    {partnerList.length > 0 ? (
+                      <View style={styles.seedIndicatorBadge}>
+                        <Text style={styles.seedIndicatorText}>{partnerList.length} Available</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  {fetchingPartners ? <ActivityIndicator size="small" color={COLORS.primary} /> : null}
+                </View>
+
+                <TouchableOpacity
+                  style={styles.dropdownSelectTrigger}
+                  onPress={() => setPartnerDropdownOpen(!partnerDropdownOpen)}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                    <Feather name="users" size={16} color={COLORS.primary} />
+                    <Text style={styles.dropdownSelectValueText}>
+                      {selectedPartnerObj
+                        ? selectedPartnerObj.name
+                        : (fetchingPartners
+                            ? 'Fetching partners from gateway...'
+                            : (partnerList.length > 0
+                                ? 'Select RADIUS Partner'
+                                : 'Enter Base URL & Token above to auto-fetch partners'))}
+                    </Text>
+                  </View>
+                  <Feather name={partnerDropdownOpen ? "chevron-up" : "chevron-down"} size={18} color={COLORS.textMuted} />
+                </TouchableOpacity>
+
+                {partnerDropdownOpen && partnerList.length > 0 ? (
+                  <View style={styles.dropdownMenuBox}>
+                    {partnerList.map((p) => {
+                      const isSelected = String(internetPartnerId) === String(p.id);
+                      return (
+                        <TouchableOpacity
+                          key={p.id}
+                          style={[styles.dropdownMenuItem, isSelected && styles.dropdownMenuItemActive]}
+                          onPress={() => handleSelectPartner(p.id)}
+                        >
+                          <Feather name={isSelected ? "check-circle" : "circle"} size={16} color={isSelected ? COLORS.primary : COLORS.textMuted} />
+                          <Text style={[styles.dropdownMenuItemText, isSelected && styles.dropdownMenuItemTextActive]}>
+                            {p.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </View>
+
+              {/* RADIUS BRANCH DROPDOWN - Dynamic & User Selectable */}
+              <View style={[styles.inputGroup, { marginTop: 14 }]}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={styles.label}>SELECT UPSTREAM RADIUS BRANCH *</Text>
+                    {branchList.length > 0 ? (
+                      <View style={[styles.seedIndicatorBadge, { backgroundColor: 'rgba(139, 92, 246, 0.12)' }]}>
+                        <Text style={[styles.seedIndicatorText, { color: '#8b5cf6' }]}>{branchList.length} Available</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  {fetchingBranches ? <ActivityIndicator size="small" color="#8b5cf6" /> : null}
+                </View>
+
+                <TouchableOpacity
+                  style={[styles.dropdownSelectTrigger, { borderColor: '#8b5cf6' }]}
+                  onPress={() => setBranchDropdownOpen(!branchDropdownOpen)}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                    <Feather name="git-branch" size={16} color="#8b5cf6" />
+                    <Text style={styles.dropdownSelectValueText}>
+                      {selectedBranchObj
+                        ? selectedBranchObj.name
+                        : (fetchingBranches
+                            ? 'Fetching branches from gateway...'
+                            : (branchList.length > 0
+                                ? 'Select RADIUS Branch'
+                                : (internetPartnerId
+                                    ? 'No branches found for selected partner'
+                                    : 'Select an upstream partner to fetch branches')))}
+                    </Text>
+                  </View>
+                  <Feather name={branchDropdownOpen ? "chevron-up" : "chevron-down"} size={18} color={COLORS.textMuted} />
+                </TouchableOpacity>
+
+                {branchDropdownOpen && branchList.length > 0 ? (
+                  <View style={styles.dropdownMenuBox}>
+                    {branchList.map((b) => {
+                      const isSelected = String(internetBranchId) === String(b.id);
+                      return (
+                        <TouchableOpacity
+                          key={b.id}
+                          style={[styles.dropdownMenuItem, isSelected && styles.dropdownMenuItemActivePurple]}
+                          onPress={() => handleSelectBranch(b.id)}
+                        >
+                          <Feather name={isSelected ? "check-circle" : "circle"} size={16} color={isSelected ? "#8b5cf6" : COLORS.textMuted} />
+                          <Text style={[styles.dropdownMenuItemText, isSelected && styles.dropdownMenuItemTextActivePurple]}>
+                            {b.name}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ) : null}
+              </View>
+            </>
+          )}
         </View>
 
         {/* Section 4: IPTV Mapping */}
@@ -753,6 +943,107 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 14,
     color: COLORS.textMain,
+  },
+  seedIndicatorBadge: {
+    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  seedIndicatorText: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  toggleModeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 8,
+    backgroundColor: 'rgba(37, 99, 235, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(37, 99, 235, 0.25)',
+  },
+  toggleModeBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.primary,
+  },
+  apiErrorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(239, 68, 68, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.25)',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 10,
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  apiErrorBannerText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#ef4444',
+    flex: 1,
+  },
+  apiErrorActionBtn: {
+    backgroundColor: '#ef4444',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  apiErrorActionBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  manualModeHelpText: {
+    fontSize: 12,
+    color: COLORS.textMuted,
+    marginTop: 2,
+    fontStyle: 'italic',
+  },
+  autoFetchStatusCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(37, 99, 235, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(37, 99, 235, 0.2)',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 10,
+  },
+  autoFetchStatusText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  autoFetchSuccessCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.25)',
+    borderRadius: 10,
+    padding: 12,
+    marginTop: 10,
+  },
+  autoFetchSuccessTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: COLORS.accentEmerald,
+  },
+  autoFetchSuccessText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: COLORS.textMuted,
+    marginTop: 2,
   },
   btnFetchPartners: {
     flexDirection: 'row',

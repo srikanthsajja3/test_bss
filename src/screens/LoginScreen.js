@@ -12,6 +12,7 @@ import {
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { OneBssApi, setApiConfig } from '../services/oneBssApi';
+import { toast } from 'react-toastify';
 
 export const LoginScreen = ({ onLoginSuccess }) => {
   const { width } = useWindowDimensions();
@@ -32,6 +33,7 @@ export const LoginScreen = ({ onLoginSuccess }) => {
       const p = password.trim();
 
       if (!u || !p) {
+        toast.error('Please enter both username and password.');
         setErrorMsg('Please enter both username and password.');
         setLoading(false);
         return;
@@ -41,6 +43,7 @@ export const LoginScreen = ({ onLoginSuccess }) => {
       const data = res.data || {};
 
       if (data.success === false || data.status === 'error' || res.status === 401) {
+        toast.error(data.message || 'Invalid username or password. Access denied.');
         setErrorMsg(`❌ ${data.message || 'Invalid username or password. Access denied.'}`);
         setLoading(false);
         return;
@@ -69,6 +72,8 @@ export const LoginScreen = ({ onLoginSuccess }) => {
       const partnerId = decoded?.partner_id || serverUser.partner_id || 1112;
       const partnerName = decoded?.partner_name || serverUser.partner_name || (role === 'operator' ? 'Airtel Broadband Ltd' : 'Global Super Admin');
 
+      toast.success(`Welcome back, ${partnerName}!`);
+
       onLoginSuccess({
         username: u,
         role: role,
@@ -77,6 +82,7 @@ export const LoginScreen = ({ onLoginSuccess }) => {
         token: token,
       });
     } catch (e) {
+      toast.error('Invalid username or password. Authentication failed.');
       setErrorMsg('❌ Invalid username or password. Authentication failed.');
     } finally {
       setLoading(false);

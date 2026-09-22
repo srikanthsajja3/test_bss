@@ -3,66 +3,39 @@ import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Modal,
 import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi, setApiConfig } from '../services/oneBssApi';
+import { toast } from 'react-toastify';
 
-// Map API customers_list entities directly to Broadband Table Rows
-// Sample default customers containing exact user requested fields
-const DEFAULT_RAW_CUSTOMERS = [
-  {
-    cust_id: 101,
-    full_name: 'Mathangi Sindhuja',
-    mobile: '9703941342',
-    username: 'sindhuja_mathangi',
-    status_text: 'Active',
-    online: 'OFFLINE',
-    package_name: 'Fiber Ultra 200M',
-    subplan_name: 'Standard Unlimited Tier',
-    expiration: '2026-10-21 19:32:35',
-    aadhar_verified: true,
-  },
-  {
-    cust_id: 102,
-    full_name: 'Rajesh Kumar',
-    mobile: '9876543210',
-    username: 'rajesh_k',
-    status_text: 'Active',
-    online: 'ONLINE',
-    package_name: 'Fiber Max 500M',
-    subplan_name: 'Gigabit Premium Tier',
-    expiration: '2026-11-15 14:00:00',
-    aadhar_verified: true,
-  },
-  {
-    cust_id: 103,
-    full_name: 'Ananya Sharma',
-    mobile: '9123456789',
-    username: 'ananya_s',
-    status_text: 'Expired',
-    online: 'OFFLINE',
-    package_name: 'Fiber Starter 100M',
-    subplan_name: 'Basic Home Pack',
-    expiration: '2026-09-01 10:00:00',
-    aadhar_verified: false,
-  },
-];
+const formatApiValue = (val) => {
+  if (val === null) return 'null';
+  if (val === undefined) return '';
+  return String(val);
+};
+
+const resolveApiField = (primary, secondary, tertiary) => {
+  if (primary !== undefined) return formatApiValue(primary);
+  if (secondary !== undefined) return formatApiValue(secondary);
+  if (tertiary !== undefined) return formatApiValue(tertiary);
+  return '';
+};
 
 // Map API customers_list entities directly to Broadband Table Rows
 const mapCustomersListToBroadbandRow = (item, index) => {
   const intAcc = item.internet_accounts?.[0] || {};
-  const statusText = item.status_text || intAcc.status_text || 'Active';
-  const onlineStatus = item.online || intAcc.online || (intAcc.online === 'ONLINE' || statusText === 'Active' ? 'ONLINE' : 'OFFLINE');
+  const statusText = resolveApiField(item.status_text, intAcc.status_text, item.status);
+  const onlineStatus = resolveApiField(item.online, intAcc.online);
   const isOnline = onlineStatus === 'ONLINE';
-  const status = (statusText || 'Active').toLowerCase();
-  const mobile = item.mobile || intAcc.mobile || '9703941342';
-  const fullName = item.full_name || item.name || `Subscriber #${item.cust_id || index + 1}`;
-  const username = item.username || intAcc.username || item.email || `+91${mobile}`;
-  const packageName = item.package_name || intAcc.package_name || intAcc.plan_name || item.plan || 'Fiber 200Mbps';
-  const subplanName = item.subplan_name || intAcc.subplan_name || 'Standard Unlimited Tier';
-  const expiration = item.expiration || intAcc.expiration || (intAcc.expiration && intAcc.expiration !== '1970-01-01 05:30:00' ? intAcc.expiration : '2026-10-21 19:32:35');
+  const status = (statusText || '').toLowerCase();
+  const mobile = resolveApiField(item.mobile, intAcc.mobile);
+  const fullName = resolveApiField(item.full_name, item.name);
+  const username = resolveApiField(item.username, intAcc.username);
+  const packageName = resolveApiField(item.package_name, intAcc.package_name, intAcc.plan_name || item.plan);
+  const subplanName = resolveApiField(item.subplan_name, intAcc.subplan_name);
+  const expiration = resolveApiField(item.expiration, intAcc.expiration);
 
   return {
     id: String(item.cust_id || item.id || index + 1),
-    cust_id: item.cust_id || index + 1,
-    internet_id: intAcc.internet_id || null,
+    cust_id: item.cust_id !== undefined ? item.cust_id : null,
+    internet_id: intAcc.internet_id !== undefined ? intAcc.internet_id : null,
     name: fullName,
     full_name: fullName,
     mobile: mobile,
@@ -73,37 +46,38 @@ const mapCustomersListToBroadbandRow = (item, index) => {
     subplan_name: subplanName,
     expiration: expiration,
     plan: packageName,
-    status: status === 'expired' ? 'expired' : (status === 'suspend' ? 'suspend' : 'active'),
+    status: status === 'expired' ? 'expired' : (status === 'suspend' ? 'suspend' : (status === 'active' ? 'active' : status)),
     isOnline: isOnline,
-    ip: item.ip || intAcc.ip || `10.100.${Math.floor((index + 1) / 254)}.${((index + 1) % 254) + 1}`,
-    stb_id: item.stb_id || `STB_8849${1000 + (item.cust_id || index)}`,
-    stb_mac: item.stb_mac || `4A:89:FE:21:00:${String((index % 90) + 10).padStart(2, '0')}`,
-    kyc: item.aadhar_verified ? 'Aadhaar Verified' : 'ScoreMe Verified',
-    invoiceAmount: intAcc.total_bill_amount ? Number(intAcc.total_bill_amount) : 699,
-    totalPaid: intAcc.paid_amount ? Number(intAcc.paid_amount) : 699,
-    dueAmount: intAcc.balance ? Number(intAcc.balance) : 0,
-    dueDate: '—',
+    ip: resolveApiField(item.ip, intAcc.ip),
+    stb_id: resolveApiField(item.stb_id),
+    stb_mac: resolveApiField(item.stb_mac),
+    kyc: item.aadhar_verified ? 'Aadhaar Verified' : resolveApiField(item.kyc),
+    invoiceAmount: intAcc.total_bill_amount !== undefined ? intAcc.total_bill_amount : (item.total_bill_amount !== undefined ? item.total_bill_amount : null),
+    totalPaid: intAcc.paid_amount !== undefined ? intAcc.paid_amount : (item.paid_amount !== undefined ? item.paid_amount : null),
+    dueAmount: intAcc.balance !== undefined ? intAcc.balance : (item.balance !== undefined ? item.balance : null),
+    dueDate: resolveApiField(item.due_date, intAcc.due_date),
     expiryDate: expiration,
-    address: item.installation_address || item.billing_address || '',
+    address: resolveApiField(item.installation_address || item.billing_address || item.address),
   };
 };
 
 // Map API customers_list entities directly to IPTV Table Rows
 const mapCustomersListToIptvRow = (item, index) => {
   const iptvAcc = item.iptv_accounts?.[0] || {};
-  const statusText = item.status_text || iptvAcc.sts || 'Active';
-  const onlineStatus = item.online || iptvAcc.online || (statusText === 'Active' ? 'ONLINE' : 'OFFLINE');
+  const statusText = resolveApiField(item.status_text, iptvAcc.sts, item.status);
+  const onlineStatus = resolveApiField(item.online, iptvAcc.online);
   const isOnline = onlineStatus === 'ONLINE';
-  const status = (statusText || 'Active').toLowerCase();
-  const mobile = item.mobile || '9703941342';
-  const fullName = item.full_name || item.name || `Subscriber ${index + 1} (Pioneer IPTV)`;
-  const username = item.username || iptvAcc.username || item.email || `+91${mobile}`;
-  const packageName = item.package_name || iptvAcc.package_name || (iptvAcc.plan_id ? `Gold HD Pack (Plan #${iptvAcc.plan_id})` : 'Gold HD Pack 150+');
-  const subplanName = item.subplan_name || iptvAcc.subplan_name || 'Pioneer Premium Tier';
-  const expiration = item.expiration || iptvAcc.expiration || iptvAcc.expriration || '2026-10-21 19:32:35';
+  const status = (statusText || '').toLowerCase();
+  const mobile = resolveApiField(item.mobile, iptvAcc.mobile);
+  const fullName = resolveApiField(item.full_name, item.name);
+  const username = resolveApiField(item.username, iptvAcc.username);
+  const packageName = resolveApiField(item.package_name, iptvAcc.package_name, iptvAcc.plan_id);
+  const subplanName = resolveApiField(item.subplan_name, iptvAcc.subplan_name);
+  const expiration = resolveApiField(item.expiration, iptvAcc.expiration, iptvAcc.expriration);
 
   return {
     id: String(`iptv_${item.cust_id || index + 1}`),
+    cust_id: item.cust_id !== undefined ? item.cust_id : null,
     name: fullName,
     full_name: fullName,
     mobile: mobile,
@@ -113,22 +87,22 @@ const mapCustomersListToIptvRow = (item, index) => {
     package_name: packageName,
     subplan_name: subplanName,
     expiration: expiration,
-    stb_id: iptvAcc.pioneer_stb_id || iptvAcc.stb_box || `STB_8849${200 + index}`,
-    stb_mac: iptvAcc.smartcard || `4A:89:FE:21:00:${String((index % 90) + 10).padStart(2, '0')}`,
-    stb_model: 'Pioneer 4K Android 11 STB',
+    stb_id: resolveApiField(item.stb_id, iptvAcc.pioneer_stb_id, iptvAcc.stb_box),
+    stb_mac: resolveApiField(item.stb_mac, iptvAcc.smartcard),
+    stb_model: resolveApiField(item.stb_model, iptvAcc.stb_model),
     plan: packageName,
     iptv_package: packageName,
-    cas_status: 'CAS Paired & Verified',
-    status: status === 'expired' ? 'expired' : 'active',
+    cas_status: resolveApiField(item.cas_status, iptvAcc.cas_status),
+    status: status === 'expired' ? 'expired' : (status === 'suspend' ? 'suspend' : (status === 'active' ? 'active' : status)),
     isOnline: isOnline,
-    ip: `192.168.2.${100 + index}`,
-    kyc: item.aadhar_verified ? 'Aadhaar Verified' : 'ScoreMe Verified',
-    invoiceAmount: 699,
-    totalPaid: 699,
-    dueAmount: 0,
-    dueDate: '—',
+    ip: resolveApiField(item.ip, iptvAcc.ip),
+    kyc: item.aadhar_verified ? 'Aadhaar Verified' : resolveApiField(item.kyc),
+    invoiceAmount: iptvAcc.total_bill_amount !== undefined ? iptvAcc.total_bill_amount : (item.total_bill_amount !== undefined ? item.total_bill_amount : null),
+    totalPaid: iptvAcc.paid_amount !== undefined ? iptvAcc.paid_amount : (item.paid_amount !== undefined ? item.paid_amount : null),
+    dueAmount: iptvAcc.balance !== undefined ? iptvAcc.balance : (item.balance !== undefined ? item.balance : null),
+    dueDate: resolveApiField(item.due_date, iptvAcc.due_date),
     expiryDate: expiration,
-    address: item.installation_address || item.billing_address || '',
+    address: resolveApiField(item.installation_address || item.billing_address || item.address),
   };
 };
 
@@ -154,10 +128,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       const custRes = await OneBssApi.getCustomersList(1, 100);
       const rawCustomers = custRes.data && Array.isArray(custRes.data) ? custRes.data : (custRes.data?.data || []);
 
-      if (rawCustomers.length > 0) {
-        setBroadbandDataset(rawCustomers.map(mapCustomersListToBroadbandRow));
-        setIptvDataset(rawCustomers.map(mapCustomersListToIptvRow));
-      }
+      const list = Array.isArray(rawCustomers) ? rawCustomers : [];
+      setBroadbandDataset(list.map(mapCustomersListToBroadbandRow));
+      setIptvDataset(list.map(mapCustomersListToIptvRow));
     } catch (e) {
       console.log('Error loading API customer records:', e);
     } finally {
@@ -185,18 +158,17 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       const data = res.data || {};
 
       if (res.status === 403 || data.success === false) {
-        setToastMsg(`❌ ${data.message || 'Access Denied. Bulk RADIUS Sync requires Operator role token.'}`);
+        toast.error(data.message || 'Access Denied. Bulk RADIUS Sync requires Operator role token.');
       } else if (data.summary) {
         const s = data.summary;
-        setToastMsg(`✅ Bulk RADIUS Sync Complete! Created: ${s.customers_created || 0}, Matched: ${s.customers_matched || 0}, Added: ${s.accounts_added || 0}`);
+        toast.success(`Bulk RADIUS Sync Complete! Created: ${s.customers_created || 0}, Matched: ${s.customers_matched || 0}, Added: ${s.accounts_added || 0}`);
       } else {
-        setToastMsg(`✅ ${data.message || 'Bulk RADIUS Sync complete! Subscriber accounts imported.'}`);
+        toast.success(data.message || 'Bulk RADIUS Sync complete! Subscriber accounts imported.');
       }
     } catch (e) {
-      setToastMsg('✅ Bulk RADIUS Sync complete!');
+      toast.success('Bulk RADIUS Sync complete!');
     } finally {
       setSyncingBulkRadius(false);
-      setTimeout(() => setToastMsg(''), 5000);
     }
   };
 
@@ -208,18 +180,17 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       const data = res.data || {};
 
       if (res.status === 403 || data.success === false) {
-        setToastMsg(`❌ ${data.message || 'IPTV STB Sync failed.'}`);
+        toast.error(data.message || 'IPTV STB Sync failed.');
       } else if (data.summary) {
         const s = data.summary;
-        setToastMsg(`✅ IPTV STB Sync Complete! STBs Added: ${s.stbs_added || 0}, STBs Skipped: ${s.stbs_skipped || 0}`);
+        toast.success(`IPTV STB Sync Complete! STBs Added: ${s.stbs_added || 0}, STBs Skipped: ${s.stbs_skipped || 0}`);
       } else {
-        setToastMsg(`✅ ${data.message || 'IPTV STB Sync complete!'}`);
+        toast.success(data.message || 'IPTV STB Sync complete!');
       }
     } catch (e) {
-      setToastMsg('❌ IPTV STB Sync failed.');
+      toast.error('IPTV STB Sync failed.');
     } finally {
       setSyncingIptvStb(false);
-      setTimeout(() => setToastMsg(''), 5000);
     }
   };
 
@@ -233,16 +204,16 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
       if (!silent) {
         if (res.status === 403) {
-          setToastMsg(`❌ Account #${numericId}: ${data.message || 'Access Denied.'}`);
+          toast.error(`Account #${numericId}: ${data.message || 'Access Denied.'}`);
         } else if (data.message === 'Internet account not found' || res.status === 404) {
-          setToastMsg(`✅ Account #${numericId}: Local subscriber account verified with RADIUS engine.`);
+          toast.success(`Account #${numericId}: Local subscriber account verified with RADIUS engine.`);
         } else {
-          setToastMsg(`✅ Account #${numericId}: ${data.message || 'Detail sync complete (matched local catalog).'}`);
+          toast.success(`Account #${numericId}: ${data.message || 'Detail sync complete (matched local catalog).'}`);
         }
       }
     } catch (e) {
       if (!silent) {
-        setToastMsg(`✅ Account #${numericId}: Detail sync complete.`);
+        toast.success(`Account #${numericId}: Detail sync complete.`);
       }
     } finally {
       setSyncingAccountIds((prev) => {
@@ -250,9 +221,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         delete next[accountId];
         return next;
       });
-      if (!silent) {
-        setTimeout(() => setToastMsg(''), 5000);
-      }
     }
   };
 
@@ -355,10 +323,11 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       const q = searchQuery.toLowerCase();
       list = list.filter(
         (c) =>
-          c.name.toLowerCase().includes(q) ||
-          c.mobile.includes(q) ||
-          c.username.toLowerCase().includes(q) ||
-          c.stb_id.toLowerCase().includes(q) ||
+          (c.name && c.name.toLowerCase().includes(q)) ||
+          (c.mobile && String(c.mobile).includes(q)) ||
+          (c.username && c.username.toLowerCase().includes(q)) ||
+          (c.package_name && c.package_name.toLowerCase().includes(q)) ||
+          (c.stb_id && c.stb_id.toLowerCase().includes(q)) ||
           (c.stb_mac && c.stb_mac.toLowerCase().includes(q))
       );
     }
@@ -483,35 +452,39 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           </TouchableOpacity>
 
           <View style={styles.subHeaderInfo}>
-            <Text style={styles.subHeaderTitle}>{activeSubProfile.name}</Text>
+            <Text style={styles.subHeaderTitle}>{activeSubProfile.full_name || activeSubProfile.name || activeSubProfile.username || ''}</Text>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
-              <View
-                style={[
-                  styles.statusTag,
-                  activeSubProfile.status === 'active'
-                    ? styles.tagActive
-                    : activeSubProfile.status === 'expired'
-                    ? styles.tagExpired
-                    : styles.tagWarn,
-                ]}
-              >
-                <Text
+              {activeSubProfile.status_text || activeSubProfile.status ? (
+                <View
                   style={[
-                    styles.statusTagText,
+                    styles.statusTag,
                     activeSubProfile.status === 'active'
-                      ? styles.tagTextActive
+                      ? styles.tagActive
                       : activeSubProfile.status === 'expired'
-                      ? styles.tagTextExpired
-                      : styles.tagTextWarn,
+                      ? styles.tagExpired
+                      : styles.tagWarn,
                   ]}
                 >
-                  {(activeSubProfile.status || 'Active').toUpperCase()}
-                </Text>
-              </View>
+                  <Text
+                    style={[
+                      styles.statusTagText,
+                      activeSubProfile.status === 'active'
+                        ? styles.tagTextActive
+                        : activeSubProfile.status === 'expired'
+                        ? styles.tagTextExpired
+                        : styles.tagTextWarn,
+                    ]}
+                  >
+                    {(activeSubProfile.status_text || activeSubProfile.status || '').toUpperCase()}
+                  </Text>
+                </View>
+              ) : null}
 
-              <Text style={{ fontSize: 12, fontWeight: '700', color: activeSubProfile.isOnline ? COLORS.accentEmerald : COLORS.textMuted }}>
-                {activeSubProfile.isOnline ? '● Online Session' : '○ Offline'}
-              </Text>
+              {activeSubProfile.online ? (
+                <Text style={{ fontSize: 12, fontWeight: '700', color: activeSubProfile.isOnline ? COLORS.accentEmerald : COLORS.textMuted }}>
+                  {activeSubProfile.online}
+                </Text>
+              ) : null}
             </View>
           </View>
         </View>
@@ -523,26 +496,26 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           <View style={styles.financialMetricsGrid}>
             <View style={styles.finCard}>
               <Text style={styles.finLabel}>Invoice Amount</Text>
-              <Text style={styles.finVal}>{activeSubProfile.invoiceAmount ? `₹ ${activeSubProfile.invoiceAmount}` : '0'}</Text>
+              <Text style={styles.finVal}>{activeSubProfile.invoiceAmount ? `₹ ${activeSubProfile.invoiceAmount}` : ''}</Text>
             </View>
 
             <View style={styles.finCard}>
               <Text style={styles.finLabel}>Total Paid</Text>
               <Text style={[styles.finVal, { color: COLORS.accentEmerald }]}>
-                {activeSubProfile.totalPaid ? `₹ ${activeSubProfile.totalPaid}` : '0'}
+                {activeSubProfile.totalPaid ? `₹ ${activeSubProfile.totalPaid}` : ''}
               </Text>
             </View>
 
             <View style={styles.finCard}>
               <Text style={styles.finLabel}>Due Amount</Text>
               <Text style={[styles.finVal, { color: activeSubProfile.dueAmount ? COLORS.accentRose : COLORS.textMain }]}>
-                {activeSubProfile.dueAmount ? `₹ ${activeSubProfile.dueAmount}` : '0'}
+                {activeSubProfile.dueAmount ? `₹ ${activeSubProfile.dueAmount}` : ''}
               </Text>
             </View>
 
             <View style={styles.finCard}>
               <Text style={styles.finLabel}>Due Date</Text>
-              <Text style={styles.finVal}>{activeSubProfile.dueDate || '—'}</Text>
+              <Text style={styles.finVal}>{activeSubProfile.dueDate || ''}</Text>
             </View>
           </View>
 
@@ -550,7 +523,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             <Feather name="clock" size={16} color={COLORS.accentRose} />
             <View style={{ marginLeft: 8 }}>
               <Text style={styles.expiryLabel}>ACCOUNT EXPIRY DATE</Text>
-              <Text style={styles.expiryVal}>{activeSubProfile.expiryDate || '08 Jan, 2026 10:22'}</Text>
+              <Text style={styles.expiryVal}>{activeSubProfile.expiryDate || activeSubProfile.expiration || ''}</Text>
             </View>
           </View>
         </View>
@@ -564,61 +537,61 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             <View style={styles.detailsDataGrid}>
               <View style={styles.dataRow}>
                 <Text style={styles.dataLabel}>User Name</Text>
-                <Text style={styles.dataValBold}>{activeSubProfile.username}</Text>
+                <Text style={styles.dataValBold}>{activeSubProfile.username || ''}</Text>
               </View>
 
               <View style={styles.dataRow}>
                 <Text style={styles.dataLabel}>Full Name</Text>
-                <Text style={styles.dataValBold}>{activeSubProfile.full_name || activeSubProfile.name}</Text>
+                <Text style={styles.dataValBold}>{activeSubProfile.full_name || activeSubProfile.name || ''}</Text>
               </View>
 
               <View style={styles.dataRow}>
                 <Text style={styles.dataLabel}>Mobile Number</Text>
-                <Text style={styles.dataValBold}>{activeSubProfile.mobile}</Text>
+                <Text style={styles.dataValBold}>{activeSubProfile.mobile || ''}</Text>
               </View>
 
               <View style={styles.dataRow}>
                 <Text style={styles.dataLabel}>Status Text</Text>
                 <Text style={[styles.dataValBold, { color: activeSubProfile.status_text === 'Active' || activeSubProfile.status === 'active' ? COLORS.accentEmerald : COLORS.accentRose }]}>
-                  {activeSubProfile.status_text || 'Active'}
+                  {activeSubProfile.status_text || ''}
                 </Text>
               </View>
 
               <View style={styles.dataRow}>
                 <Text style={styles.dataLabel}>Online Status</Text>
                 <Text style={[styles.dataValBold, { color: activeSubProfile.online === 'ONLINE' || activeSubProfile.isOnline ? COLORS.accentEmerald : COLORS.textMuted }]}>
-                  {activeSubProfile.online || (activeSubProfile.isOnline ? 'ONLINE' : 'OFFLINE')}
+                  {activeSubProfile.online || ''}
                 </Text>
               </View>
 
               <View style={styles.dataRow}>
                 <Text style={styles.dataLabel}>Package Name</Text>
-                <Text style={[styles.dataValBold, { color: COLORS.accentEmerald }]}>{activeSubProfile.package_name}</Text>
+                <Text style={[styles.dataValBold, { color: COLORS.accentEmerald }]}>{activeSubProfile.package_name || ''}</Text>
               </View>
 
               <View style={styles.dataRow}>
                 <Text style={styles.dataLabel}>Subplan Name</Text>
-                <Text style={styles.dataVal}>{activeSubProfile.subplan_name}</Text>
+                <Text style={styles.dataVal}>{activeSubProfile.subplan_name || ''}</Text>
               </View>
 
               <View style={styles.dataRow}>
                 <Text style={styles.dataLabel}>Expiration Date</Text>
-                <Text style={[styles.dataValBold, { color: COLORS.accentRose }]}>{activeSubProfile.expiration}</Text>
+                <Text style={[styles.dataValBold, { color: COLORS.accentRose }]}>{activeSubProfile.expiration || ''}</Text>
               </View>
 
               <View style={styles.dataRow}>
                 <Text style={styles.dataLabel}>Pioneer IPTV STB ID</Text>
-                <Text style={styles.dataValBold}>{activeSubProfile.stb_id || 'STB_8849201'}</Text>
+                <Text style={styles.dataValBold}>{activeSubProfile.stb_id || ''}</Text>
               </View>
 
               <View style={styles.dataRow}>
                 <Text style={styles.dataLabel}>STB MAC Address</Text>
-                <Text style={styles.dataVal}>{activeSubProfile.stb_mac || '4A:89:FE:21:00:10'}</Text>
+                <Text style={styles.dataVal}>{activeSubProfile.stb_mac || ''}</Text>
               </View>
 
               <View style={styles.dataRow}>
                 <Text style={styles.dataLabel}>e-KYC Verification</Text>
-                <Text style={[styles.dataVal, { color: COLORS.accentCyan }]}>{activeSubProfile.kyc}</Text>
+                <Text style={[styles.dataVal, { color: COLORS.accentCyan }]}>{activeSubProfile.kyc || ''}</Text>
               </View>
             </View>
           </View>
@@ -762,7 +735,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   <Text style={[styles.th, { flex: 2 }]}>Package Name</Text>
                   <Text style={[styles.th, { flex: 1.8 }]}>Subplan Name</Text>
                   <Text style={[styles.th, { flex: 2 }]}>Expiration</Text>
-                  <Text style={[styles.th, { flex: 1, textAlign: 'right' }]}>Actions</Text>
                 </View>
               ) : (
                 <View style={styles.tableHeader}>
@@ -773,7 +745,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   <Text style={[styles.th, { flex: 2 }]}>Package Name</Text>
                   <Text style={[styles.th, { flex: 1.8 }]}>Subplan Name</Text>
                   <Text style={[styles.th, { flex: 2 }]}>Expiration</Text>
-                  <Text style={[styles.th, { flex: 1, textAlign: 'right' }]}>Actions</Text>
                 </View>
               )}
 
@@ -782,44 +753,50 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   {viewMode === 'iptv' ? (
                     <>
                       <View style={{ flex: 1.5 }}>
-                        <Text style={styles.tdBold}>{cust.username}</Text>
-                        <Text style={styles.tdSub}>STB: {cust.stb_id}</Text>
+                        <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
+                          <Text style={styles.tdClickableUsername}>{cust.username}</Text>
+                        </TouchableOpacity>
+                        {cust.stb_id ? <Text style={styles.tdSub}>STB: {cust.stb_id}</Text> : null}
                       </View>
 
                       <View style={{ flex: 1.6 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <View
-                            style={[
-                              styles.statusTag,
-                              cust.status_text === 'Active' || cust.status === 'active'
-                                ? styles.tagActive
-                                : cust.status === 'expired'
-                                ? styles.tagExpired
-                                : styles.tagWarn,
-                            ]}
-                          >
-                            <Text
+                          {cust.status_text ? (
+                            <View
                               style={[
-                                styles.statusTagText,
+                                styles.statusTag,
                                 cust.status_text === 'Active' || cust.status === 'active'
-                                  ? styles.tagTextActive
+                                  ? styles.tagActive
                                   : cust.status === 'expired'
-                                  ? styles.tagTextExpired
-                                  : styles.tagTextWarn,
+                                  ? styles.tagExpired
+                                  : styles.tagWarn,
                               ]}
                             >
-                              {cust.status_text || 'Active'}
+                              <Text
+                                style={[
+                                  styles.statusTagText,
+                                  cust.status_text === 'Active' || cust.status === 'active'
+                                    ? styles.tagTextActive
+                                    : cust.status === 'expired'
+                                    ? styles.tagTextExpired
+                                    : styles.tagTextWarn,
+                                ]}
+                              >
+                                {cust.status_text}
+                              </Text>
+                            </View>
+                          ) : null}
+                          {cust.online ? (
+                            <Text
+                              style={{
+                                fontSize: 10,
+                                fontWeight: '700',
+                                color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
+                              }}
+                            >
+                              {cust.online}
                             </Text>
-                          </View>
-                          <Text
-                            style={{
-                              fontSize: 10,
-                              fontWeight: '700',
-                              color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
-                            }}
-                          >
-                            {cust.online || (cust.isOnline ? 'ONLINE' : 'OFFLINE')}
-                          </Text>
+                          ) : null}
                         </View>
                       </View>
 
@@ -848,43 +825,49 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   ) : (
                     <>
                       <View style={{ flex: 1.5 }}>
-                        <Text style={styles.tdBold}>{cust.username}</Text>
+                        <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
+                          <Text style={styles.tdClickableUsername}>{cust.username}</Text>
+                        </TouchableOpacity>
                       </View>
 
                       <View style={{ flex: 1.6 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          <View
-                            style={[
-                              styles.statusTag,
-                              cust.status_text === 'Active' || cust.status === 'active'
-                                ? styles.tagActive
-                                : cust.status === 'expired'
-                                ? styles.tagExpired
-                                : styles.tagWarn,
-                            ]}
-                          >
-                            <Text
+                          {cust.status_text ? (
+                            <View
                               style={[
-                                styles.statusTagText,
+                                styles.statusTag,
                                 cust.status_text === 'Active' || cust.status === 'active'
-                                  ? styles.tagTextActive
+                                  ? styles.tagActive
                                   : cust.status === 'expired'
-                                  ? styles.tagTextExpired
-                                  : styles.tagTextWarn,
+                                  ? styles.tagExpired
+                                  : styles.tagWarn,
                               ]}
                             >
-                              {cust.status_text || 'Active'}
+                              <Text
+                                style={[
+                                  styles.statusTagText,
+                                  cust.status_text === 'Active' || cust.status === 'active'
+                                    ? styles.tagTextActive
+                                    : cust.status === 'expired'
+                                    ? styles.tagTextExpired
+                                    : styles.tagTextWarn,
+                                ]}
+                              >
+                                {cust.status_text}
+                              </Text>
+                            </View>
+                          ) : null}
+                          {cust.online ? (
+                            <Text
+                              style={{
+                                fontSize: 10,
+                                fontWeight: '700',
+                                color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
+                              }}
+                            >
+                              {cust.online}
                             </Text>
-                          </View>
-                          <Text
-                            style={{
-                              fontSize: 10,
-                              fontWeight: '700',
-                              color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
-                            }}
-                          >
-                            {cust.online || (cust.isOnline ? 'ONLINE' : 'OFFLINE')}
-                          </Text>
+                          ) : null}
                         </View>
                       </View>
 
@@ -911,16 +894,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       </View>
                     </>
                   )}
-
-                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                    <TouchableOpacity
-                      style={styles.editBtn}
-                      onPress={() => handleOpenEdit(cust)}
-                    >
-                      <Feather name="edit-3" size={12} color={COLORS.primary} />
-                      <Text style={styles.editBtnText}>Edit</Text>
-                    </TouchableOpacity>
-                  </View>
                 </View>
               ))}
             </View>
@@ -936,7 +909,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 <Text style={[styles.th, { flex: 2 }]}>Package Name</Text>
                 <Text style={[styles.th, { flex: 1.8 }]}>Subplan Name</Text>
                 <Text style={[styles.th, { flex: 2 }]}>Expiration</Text>
-                <Text style={[styles.th, { flex: 1, textAlign: 'right' }]}>Actions</Text>
               </View>
             ) : (
               <View style={styles.tableHeader}>
@@ -947,7 +919,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 <Text style={[styles.th, { flex: 2 }]}>Package Name</Text>
                 <Text style={[styles.th, { flex: 1.8 }]}>Subplan Name</Text>
                 <Text style={[styles.th, { flex: 2 }]}>Expiration</Text>
-                <Text style={[styles.th, { flex: 1, textAlign: 'right' }]}>Actions</Text>
               </View>
             )}
 
@@ -956,44 +927,50 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 {viewMode === 'iptv' ? (
                   <>
                     <View style={{ flex: 1.5 }}>
-                      <Text style={styles.tdBold}>{cust.username}</Text>
-                      <Text style={styles.tdSub}>STB: {cust.stb_id}</Text>
+                      <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
+                        <Text style={styles.tdClickableUsername}>{cust.username}</Text>
+                      </TouchableOpacity>
+                      {cust.stb_id ? <Text style={styles.tdSub}>STB: {cust.stb_id}</Text> : null}
                     </View>
 
                     <View style={{ flex: 1.6 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <View
-                          style={[
-                            styles.statusTag,
-                            cust.status_text === 'Active' || cust.status === 'active'
-                              ? styles.tagActive
-                              : cust.status === 'expired'
-                              ? styles.tagExpired
-                              : styles.tagWarn,
-                          ]}
-                        >
-                          <Text
+                        {cust.status_text ? (
+                          <View
                             style={[
-                              styles.statusTagText,
+                              styles.statusTag,
                               cust.status_text === 'Active' || cust.status === 'active'
-                                ? styles.tagTextActive
+                                ? styles.tagActive
                                 : cust.status === 'expired'
-                                ? styles.tagTextExpired
-                                : styles.tagTextWarn,
+                                ? styles.tagExpired
+                                : styles.tagWarn,
                             ]}
                           >
-                            {cust.status_text || 'Active'}
+                            <Text
+                              style={[
+                                styles.statusTagText,
+                                cust.status_text === 'Active' || cust.status === 'active'
+                                  ? styles.tagTextActive
+                                  : cust.status === 'expired'
+                                  ? styles.tagTextExpired
+                                  : styles.tagWarn,
+                              ]}
+                            >
+                              {cust.status_text}
+                            </Text>
+                          </View>
+                        ) : null}
+                        {cust.online ? (
+                          <Text
+                            style={{
+                              fontSize: 10,
+                              fontWeight: '700',
+                              color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
+                            }}
+                          >
+                            {cust.online}
                           </Text>
-                        </View>
-                        <Text
-                          style={{
-                            fontSize: 10,
-                            fontWeight: '700',
-                            color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
-                          }}
-                        >
-                          {cust.online || (cust.isOnline ? 'ONLINE' : 'OFFLINE')}
-                        </Text>
+                        ) : null}
                       </View>
                     </View>
 
@@ -1022,43 +999,49 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 ) : (
                   <>
                     <View style={{ flex: 1.5 }}>
-                      <Text style={styles.tdBold}>{cust.username}</Text>
+                      <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
+                        <Text style={styles.tdClickableUsername}>{cust.username}</Text>
+                      </TouchableOpacity>
                     </View>
 
                     <View style={{ flex: 1.6 }}>
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <View
-                          style={[
-                            styles.statusTag,
-                            cust.status_text === 'Active' || cust.status === 'active'
-                              ? styles.tagActive
-                              : cust.status === 'expired'
-                              ? styles.tagExpired
-                              : styles.tagWarn,
-                          ]}
-                        >
-                          <Text
+                        {cust.status_text ? (
+                          <View
                             style={[
-                              styles.statusTagText,
+                              styles.statusTag,
                               cust.status_text === 'Active' || cust.status === 'active'
-                                ? styles.tagTextActive
+                                ? styles.tagActive
                                 : cust.status === 'expired'
-                                ? styles.tagTextExpired
-                                : styles.tagTextWarn,
+                                ? styles.tagExpired
+                                : styles.tagWarn,
                             ]}
                           >
-                            {cust.status_text || 'Active'}
+                            <Text
+                              style={[
+                                styles.statusTagText,
+                                cust.status_text === 'Active' || cust.status === 'active'
+                                  ? styles.tagTextActive
+                                  : cust.status === 'expired'
+                                  ? styles.tagTextExpired
+                                  : styles.tagWarn,
+                              ]}
+                            >
+                              {cust.status_text}
+                            </Text>
+                          </View>
+                        ) : null}
+                        {cust.online ? (
+                          <Text
+                            style={{
+                              fontSize: 10,
+                              fontWeight: '700',
+                              color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
+                            }}
+                          >
+                            {cust.online}
                           </Text>
-                        </View>
-                        <Text
-                          style={{
-                            fontSize: 10,
-                            fontWeight: '700',
-                            color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
-                          }}
-                        >
-                          {cust.online || (cust.isOnline ? 'ONLINE' : 'OFFLINE')}
-                        </Text>
+                        ) : null}
                       </View>
                     </View>
 
@@ -1085,16 +1068,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                     </View>
                   </>
                 )}
-
-                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
-                  <TouchableOpacity
-                    style={styles.editBtn}
-                    onPress={() => handleOpenEdit(cust)}
-                  >
-                    <Feather name="edit-3" size={12} color={COLORS.primary} />
-                    <Text style={styles.editBtnText}>Edit</Text>
-                  </TouchableOpacity>
-                </View>
               </View>
             ))}
           </View>
@@ -1300,7 +1273,8 @@ const styles = StyleSheet.create({
   tdBold: { fontSize: 13, fontWeight: '600', color: COLORS.textMain },
   tdSub: { fontSize: 11, color: COLORS.textMuted },
   tdText: { fontSize: 12, color: COLORS.textMain },
-  tdClickableName: { fontSize: 13, fontWeight: '700', color: COLORS.primary, textDecorationLine: 'underline' },
+  tdClickableName: { fontSize: 13, fontWeight: '700', color: COLORS.primary, textDecorationLine: 'underline', cursor: 'pointer' },
+  tdClickableUsername: { fontSize: 13, fontWeight: '700', color: COLORS.primary, textDecorationLine: 'underline', cursor: 'pointer' },
   tdClickableMobile: { fontSize: 11, color: COLORS.accentCyan, fontWeight: '600' },
   statusTag: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, alignSelf: 'flex-start' },
   tagActive: { backgroundColor: 'rgba(16, 185, 129, 0.1)' },

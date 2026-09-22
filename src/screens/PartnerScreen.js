@@ -14,6 +14,7 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 import { CreateAccountModal } from '../components/CreateAccountModal';
+import { toast } from 'react-toastify';
 
 export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   const { width } = useWindowDimensions();
@@ -76,8 +77,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       prev.map((p) => {
         if (p.partner_id === partnerId) {
           const newStatus = p.status === 'enabled' ? 'disabled' : 'enabled';
-          setToastMsg(`Partner #${partnerId} status updated to ${newStatus.toUpperCase()}`);
-          setTimeout(() => setToastMsg(''), 4000);
+          toast.info(`Partner #${partnerId} status updated to ${newStatus.toUpperCase()}`);
           return { ...p, status: newStatus };
         }
         return p;
@@ -92,9 +92,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   };
 
   const handleAccountCreated = (newPartner, msg) => {
-    setToastMsg(msg || `New ${newPartner.account_role.toUpperCase()} #${newPartner.partner_id} created successfully!`);
+    toast.success(msg || `New ${newPartner.account_role.toUpperCase()} #${newPartner.partner_id} created successfully!`);
     fetchPartners();
-    setTimeout(() => setToastMsg(''), 5000);
   };
 
   if (isCreateOpen) {

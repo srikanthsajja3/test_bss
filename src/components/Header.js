@@ -18,7 +18,14 @@ export const Header = ({
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
-  const isOperator = user?.role === 'operator';
+  const userRole = (user?.role || '').toLowerCase();
+  const isOperator = userRole === 'operator';
+  const isSuperAdminOrAdmin = userRole === 'superadmin' || userRole === 'admin';
+  const showWallet = isOperator && !isSuperAdminOrAdmin;
+  const formattedBalance =
+    user?.wallet_balance !== undefined
+      ? `₹ ${Number(user.wallet_balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+      : '₹ 12,450.00';
   const handleAddClick = onOpenCreate || onOpenCreateOperator || onOpenCreateAdmin;
 
   return (
@@ -36,14 +43,16 @@ export const Header = ({
       </View>
 
       <View style={styles.actionSection}>
-        {/* Wallet Balance Card Pill */}
-        <View style={styles.walletCard}>
-          <Ionicons name="wallet-outline" size={18} color={COLORS.primary} />
-          <View style={{ marginLeft: 6 }}>
-            <Text style={styles.walletLbl}>WALLET BALANCE</Text>
-            <Text style={styles.walletVal}>₹ 12,450.00</Text>
+        {/* Wallet Balance Card Pill - Hidden for Super Admin and Admin, displayed for Operator */}
+        {showWallet && (
+          <View style={styles.walletCard}>
+            <Ionicons name="wallet-outline" size={18} color={COLORS.primary} />
+            <View style={{ marginLeft: 6 }}>
+              <Text style={styles.walletLbl}>WALLET BALANCE</Text>
+              <Text style={styles.walletVal}>{formattedBalance}</Text>
+            </View>
           </View>
-        </View>
+        )}
 
         {onRefresh ? (
           <TouchableOpacity style={styles.iconBtn} onPress={onRefresh} title="Refresh">
