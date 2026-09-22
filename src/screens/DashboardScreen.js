@@ -86,8 +86,20 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
   };
 
   useEffect(() => {
-    refreshData();
-  }, [currentPartnerId]);
+    const initOperatorSyncAndRefresh = async () => {
+      if (currentRole === 'operator') {
+        try {
+          if (user?.token) setApiConfig(undefined, user.token);
+          const res = await OneBssApi.syncInternetCustomersBulk();
+          if (res.data?.summary) {
+            toast.success(`Operator RADIUS Sync Complete! Created: ${res.data.summary.customers_created || 0}, Matched: ${res.data.summary.customers_matched || 0}, Added: ${res.data.summary.accounts_added || 0}`);
+          }
+        } catch (e) {}
+      }
+      await refreshData();
+    };
+    initOperatorSyncAndRefresh();
+  }, [currentPartnerId, currentRole]);
 
   const inet = telemetry?.internet || { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 };
   const iptv = telemetry?.iptv || { total: 0, active: 0, expired: 0 };
@@ -179,60 +191,78 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
 
 
       {/* INTERNET TELEMETRY GRID */}
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-        <Text style={styles.sectionHeaderTitle}>Subscriber Telemetry</Text>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>
+        <Text style={styles.sectionHeaderTitle}>Subscriber Overview (Live Dashboard API)</Text>
       </View>
 
       <View style={styles.statsGrid7}>
         {/* TOTAL USERS */}
         <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('all')}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={styles.statLabel}>TOTAL USERS</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Feather name="users" size={14} color={COLORS.primary} />
+              <Text style={styles.statLabel}>TOTAL USERS</Text>
+            </View>
             <Feather name="arrow-up-right" size={13} color={COLORS.primary} />
           </View>
-          <Text style={styles.statValueMetric}>{inet.total}</Text>
+          <Text style={styles.statValueMetric}>{inet.total ?? 0}</Text>
         </TouchableOpacity>
 
         {/* ACTIVE USERS */}
         <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('active')}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={styles.statLabel}>ACTIVE USERS</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Feather name="check-circle" size={14} color={COLORS.accentEmerald} />
+              <Text style={styles.statLabel}>ACTIVE USERS</Text>
+            </View>
             <Feather name="arrow-up-right" size={13} color={COLORS.accentEmerald} />
           </View>
-          <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>{inet.active}</Text>
+          <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>{inet.active ?? 0}</Text>
         </TouchableOpacity>
 
         {/* ONLINE USERS */}
         <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('online')}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={styles.statLabel}>ONLINE USERS</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Feather name="wifi" size={14} color="#3b82f6" />
+              <Text style={styles.statLabel}>ONLINE USERS</Text>
+            </View>
             <Feather name="arrow-up-right" size={13} color="#3b82f6" />
           </View>
-          <Text style={[styles.statValueMetric, { color: '#3b82f6' }]}>{inet.online}</Text>
+          <Text style={[styles.statValueMetric, { color: '#3b82f6' }]}>{inet.online ?? 0}</Text>
         </TouchableOpacity>
 
         {/* EXPIRED USERS */}
         <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('expired')}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={styles.statLabel}>EXPIRED USERS</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Feather name="clock" size={14} color={COLORS.accentRose} />
+              <Text style={styles.statLabel}>EXPIRED USERS</Text>
+            </View>
             <Feather name="arrow-up-right" size={13} color={COLORS.accentRose} />
           </View>
-          <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>{inet.expired}</Text>
+          <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>{inet.expired ?? 0}</Text>
         </TouchableOpacity>
 
         {/* SUSPENDED USERS */}
         <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('suspend')}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={styles.statLabel}>SUSPENDED USERS</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Feather name="alert-triangle" size={14} color={COLORS.accentAmber} />
+              <Text style={styles.statLabel}>SUSPENDED USERS</Text>
+            </View>
             <Feather name="arrow-up-right" size={13} color={COLORS.accentAmber} />
           </View>
-          <Text style={[styles.statValueMetric, { color: COLORS.accentAmber }]}>{inet.suspend ?? 1}</Text>
+          <Text style={[styles.statValueMetric, { color: COLORS.accentAmber }]}>{inet.suspend ?? 0}</Text>
         </TouchableOpacity>
 
         {/* DISABLED USERS */}
         <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('suspend')}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={styles.statLabel}>DISABLED USERS</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Feather name="slash" size={14} color="#64748b" />
+              <Text style={styles.statLabel}>DISABLED USERS</Text>
+            </View>
             <Feather name="arrow-up-right" size={13} color="#64748b" />
           </View>
           <Text style={[styles.statValueMetric, { color: '#64748b' }]}>{inet.disabled ?? 0}</Text>
@@ -241,7 +271,10 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         {/* NEW USERS */}
         <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('all')}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <Text style={styles.statLabel}>NEW USERS</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Feather name="user-plus" size={14} color="#8b5cf6" />
+              <Text style={styles.statLabel}>NEW USERS</Text>
+            </View>
             <Feather name="arrow-up-right" size={13} color="#8b5cf6" />
           </View>
           <Text style={[styles.statValueMetric, { color: '#8b5cf6' }]}>{inet.new ?? 0}</Text>

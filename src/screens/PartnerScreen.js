@@ -25,10 +25,49 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   const [search, setSearch] = useState('');
   const [selectedRole, setSelectedRole] = useState('');
   const [selectedPartner, setSelectedPartner] = useState(null);
+  const [partnerTelemetry, setPartnerTelemetry] = useState(null);
+  const [loadingPartnerTelemetry, setLoadingPartnerTelemetry] = useState(false);
   const [toastMsg, setToastMsg] = useState('');
   const [showSecret, setShowSecret] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createRole, setCreateRole] = useState('admin');
+
+  useEffect(() => {
+    if (selectedPartner?.partner_id) {
+      setLoadingPartnerTelemetry(true);
+      OneBssApi.getDashboardTelemetry(selectedPartner.partner_id)
+        .then((res) => {
+          const data = res.data?.data || res.data?.telemetry || res.data;
+          if (data && data.internet) {
+            setPartnerTelemetry(data.internet);
+          } else {
+            setPartnerTelemetry({
+              total: 0,
+              active: 0,
+              online: 0,
+              expired: 0,
+              suspend: 0,
+              disabled: 0,
+              new: 0,
+            });
+          }
+        })
+        .catch(() => {
+          setPartnerTelemetry({
+            total: 0,
+            active: 0,
+            online: 0,
+            expired: 0,
+            suspend: 0,
+            disabled: 0,
+            new: 0,
+          });
+        })
+        .finally(() => setLoadingPartnerTelemetry(false));
+    } else {
+      setPartnerTelemetry(null);
+    }
+  }, [selectedPartner]);
 
   useEffect(() => {
     if (initialCreateRole) {
@@ -104,6 +143,210 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
         initialRole={createRole}
         onAccountCreated={handleAccountCreated}
       />
+    );
+  }
+
+  // Full Screen Partner Details View after clicking Partner & Company Name
+  if (selectedPartner) {
+    const isEnabled = selectedPartner.status === 'enabled';
+    return (
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[
+          styles.content,
+          {
+            paddingHorizontal: isMobile ? 12 : 24,
+            paddingVertical: isMobile ? 14 : 24,
+            width: '100%',
+          },
+        ]}
+      >
+        {/* Navigation Bar */}
+        <View style={styles.detailsHeaderRow}>
+          <TouchableOpacity style={styles.backBtn} onPress={() => setSelectedPartner(null)}>
+            <Feather name="arrow-left" size={18} color={COLORS.textMain} />
+            <Text style={styles.backBtnText}>Back to Partners List</Text>
+          </TouchableOpacity>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View
+              style={[
+                styles.roleBadge,
+                selectedPartner.account_role === 'admin' ? styles.roleBadgeAdmin : styles.roleBadgeOperator,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.roleBadgeText,
+                  selectedPartner.account_role === 'admin' ? styles.roleBadgeTextAdmin : styles.roleBadgeTextOperator,
+                ]}
+              >
+                {(selectedPartner.account_role || 'operator').toUpperCase()}
+              </Text>
+            </View>
+
+            <TouchableOpacity onPress={() => togglePartnerStatus(selectedPartner.partner_id)}>
+              <View style={[styles.statusTag, isEnabled ? styles.tagEnabled : styles.tagDisabled]}>
+                <View style={[styles.statusDot, isEnabled ? styles.dotEnabled : styles.dotDisabled]} />
+                <Text style={[styles.tagText, isEnabled ? styles.tagTextEnabled : styles.tagTextDisabled]}>
+                  {isEnabled ? 'ENABLED' : 'DISABLED'}
+                </Text>
+              </View>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Hero Card */}
+        <View style={styles.heroCard}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+            <View style={styles.heroAvatar}>
+              <Text style={styles.heroAvatarText}>
+                {selectedPartner.partner_name ? selectedPartner.partner_name.charAt(0).toUpperCase() : 'P'}
+              </Text>
+            </View>
+            <View style={{ flex: 1 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <Text style={styles.heroTitle}>{selectedPartner.partner_name}</Text>
+                <View style={styles.idBadge}>
+                  <Text style={styles.idText}>#{selectedPartner.partner_id}</Text>
+                </View>
+              </View>
+              <Text style={styles.heroSubtitle}>{selectedPartner.company_name || 'Telecom Services Network'}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Section 0: Partner Live Telemetry Cards (Total, Active, Online, Expired, Suspended, Disabled, New) */}
+        <View style={{ marginBottom: 20 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
+            <Text style={styles.sectionHeaderTitle}>Subscriber Overview (Live Dashboard API)</Text>
+            {loadingPartnerTelemetry && (
+              <ActivityIndicator size="small" color={COLORS.primary} style={{ marginLeft: 8 }} />
+            )}
+          </View>
+
+          <View style={styles.statsGrid7}>
+            {/* TOTAL USERS */}
+            <View style={[styles.statCardMetric, styles.statCardMetricClickable]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Feather name="users" size={14} color={COLORS.primary} />
+                  <Text style={styles.statLabel}>TOTAL USERS</Text>
+                </View>
+                <Feather name="arrow-up-right" size={13} color={COLORS.primary} />
+              </View>
+              <Text style={styles.statValueMetric}>{partnerTelemetry?.total ?? 0}</Text>
+            </View>
+
+            {/* ACTIVE USERS */}
+            <View style={[styles.statCardMetric, styles.statCardMetricClickable]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Feather name="check-circle" size={14} color={COLORS.accentEmerald} />
+                  <Text style={styles.statLabel}>ACTIVE USERS</Text>
+                </View>
+                <Feather name="arrow-up-right" size={13} color={COLORS.accentEmerald} />
+              </View>
+              <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>{partnerTelemetry?.active ?? 0}</Text>
+            </View>
+
+            {/* ONLINE USERS */}
+            <View style={[styles.statCardMetric, styles.statCardMetricClickable]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Feather name="wifi" size={14} color="#3b82f6" />
+                  <Text style={styles.statLabel}>ONLINE USERS</Text>
+                </View>
+                <Feather name="arrow-up-right" size={13} color="#3b82f6" />
+              </View>
+              <Text style={[styles.statValueMetric, { color: '#3b82f6' }]}>{partnerTelemetry?.online ?? 0}</Text>
+            </View>
+
+            {/* EXPIRED USERS */}
+            <View style={[styles.statCardMetric, styles.statCardMetricClickable]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Feather name="clock" size={14} color={COLORS.accentRose} />
+                  <Text style={styles.statLabel}>EXPIRED USERS</Text>
+                </View>
+                <Feather name="arrow-up-right" size={13} color={COLORS.accentRose} />
+              </View>
+              <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>{partnerTelemetry?.expired ?? 0}</Text>
+            </View>
+
+            {/* SUSPENDED USERS */}
+            <View style={[styles.statCardMetric, styles.statCardMetricClickable]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Feather name="alert-triangle" size={14} color={COLORS.accentAmber} />
+                  <Text style={styles.statLabel}>SUSPENDED USERS</Text>
+                </View>
+                <Feather name="arrow-up-right" size={13} color={COLORS.accentAmber} />
+              </View>
+              <Text style={[styles.statValueMetric, { color: COLORS.accentAmber }]}>{partnerTelemetry?.suspend ?? partnerTelemetry?.suspended ?? 0}</Text>
+            </View>
+
+            {/* DISABLED USERS */}
+            <View style={[styles.statCardMetric, styles.statCardMetricClickable]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Feather name="slash" size={14} color="#64748b" />
+                  <Text style={styles.statLabel}>DISABLED USERS</Text>
+                </View>
+                <Feather name="arrow-up-right" size={13} color="#64748b" />
+              </View>
+              <Text style={[styles.statValueMetric, { color: '#64748b' }]}>{partnerTelemetry?.disabled ?? 0}</Text>
+            </View>
+
+            {/* NEW USERS */}
+            <View style={[styles.statCardMetric, styles.statCardMetricClickable]}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Feather name="user-plus" size={14} color="#8b5cf6" />
+                  <Text style={styles.statLabel}>NEW USERS</Text>
+                </View>
+                <Feather name="arrow-up-right" size={13} color="#8b5cf6" />
+              </View>
+              <Text style={[styles.statValueMetric, { color: '#8b5cf6' }]}>{partnerTelemetry?.new ?? 0}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* Section 1: Partner Information */}
+        <View style={styles.detailsCardSection}>
+          <View style={styles.sectionTitleRow}>
+            <Feather name="user-check" size={18} color={COLORS.primary} />
+            <Text style={styles.sectionTitleText}>Partner Information</Text>
+          </View>
+
+          <View style={styles.detailsGrid}>
+            <View style={styles.detailsGridItem}>
+              <Text style={styles.detailsGridLabel}>PARTNER NAME</Text>
+              <Text style={styles.detailsGridVal}>{selectedPartner.partner_name || '—'}</Text>
+            </View>
+            <View style={styles.detailsGridItem}>
+              <Text style={styles.detailsGridLabel}>COMPANY / NETWORK NAME</Text>
+              <Text style={styles.detailsGridVal}>{selectedPartner.company_name || '—'}</Text>
+            </View>
+            <View style={styles.detailsGridItem}>
+              <Text style={styles.detailsGridLabel}>MOBILE NUMBER</Text>
+              <Text style={styles.detailsGridVal}>{selectedPartner.partner_mobile || '—'}</Text>
+            </View>
+            <View style={styles.detailsGridItem}>
+              <Text style={styles.detailsGridLabel}>EMAIL ADDRESS</Text>
+              <Text style={styles.detailsGridVal}>{selectedPartner.partner_email || '—'}</Text>
+            </View>
+            <View style={styles.detailsGridItem}>
+              <Text style={styles.detailsGridLabel}>REGION / LOCATION</Text>
+              <Text style={styles.detailsGridVal}>{selectedPartner.partner_region || 'Vijayawada'}</Text>
+            </View>
+            <View style={styles.detailsGridItem}>
+              <Text style={styles.detailsGridLabel}>ACCOUNT USERNAME</Text>
+              <Text style={styles.detailsGridVal}>{selectedPartner.account_username || selectedPartner.login?.username || '—'}</Text>
+            </View>
+          </View>
+        </View>
+      </ScrollView>
     );
   }
 
@@ -914,4 +1157,125 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 2,
   },
+
+  // Full screen partner details styles
+  detailsHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  backBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: COLORS.glassBorder,
+  },
+  backBtnText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textMain,
+  },
+  heroCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.glassBorder,
+    padding: 20,
+    marginBottom: 18,
+    boxShadow: '0 2px 10px rgba(0, 0, 0, 0.04)',
+    elevation: 2,
+  },
+  heroAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: 'rgba(16, 185, 129, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  heroAvatarText: {
+    fontSize: 22,
+    fontWeight: '800',
+    color: COLORS.primary,
+  },
+  heroTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: COLORS.textMain,
+  },
+  heroSubtitle: {
+    fontSize: 13,
+    color: COLORS.textMuted,
+    marginTop: 2,
+  },
+  detailsCardSection: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: COLORS.glassBorder,
+    padding: 20,
+    marginBottom: 16,
+    boxShadow: '0 2px 10px rgba(0, 0, 0, 0.04)',
+    elevation: 2,
+  },
+  sectionTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 16,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.glassBorder,
+  },
+  sectionTitleText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: COLORS.textMain,
+  },
+  detailsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 14,
+  },
+  detailsGridItem: {
+    width: '48%',
+    backgroundColor: 'rgba(248, 250, 252, 0.8)',
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: COLORS.glassBorder,
+  },
+  detailsGridLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+    marginBottom: 4,
+    letterSpacing: 0.5,
+  },
+  detailsGridVal: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textMain,
+  },
+
+  // Metric cards styles
+  sectionHeaderTitle: { fontSize: 15, fontWeight: '700', color: COLORS.textMain },
+  statsGrid7: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 20 },
+  statCardMetric: { flex: 1, minWidth: 160, padding: 16, borderRadius: 12, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.25)', elevation: 2 },
+  statCardMetricClickable: {
+    borderColor: COLORS.primary,
+    backgroundColor: '#ffffff',
+    boxShadow: '0 4px 10px rgba(16, 185, 129, 0.08)',
+    elevation: 2,
+  },
+  statLabel: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 0.5 },
+  statValueMetric: { fontSize: 24, fontWeight: '700', color: COLORS.textMain, marginTop: 6 },
 });

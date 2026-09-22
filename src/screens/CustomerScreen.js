@@ -237,17 +237,17 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
       if (!silent) {
         if (data.success === false) {
-          setToastMsg(`❌ IPTV STB Sync: ${data.message || 'Provider sync failed.'}`);
+          toast.error(`IPTV STB Sync: ${data.message || 'Provider sync failed.'}`);
         } else if (data.summary) {
           const s = data.summary;
-          setToastMsg(`✅ IPTV STB Sync Complete for ${cust.name}! STBs Added: ${s.stbs_added || 0}, Skipped: ${s.stbs_skipped || 0}`);
+          toast.success(`IPTV STB Sync Complete for ${cust.name || cust.full_name}! STBs Added: ${s.stbs_added || 0}, Skipped: ${s.stbs_skipped || 0}`);
         } else {
-          setToastMsg(`✅ IPTV STB Sync Complete for ${cust.name}! ${data.message || 'IPTV STB synced.'}`);
+          toast.success(`IPTV STB Sync Complete for ${cust.name || cust.full_name}! ${data.message || 'IPTV STB synced.'}`);
         }
       }
     } catch (e) {
       if (!silent) {
-        setToastMsg(`❌ IPTV STB Sync failed for ${cust.name}.`);
+        toast.error(`IPTV STB Sync failed for ${cust.name || cust.full_name}.`);
       }
     } finally {
       setSyncingAccountIds((prev) => {
@@ -255,9 +255,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         delete next[cust.id];
         return next;
       });
-      if (!silent) {
-        setTimeout(() => setToastMsg(''), 5000);
-      }
     }
   };
 
@@ -349,10 +346,12 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     if (onAutoCloseSidebar) {
       onAutoCloseSidebar();
     }
-    if (viewMode === 'iptv' || cust?.id?.startsWith('iptv_')) {
-      handleIptvCustomerDetailSync(cust, true);
-    } else if (cust?.internet_id) {
-      handleAccountDetailSync(cust.internet_id, true);
+    // Auto-trigger POST /iptv_customer_sync.php as soon as customer detail is opened
+    if (cust) {
+      handleIptvCustomerDetailSync(cust, false);
+      if (cust.internet_id) {
+        handleAccountDetailSync(cust.internet_id, true);
+      }
     }
   };
 
