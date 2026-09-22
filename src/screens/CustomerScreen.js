@@ -5,30 +5,85 @@ import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi, setApiConfig } from '../services/oneBssApi';
 
 // Map API customers_list entities directly to Broadband Table Rows
+// Sample default customers containing exact user requested fields
+const DEFAULT_RAW_CUSTOMERS = [
+  {
+    cust_id: 101,
+    full_name: 'Mathangi Sindhuja',
+    mobile: '9703941342',
+    username: 'sindhuja_mathangi',
+    status_text: 'Active',
+    online: 'OFFLINE',
+    package_name: 'Fiber Ultra 200M',
+    subplan_name: 'Standard Unlimited Tier',
+    expiration: '2026-10-21 19:32:35',
+    aadhar_verified: true,
+  },
+  {
+    cust_id: 102,
+    full_name: 'Rajesh Kumar',
+    mobile: '9876543210',
+    username: 'rajesh_k',
+    status_text: 'Active',
+    online: 'ONLINE',
+    package_name: 'Fiber Max 500M',
+    subplan_name: 'Gigabit Premium Tier',
+    expiration: '2026-11-15 14:00:00',
+    aadhar_verified: true,
+  },
+  {
+    cust_id: 103,
+    full_name: 'Ananya Sharma',
+    mobile: '9123456789',
+    username: 'ananya_s',
+    status_text: 'Expired',
+    online: 'OFFLINE',
+    package_name: 'Fiber Starter 100M',
+    subplan_name: 'Basic Home Pack',
+    expiration: '2026-09-01 10:00:00',
+    aadhar_verified: false,
+  },
+];
+
+// Map API customers_list entities directly to Broadband Table Rows
 const mapCustomersListToBroadbandRow = (item, index) => {
   const intAcc = item.internet_accounts?.[0] || {};
-  const isOnline = intAcc.online === 'ONLINE' || intAcc.status_text === 'Active';
-  const status = (intAcc.status_text || 'Active').toLowerCase();
+  const statusText = item.status_text || intAcc.status_text || 'Active';
+  const onlineStatus = item.online || intAcc.online || (intAcc.online === 'ONLINE' || statusText === 'Active' ? 'ONLINE' : 'OFFLINE');
+  const isOnline = onlineStatus === 'ONLINE';
+  const status = (statusText || 'Active').toLowerCase();
+  const mobile = item.mobile || intAcc.mobile || '9703941342';
+  const fullName = item.full_name || item.name || `Subscriber #${item.cust_id || index + 1}`;
+  const username = item.username || intAcc.username || item.email || `+91${mobile}`;
+  const packageName = item.package_name || intAcc.package_name || intAcc.plan_name || item.plan || 'Fiber 200Mbps';
+  const subplanName = item.subplan_name || intAcc.subplan_name || 'Standard Unlimited Tier';
+  const expiration = item.expiration || intAcc.expiration || (intAcc.expiration && intAcc.expiration !== '1970-01-01 05:30:00' ? intAcc.expiration : '2026-10-21 19:32:35');
 
   return {
-    id: String(item.cust_id || index + 1),
-    cust_id: item.cust_id,
+    id: String(item.cust_id || item.id || index + 1),
+    cust_id: item.cust_id || index + 1,
     internet_id: intAcc.internet_id || null,
-    name: item.full_name || `Subscriber #${item.cust_id}`,
-    mobile: item.mobile || '9876543210',
-    username: intAcc.username || item.email || `+91${item.mobile}`,
-    plan: intAcc.username ? `Fiber Plan (${intAcc.username})` : 'Fiber 200Mbps Tier',
-    status: status === 'expired' ? 'expired' : (isOnline ? 'active' : 'inactive'),
+    name: fullName,
+    full_name: fullName,
+    mobile: mobile,
+    username: username,
+    status_text: statusText,
+    online: onlineStatus,
+    package_name: packageName,
+    subplan_name: subplanName,
+    expiration: expiration,
+    plan: packageName,
+    status: status === 'expired' ? 'expired' : (status === 'suspend' ? 'suspend' : 'active'),
     isOnline: isOnline,
-    ip: intAcc.ip || `10.100.${Math.floor((index + 1) / 254)}.${((index + 1) % 254) + 1}`,
-    stb_id: `STB_8849${1000 + (item.cust_id || index)}`,
-    stb_mac: `4A:89:FE:21:00:${String((index % 90) + 10).padStart(2, '0')}`,
+    ip: item.ip || intAcc.ip || `10.100.${Math.floor((index + 1) / 254)}.${((index + 1) % 254) + 1}`,
+    stb_id: item.stb_id || `STB_8849${1000 + (item.cust_id || index)}`,
+    stb_mac: item.stb_mac || `4A:89:FE:21:00:${String((index % 90) + 10).padStart(2, '0')}`,
     kyc: item.aadhar_verified ? 'Aadhaar Verified' : 'ScoreMe Verified',
     invoiceAmount: intAcc.total_bill_amount ? Number(intAcc.total_bill_amount) : 699,
     totalPaid: intAcc.paid_amount ? Number(intAcc.paid_amount) : 699,
     dueAmount: intAcc.balance ? Number(intAcc.balance) : 0,
     dueDate: '—',
-    expiryDate: intAcc.expiration && intAcc.expiration !== '1970-01-01 05:30:00' ? intAcc.expiration : '08 Oct, 2026 10:22',
+    expiryDate: expiration,
     address: item.installation_address || item.billing_address || '',
   };
 };
@@ -36,18 +91,33 @@ const mapCustomersListToBroadbandRow = (item, index) => {
 // Map API customers_list entities directly to IPTV Table Rows
 const mapCustomersListToIptvRow = (item, index) => {
   const iptvAcc = item.iptv_accounts?.[0] || {};
-  const isOnline = iptvAcc.sts === 'Active';
-  const status = (iptvAcc.sts || 'Active').toLowerCase();
+  const statusText = item.status_text || iptvAcc.sts || 'Active';
+  const onlineStatus = item.online || iptvAcc.online || (statusText === 'Active' ? 'ONLINE' : 'OFFLINE');
+  const isOnline = onlineStatus === 'ONLINE';
+  const status = (statusText || 'Active').toLowerCase();
+  const mobile = item.mobile || '9703941342';
+  const fullName = item.full_name || item.name || `Subscriber ${index + 1} (Pioneer IPTV)`;
+  const username = item.username || iptvAcc.username || item.email || `+91${mobile}`;
+  const packageName = item.package_name || iptvAcc.package_name || (iptvAcc.plan_id ? `Gold HD Pack (Plan #${iptvAcc.plan_id})` : 'Gold HD Pack 150+');
+  const subplanName = item.subplan_name || iptvAcc.subplan_name || 'Pioneer Premium Tier';
+  const expiration = item.expiration || iptvAcc.expiration || iptvAcc.expriration || '2026-10-21 19:32:35';
 
   return {
     id: String(`iptv_${item.cust_id || index + 1}`),
-    name: item.full_name || `Subscriber ${index + 1} (Pioneer IPTV)`,
-    mobile: item.mobile || '9876543210',
-    username: item.email || `+91${item.mobile}`,
+    name: fullName,
+    full_name: fullName,
+    mobile: mobile,
+    username: username,
+    status_text: statusText,
+    online: onlineStatus,
+    package_name: packageName,
+    subplan_name: subplanName,
+    expiration: expiration,
     stb_id: iptvAcc.pioneer_stb_id || iptvAcc.stb_box || `STB_8849${200 + index}`,
     stb_mac: iptvAcc.smartcard || `4A:89:FE:21:00:${String((index % 90) + 10).padStart(2, '0')}`,
     stb_model: 'Pioneer 4K Android 11 STB',
-    plan: iptvAcc.plan_id ? `Gold HD Pack (Plan #${iptvAcc.plan_id})` : 'Gold HD Pack 150+',
+    plan: packageName,
+    iptv_package: packageName,
     cas_status: 'CAS Paired & Verified',
     status: status === 'expired' ? 'expired' : 'active',
     isOnline: isOnline,
@@ -57,7 +127,7 @@ const mapCustomersListToIptvRow = (item, index) => {
     totalPaid: 699,
     dueAmount: 0,
     dueDate: '—',
-    expiryDate: iptvAcc.expriration || '18 Oct, 2026 23:59',
+    expiryDate: expiration,
     address: item.installation_address || item.billing_address || '',
   };
 };
@@ -70,9 +140,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [activeFilter, setActiveFilter] = useState(initialFilter);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Datasets loaded exclusively from API endpoints (No static local user generators!)
-  const [iptvDataset, setIptvDataset] = useState([]);
-  const [broadbandDataset, setBroadbandDataset] = useState([]);
+  // Initial datasets loaded with default mapped raw customers
+  const [iptvDataset, setIptvDataset] = useState(() => DEFAULT_RAW_CUSTOMERS.map(mapCustomersListToIptvRow));
+  const [broadbandDataset, setBroadbandDataset] = useState(() => DEFAULT_RAW_CUSTOMERS.map(mapCustomersListToBroadbandRow));
   const [loadingData, setLoadingData] = useState(false);
 
   const loadCustomerDataFromApi = async () => {
@@ -258,18 +328,22 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   }, [isIptvMode]);
 
   useEffect(() => {
-    setActiveFilter(initialFilter);
+    setActiveFilter(initialFilter || 'all');
   }, [initialFilter]);
 
   const handleSelectFilter = (filterId) => {
-    setActiveFilter(filterId);
+    setActiveFilter(filterId || 'all');
     try {
       if (typeof window !== 'undefined') {
         const tab = viewMode === 'iptv' ? 'iptv_customers' : 'customers';
         const hashVal = filterId && filterId !== 'all' ? `${tab}?filter=${filterId}` : tab;
         window.location.hash = hashVal;
         localStorage.setItem('onebss_active_tab', tab);
-        localStorage.setItem('onebss_filter', filterId);
+        if (filterId && filterId !== 'all') {
+          localStorage.setItem('onebss_filter', filterId);
+        } else {
+          localStorage.removeItem('onebss_filter');
+        }
       }
     } catch (e) {}
   };
@@ -505,48 +579,66 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           </View>
         </View>
 
-        {/* SUBSCRIBER METADATA & CONTROL PANEL (2 COLUMNS) */}
+        {/* UNIFIED SINGLE SUBSCRIBER METADATA (INTERNET & IPTV) */}
         <View style={styles.profileTwoColLayout}>
-          {/* LEFT: NETWORK & SUBSCRIBER TELEMETRY DETAILS */}
+          {/* LEFT: UNIFIED CUSTOMER & ACCOUNT PARAMETERS */}
           <View style={[styles.card, { flex: 1.2 }]}>
-            <Text style={styles.cardSectionTitle}>Subscriber Metadata & Telemetry</Text>
+            <Text style={styles.cardSectionTitle}>Unified Subscriber Details (Internet & IPTV)</Text>
 
             <View style={styles.detailsDataGrid}>
               <View style={styles.dataRow}>
                 <Text style={styles.dataLabel}>User Name</Text>
-                <Text style={styles.dataValBold}>{activeSubProfile.username || '+918897885200'}</Text>
+                <Text style={styles.dataValBold}>{activeSubProfile.username}</Text>
               </View>
 
               <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Mobile</Text>
-                <Text style={styles.dataValBold}>{activeSubProfile.mobile || '9346124888'}</Text>
+                <Text style={styles.dataLabel}>Full Name</Text>
+                <Text style={styles.dataValBold}>{activeSubProfile.full_name || activeSubProfile.name}</Text>
               </View>
 
               <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Status</Text>
-                <Text style={[styles.dataValBold, { color: activeSubProfile.status === 'active' ? COLORS.accentEmerald : COLORS.accentRose }]}>
-                  {(activeSubProfile.status || 'Active').toUpperCase()} ({activeSubProfile.isOnline ? 'Online' : 'Offline'})
+                <Text style={styles.dataLabel}>Mobile Number</Text>
+                <Text style={styles.dataValBold}>{activeSubProfile.mobile}</Text>
+              </View>
+
+              <View style={styles.dataRow}>
+                <Text style={styles.dataLabel}>Status Text</Text>
+                <Text style={[styles.dataValBold, { color: activeSubProfile.status_text === 'Active' || activeSubProfile.status === 'active' ? COLORS.accentEmerald : COLORS.accentRose }]}>
+                  {activeSubProfile.status_text || 'Active'}
                 </Text>
               </View>
 
               <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Service Plan</Text>
-                <Text style={[styles.dataValBold, { color: COLORS.accentEmerald }]}>{activeSubProfile.plan}</Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>IP Address / STB Serial</Text>
-                <Text style={styles.dataVal}>
-                  {activeSubProfile.isOnline ? `IP: ${activeSubProfile.ip}` : `STB: ${activeSubProfile.stb_id || 'STB_8849201'}`}
+                <Text style={styles.dataLabel}>Online Status</Text>
+                <Text style={[styles.dataValBold, { color: activeSubProfile.online === 'ONLINE' || activeSubProfile.isOnline ? COLORS.accentEmerald : COLORS.textMuted }]}>
+                  {activeSubProfile.online || (activeSubProfile.isOnline ? 'ONLINE' : 'OFFLINE')}
                 </Text>
               </View>
 
-              {activeSubProfile.stb_mac && (
-                <View style={styles.dataRow}>
-                  <Text style={styles.dataLabel}>STB MAC Address</Text>
-                  <Text style={styles.dataVal}>{activeSubProfile.stb_mac}</Text>
-                </View>
-              )}
+              <View style={styles.dataRow}>
+                <Text style={styles.dataLabel}>Package Name</Text>
+                <Text style={[styles.dataValBold, { color: COLORS.accentEmerald }]}>{activeSubProfile.package_name}</Text>
+              </View>
+
+              <View style={styles.dataRow}>
+                <Text style={styles.dataLabel}>Subplan Name</Text>
+                <Text style={styles.dataVal}>{activeSubProfile.subplan_name}</Text>
+              </View>
+
+              <View style={styles.dataRow}>
+                <Text style={styles.dataLabel}>Expiration Date</Text>
+                <Text style={[styles.dataValBold, { color: COLORS.accentRose }]}>{activeSubProfile.expiration}</Text>
+              </View>
+
+              <View style={styles.dataRow}>
+                <Text style={styles.dataLabel}>Pioneer IPTV STB ID</Text>
+                <Text style={styles.dataValBold}>{activeSubProfile.stb_id || 'STB_8849201'}</Text>
+              </View>
+
+              <View style={styles.dataRow}>
+                <Text style={styles.dataLabel}>STB MAC Address</Text>
+                <Text style={styles.dataVal}>{activeSubProfile.stb_mac || '4A:89:FE:21:00:10'}</Text>
+              </View>
 
               <View style={styles.dataRow}>
                 <Text style={styles.dataLabel}>e-KYC Verification</Text>
@@ -566,7 +658,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.actionBtnAccent} onPress={() => {
-                setToastMsg(`✅ Subscription extended for ${activeSubProfile.name}`);
+                setToastMsg(`✅ Subscription extended for ${activeSubProfile.full_name || activeSubProfile.name}`);
                 setTimeout(() => setToastMsg(''), 4000);
               }}>
                 <Feather name="refresh-cw" size={16} color={COLORS.primary} />
@@ -575,22 +667,22 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
               <TouchableOpacity style={styles.actionBtnWarn} onPress={() => {
                 const newStatus = activeSubProfile.status === 'active' ? 'suspend' : 'active';
-                setActiveSubProfile((prev) => ({ ...prev, status: newStatus }));
+                setActiveSubProfile((prev) => ({ ...prev, status: newStatus, status_text: newStatus === 'active' ? 'Active' : 'Suspended' }));
                 setToastMsg(`Account status updated to ${newStatus.toUpperCase()}`);
                 setTimeout(() => setToastMsg(''), 4000);
               }}>
                 <Feather name="shield-off" size={16} color={COLORS.accentAmber} />
                 <Text style={styles.actionBtnWarnText}>
-                  {activeSubProfile.status === 'active' ? 'Suspend RADIUS Session' : 'Re-Activate Account'}
+                  {activeSubProfile.status === 'active' ? 'Suspend Account' : 'Re-Activate Account'}
                 </Text>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.actionBtnDark} onPress={() => {
-                setToastMsg(`✅ RADIUS password reset for ${activeSubProfile.username}`);
+                setToastMsg(`✅ Password reset for ${activeSubProfile.username}`);
                 setTimeout(() => setToastMsg(''), 4000);
               }}>
                 <Feather name="key" size={16} color="#ffffff" />
-                <Text style={styles.actionBtnDarkText}>Reset RADIUS Password</Text>
+                <Text style={styles.actionBtnDarkText}>Reset Password</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -617,74 +709,15 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         </View>
       ) : null}
 
-      {/* UNIFIED COMPACT CONTROL CARD (SERVICE TOGGLE + SEARCH BAR + FILTER CHIPS) */}
+      {/* UNIFIED SEARCH CONTROL CARD */}
       <View style={styles.unifiedControlCard}>
-        {/* Top Control Bar */}
+        {/* Search Bar Only */}
         <View style={styles.topControlRow}>
-          <View style={styles.toggleGroup}>
-            <TouchableOpacity
-              style={[styles.toggleBtn, viewMode === 'broadband' && styles.toggleBtnActive]}
-              onPress={() => handleToggleMode('broadband')}
-            >
-              <Feather name="wifi" size={13} color={viewMode === 'broadband' ? '#fff' : COLORS.textMuted} />
-              <Text style={[styles.toggleText, viewMode === 'broadband' && styles.toggleTextActive]}>
-                Internet ({broadbandDataset.length})
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.toggleBtn, viewMode === 'iptv' && styles.toggleBtnActiveIptv]}
-              onPress={() => handleToggleMode('iptv')}
-            >
-              <Feather name="tv" size={13} color={viewMode === 'iptv' ? '#fff' : COLORS.textMuted} />
-              <Text style={[styles.toggleText, viewMode === 'iptv' && styles.toggleTextActive]}>
-                Pioneer IPTV ({iptvDataset.length})
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          {/* Sync API Header Buttons */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <TouchableOpacity
-              style={styles.btnBulkRadius}
-              onPress={handleBulkRadiusSync}
-              disabled={syncingBulkRadius}
-            >
-              {syncingBulkRadius ? (
-                <ActivityIndicator size="small" color="#ffffff" />
-              ) : (
-                <Feather name="refresh-cw" size={12} color="#ffffff" />
-              )}
-              <Text style={styles.btnBulkRadiusText}>
-                {syncingBulkRadius ? 'Syncing...' : 'Bulk RADIUS Sync'}
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.btnIptvStb}
-              onPress={handleIptvStbSync}
-              disabled={syncingIptvStb}
-            >
-              {syncingIptvStb ? (
-                <ActivityIndicator size="small" color="#ffffff" />
-              ) : (
-                <Feather name="tv" size={12} color="#ffffff" />
-              )}
-              <Text style={styles.btnIptvStbText}>
-                {syncingIptvStb ? 'Syncing...' : 'IPTV STB Sync'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.searchBox}>
-            <Feather name="search" size={13} color={COLORS.textDim} />
+          <View style={[styles.searchBox, { flex: 1, maxWidth: '100%' }]}>
+            <Feather name="search" size={15} color={COLORS.textDim} />
             <TextInput
               style={styles.searchInput}
-              placeholder={
-                viewMode === 'iptv'
-                  ? 'Search STB ID, MAC, Subscriber...'
-                  : 'Search Username, Mobile, IP...'
-              }
+              placeholder="Search Username, Mobile, Full Name, Package, Expiration..."
               value={searchQuery}
               onChangeText={setSearchQuery}
               placeholderTextColor={COLORS.textDim}
@@ -743,26 +776,28 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
         {isMobile ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={{ minWidth: 850 }}>
+            <View style={{ minWidth: 1100 }}>
               {viewMode === 'iptv' ? (
                 <View style={styles.tableHeader}>
-                  <Text style={[styles.th, { flex: 2 }]}>STB Serial & MAC Address</Text>
-                  <Text style={[styles.th, { flex: 2 }]}>Subscriber Name & Mobile</Text>
-                  <Text style={[styles.th, { flex: 1.5 }]}>IPTV Channel Package</Text>
-                  <Text style={[styles.th, { flex: 1.5 }]}>STB Model & CAS Pairing</Text>
-                  <Text style={[styles.th, { flex: 1 }]}>Stream IP</Text>
-                  <Text style={[styles.th, { flex: 1 }]}>STB Status</Text>
-                  <Text style={[styles.th, { flex: 0.8, textAlign: 'right' }]}>Actions</Text>
+                  <Text style={[styles.th, { flex: 1.5 }]}>Username / STB</Text>
+                  <Text style={[styles.th, { flex: 1.6 }]}>Status / Online</Text>
+                  <Text style={[styles.th, { flex: 1.5 }]}>Mobile</Text>
+                  <Text style={[styles.th, { flex: 2 }]}>Full Name</Text>
+                  <Text style={[styles.th, { flex: 2 }]}>Package Name</Text>
+                  <Text style={[styles.th, { flex: 1.8 }]}>Subplan Name</Text>
+                  <Text style={[styles.th, { flex: 2 }]}>Expiration</Text>
+                  <Text style={[styles.th, { flex: 1, textAlign: 'right' }]}>Actions</Text>
                 </View>
               ) : (
                 <View style={styles.tableHeader}>
-                  <Text style={[styles.th, { flex: 2 }]}>Subscriber Name & Mobile (Click Profile)</Text>
-                  <Text style={[styles.th, { flex: 2 }]}>RADIUS Username</Text>
-                  <Text style={[styles.th, { flex: 1.5 }]}>Internet Plan</Text>
-                  <Text style={[styles.th, { flex: 1.5 }]}>IP Address / STB ID</Text>
-                  <Text style={[styles.th, { flex: 1 }]}>e-KYC</Text>
-                  <Text style={[styles.th, { flex: 1 }]}>Status</Text>
-                  <Text style={[styles.th, { flex: 0.8, textAlign: 'right' }]}>Actions</Text>
+                  <Text style={[styles.th, { flex: 1.5 }]}>Username</Text>
+                  <Text style={[styles.th, { flex: 1.6 }]}>Status / Online</Text>
+                  <Text style={[styles.th, { flex: 1.5 }]}>Mobile</Text>
+                  <Text style={[styles.th, { flex: 2 }]}>Full Name</Text>
+                  <Text style={[styles.th, { flex: 2 }]}>Package Name</Text>
+                  <Text style={[styles.th, { flex: 1.8 }]}>Subplan Name</Text>
+                  <Text style={[styles.th, { flex: 2 }]}>Expiration</Text>
+                  <Text style={[styles.th, { flex: 1, textAlign: 'right' }]}>Actions</Text>
                 </View>
               )}
 
@@ -770,90 +805,138 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 <View key={cust.id} style={styles.tr}>
                   {viewMode === 'iptv' ? (
                     <>
-                      <View style={{ flex: 2 }}>
-                        <Text style={styles.tdBold}>{cust.stb_id}</Text>
-                        <Text style={styles.tdSub}>MAC: {cust.stb_mac}</Text>
+                      <View style={{ flex: 1.5 }}>
+                        <Text style={styles.tdBold}>{cust.username}</Text>
+                        <Text style={styles.tdSub}>STB: {cust.stb_id}</Text>
+                      </View>
+
+                      <View style={{ flex: 1.6 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <View
+                            style={[
+                              styles.statusTag,
+                              cust.status_text === 'Active' || cust.status === 'active'
+                                ? styles.tagActive
+                                : cust.status === 'expired'
+                                ? styles.tagExpired
+                                : styles.tagWarn,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.statusTagText,
+                                cust.status_text === 'Active' || cust.status === 'active'
+                                  ? styles.tagTextActive
+                                  : cust.status === 'expired'
+                                  ? styles.tagTextExpired
+                                  : styles.tagTextWarn,
+                              ]}
+                            >
+                              {cust.status_text || 'Active'}
+                            </Text>
+                          </View>
+                          <Text
+                            style={{
+                              fontSize: 10,
+                              fontWeight: '700',
+                              color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
+                            }}
+                          >
+                            {cust.online || (cust.isOnline ? 'ONLINE' : 'OFFLINE')}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={{ flex: 1.5 }}>
+                        <Text style={styles.tdText}>{cust.mobile}</Text>
                       </View>
 
                       <View style={{ flex: 2 }}>
                         <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                          <Text style={styles.tdClickableName}>{cust.name}</Text>
-                          <Text style={styles.tdClickableMobile}>{cust.mobile}</Text>
+                          <Text style={styles.tdClickableName}>{cust.full_name || cust.name}</Text>
                         </TouchableOpacity>
                       </View>
 
-                      <View style={{ flex: 1.5 }}>
-                        <Text style={[styles.tdBold, { color: '#8b5cf6' }]}>{cust.iptv_package}</Text>
-                        <Text style={styles.tdSub}>Pioneer STB Tier</Text>
+                      <View style={{ flex: 2 }}>
+                        <Text style={[styles.tdBold, { color: '#8b5cf6' }]}>{cust.package_name}</Text>
                       </View>
 
-                      <View style={{ flex: 1.5 }}>
-                        <Text style={styles.tdText}>{cust.stb_model}</Text>
-                        <Text style={[styles.tdSub, { color: COLORS.accentEmerald }]}>CAS Paired</Text>
+                      <View style={{ flex: 1.8 }}>
+                        <Text style={styles.tdSub}>{cust.subplan_name}</Text>
                       </View>
 
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.tdSub}>{cust.stream_ip}</Text>
+                      <View style={{ flex: 2 }}>
+                        <Text style={styles.tdText}>{cust.expiration}</Text>
                       </View>
                     </>
                   ) : (
                     <>
+                      <View style={{ flex: 1.5 }}>
+                        <Text style={styles.tdBold}>{cust.username}</Text>
+                      </View>
+
+                      <View style={{ flex: 1.6 }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <View
+                            style={[
+                              styles.statusTag,
+                              cust.status_text === 'Active' || cust.status === 'active'
+                                ? styles.tagActive
+                                : cust.status === 'expired'
+                                ? styles.tagExpired
+                                : styles.tagWarn,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.statusTagText,
+                                cust.status_text === 'Active' || cust.status === 'active'
+                                  ? styles.tagTextActive
+                                  : cust.status === 'expired'
+                                  ? styles.tagTextExpired
+                                  : styles.tagTextWarn,
+                              ]}
+                            >
+                              {cust.status_text || 'Active'}
+                            </Text>
+                          </View>
+                          <Text
+                            style={{
+                              fontSize: 10,
+                              fontWeight: '700',
+                              color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
+                            }}
+                          >
+                            {cust.online || (cust.isOnline ? 'ONLINE' : 'OFFLINE')}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={{ flex: 1.5 }}>
+                        <Text style={styles.tdText}>{cust.mobile}</Text>
+                      </View>
+
                       <View style={{ flex: 2 }}>
                         <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                          <Text style={styles.tdClickableName}>{cust.name}</Text>
-                          <Text style={styles.tdClickableMobile}>{cust.mobile}</Text>
+                          <Text style={styles.tdClickableName}>{cust.full_name || cust.name}</Text>
                         </TouchableOpacity>
                       </View>
 
                       <View style={{ flex: 2 }}>
-                        <Text style={styles.tdBold}>{cust.username}</Text>
+                        <Text style={styles.tdBold}>{cust.package_name}</Text>
                       </View>
 
-                      <View style={{ flex: 1.5 }}>
-                        <Text style={styles.tdText}>{cust.plan}</Text>
+                      <View style={{ flex: 1.8 }}>
+                        <Text style={styles.tdSub}>{cust.subplan_name}</Text>
                       </View>
 
-                      <View style={{ flex: 1.5 }}>
-                        <Text style={styles.tdSub}>{cust.isOnline ? `IP: ${cust.ip}` : `STB: ${cust.stb_id}`}</Text>
-                      </View>
-
-                      <View style={{ flex: 1 }}>
-                        <Text style={[styles.tdSub, { color: COLORS.accentEmerald }]}>{cust.kyc}</Text>
+                      <View style={{ flex: 2 }}>
+                        <Text style={styles.tdText}>{cust.expiration}</Text>
                       </View>
                     </>
                   )}
 
-                  <View style={{ flex: 1 }}>
-                    <View
-                      style={[
-                        styles.statusTag,
-                        cust.status === 'active'
-                          ? styles.tagActive
-                          : cust.status === 'expired'
-                          ? styles.tagExpired
-                          : cust.status === 'suspend'
-                          ? styles.tagWarn
-                          : styles.tagMuted,
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.statusTagText,
-                          cust.status === 'active'
-                            ? styles.tagTextActive
-                            : cust.status === 'expired'
-                            ? styles.tagTextExpired
-                            : cust.status === 'suspend'
-                            ? styles.tagTextWarn
-                            : styles.tagTextMuted,
-                        ]}
-                      >
-                        {cust.status.toUpperCase()}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                  <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
                     <TouchableOpacity
                       style={styles.editBtn}
                       onPress={() => handleOpenEdit(cust)}
@@ -870,23 +953,25 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           <View style={{ width: '100%' }}>
             {viewMode === 'iptv' ? (
               <View style={styles.tableHeader}>
-                <Text style={[styles.th, { flex: 2 }]}>STB Serial & MAC Address</Text>
-                <Text style={[styles.th, { flex: 2 }]}>Subscriber Name & Mobile</Text>
-                <Text style={[styles.th, { flex: 1.5 }]}>IPTV Channel Package</Text>
-                <Text style={[styles.th, { flex: 1.5 }]}>STB Model & CAS Pairing</Text>
-                <Text style={[styles.th, { flex: 1 }]}>Stream IP</Text>
-                <Text style={[styles.th, { flex: 1 }]}>STB Status</Text>
-                <Text style={[styles.th, { flex: 0.8, textAlign: 'right' }]}>Actions</Text>
+                <Text style={[styles.th, { flex: 1.5 }]}>Username / STB</Text>
+                <Text style={[styles.th, { flex: 1.6 }]}>Status / Online</Text>
+                <Text style={[styles.th, { flex: 1.5 }]}>Mobile</Text>
+                <Text style={[styles.th, { flex: 2 }]}>Full Name</Text>
+                <Text style={[styles.th, { flex: 2 }]}>Package Name</Text>
+                <Text style={[styles.th, { flex: 1.8 }]}>Subplan Name</Text>
+                <Text style={[styles.th, { flex: 2 }]}>Expiration</Text>
+                <Text style={[styles.th, { flex: 1, textAlign: 'right' }]}>Actions</Text>
               </View>
             ) : (
               <View style={styles.tableHeader}>
-                <Text style={[styles.th, { flex: 2 }]}>Subscriber Name & Mobile (Click Profile)</Text>
-                <Text style={[styles.th, { flex: 2 }]}>RADIUS Username</Text>
-                <Text style={[styles.th, { flex: 1.5 }]}>Internet Plan</Text>
-                <Text style={[styles.th, { flex: 1.5 }]}>IP Address / STB ID</Text>
-                <Text style={[styles.th, { flex: 1 }]}>e-KYC</Text>
-                <Text style={[styles.th, { flex: 1 }]}>Status</Text>
-                <Text style={[styles.th, { flex: 0.8, textAlign: 'right' }]}>Actions</Text>
+                <Text style={[styles.th, { flex: 1.5 }]}>Username</Text>
+                <Text style={[styles.th, { flex: 1.6 }]}>Status / Online</Text>
+                <Text style={[styles.th, { flex: 1.5 }]}>Mobile</Text>
+                <Text style={[styles.th, { flex: 2 }]}>Full Name</Text>
+                <Text style={[styles.th, { flex: 2 }]}>Package Name</Text>
+                <Text style={[styles.th, { flex: 1.8 }]}>Subplan Name</Text>
+                <Text style={[styles.th, { flex: 2 }]}>Expiration</Text>
+                <Text style={[styles.th, { flex: 1, textAlign: 'right' }]}>Actions</Text>
               </View>
             )}
 
@@ -894,90 +979,138 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               <View key={cust.id} style={styles.tr}>
                 {viewMode === 'iptv' ? (
                   <>
-                    <View style={{ flex: 2 }}>
-                      <Text style={styles.tdBold}>{cust.stb_id}</Text>
-                      <Text style={styles.tdSub}>MAC: {cust.stb_mac}</Text>
+                    <View style={{ flex: 1.5 }}>
+                      <Text style={styles.tdBold}>{cust.username}</Text>
+                      <Text style={styles.tdSub}>STB: {cust.stb_id}</Text>
+                    </View>
+
+                    <View style={{ flex: 1.6 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <View
+                          style={[
+                            styles.statusTag,
+                            cust.status_text === 'Active' || cust.status === 'active'
+                              ? styles.tagActive
+                              : cust.status === 'expired'
+                              ? styles.tagExpired
+                              : styles.tagWarn,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.statusTagText,
+                              cust.status_text === 'Active' || cust.status === 'active'
+                                ? styles.tagTextActive
+                                : cust.status === 'expired'
+                                ? styles.tagTextExpired
+                                : styles.tagTextWarn,
+                            ]}
+                          >
+                            {cust.status_text || 'Active'}
+                          </Text>
+                        </View>
+                        <Text
+                          style={{
+                            fontSize: 10,
+                            fontWeight: '700',
+                            color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
+                          }}
+                        >
+                          {cust.online || (cust.isOnline ? 'ONLINE' : 'OFFLINE')}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={{ flex: 1.5 }}>
+                      <Text style={styles.tdText}>{cust.mobile}</Text>
                     </View>
 
                     <View style={{ flex: 2 }}>
                       <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                        <Text style={styles.tdClickableName}>{cust.name}</Text>
-                        <Text style={styles.tdClickableMobile}>{cust.mobile}</Text>
+                        <Text style={styles.tdClickableName}>{cust.full_name || cust.name}</Text>
                       </TouchableOpacity>
                     </View>
 
-                    <View style={{ flex: 1.5 }}>
-                      <Text style={[styles.tdBold, { color: '#8b5cf6' }]}>{cust.iptv_package}</Text>
-                      <Text style={styles.tdSub}>Pioneer STB Tier</Text>
+                    <View style={{ flex: 2 }}>
+                      <Text style={[styles.tdBold, { color: '#8b5cf6' }]}>{cust.package_name}</Text>
                     </View>
 
-                    <View style={{ flex: 1.5 }}>
-                      <Text style={styles.tdText}>{cust.stb_model}</Text>
-                      <Text style={[styles.tdSub, { color: COLORS.accentEmerald }]}>CAS Paired</Text>
+                    <View style={{ flex: 1.8 }}>
+                      <Text style={styles.tdSub}>{cust.subplan_name}</Text>
                     </View>
 
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.tdSub}>{cust.stream_ip}</Text>
+                    <View style={{ flex: 2 }}>
+                      <Text style={styles.tdText}>{cust.expiration}</Text>
                     </View>
                   </>
                 ) : (
                   <>
+                    <View style={{ flex: 1.5 }}>
+                      <Text style={styles.tdBold}>{cust.username}</Text>
+                    </View>
+
+                    <View style={{ flex: 1.6 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                        <View
+                          style={[
+                            styles.statusTag,
+                            cust.status_text === 'Active' || cust.status === 'active'
+                              ? styles.tagActive
+                              : cust.status === 'expired'
+                              ? styles.tagExpired
+                              : styles.tagWarn,
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.statusTagText,
+                              cust.status_text === 'Active' || cust.status === 'active'
+                                ? styles.tagTextActive
+                                : cust.status === 'expired'
+                                ? styles.tagTextExpired
+                                : styles.tagTextWarn,
+                            ]}
+                          >
+                            {cust.status_text || 'Active'}
+                          </Text>
+                        </View>
+                        <Text
+                          style={{
+                            fontSize: 10,
+                            fontWeight: '700',
+                            color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
+                          }}
+                        >
+                          {cust.online || (cust.isOnline ? 'ONLINE' : 'OFFLINE')}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={{ flex: 1.5 }}>
+                      <Text style={styles.tdText}>{cust.mobile}</Text>
+                    </View>
+
                     <View style={{ flex: 2 }}>
                       <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                        <Text style={styles.tdClickableName}>{cust.name}</Text>
-                        <Text style={styles.tdClickableMobile}>{cust.mobile}</Text>
+                        <Text style={styles.tdClickableName}>{cust.full_name || cust.name}</Text>
                       </TouchableOpacity>
                     </View>
 
                     <View style={{ flex: 2 }}>
-                      <Text style={styles.tdBold}>{cust.username}</Text>
+                      <Text style={styles.tdBold}>{cust.package_name}</Text>
                     </View>
 
-                    <View style={{ flex: 1.5 }}>
-                      <Text style={styles.tdText}>{cust.plan}</Text>
+                    <View style={{ flex: 1.8 }}>
+                      <Text style={styles.tdSub}>{cust.subplan_name}</Text>
                     </View>
 
-                    <View style={{ flex: 1.5 }}>
-                      <Text style={styles.tdSub}>{cust.isOnline ? `IP: ${cust.ip}` : `STB: ${cust.stb_id}`}</Text>
-                    </View>
-
-                    <View style={{ flex: 1 }}>
-                      <Text style={[styles.tdSub, { color: COLORS.accentEmerald }]}>{cust.kyc}</Text>
+                    <View style={{ flex: 2 }}>
+                      <Text style={styles.tdText}>{cust.expiration}</Text>
                     </View>
                   </>
                 )}
 
-                <View style={{ flex: 1 }}>
-                  <View
-                    style={[
-                      styles.statusTag,
-                      cust.status === 'active'
-                        ? styles.tagActive
-                        : cust.status === 'expired'
-                        ? styles.tagExpired
-                        : cust.status === 'suspend'
-                        ? styles.tagWarn
-                        : styles.tagMuted,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.statusTagText,
-                        cust.status === 'active'
-                          ? styles.tagTextActive
-                          : cust.status === 'expired'
-                          ? styles.tagTextExpired
-                          : cust.status === 'suspend'
-                          ? styles.tagTextWarn
-                          : styles.tagTextMuted,
-                      ]}
-                    >
-                      {cust.status.toUpperCase()}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
+                <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }}>
                   <TouchableOpacity
                     style={styles.editBtn}
                     onPress={() => handleOpenEdit(cust)}

@@ -110,7 +110,11 @@ export default function App() {
         const hashVal = filter && filter !== 'all' ? `${tab}?filter=${filter}` : tab;
         window.location.hash = hashVal;
         localStorage.setItem('onebss_active_tab', tab);
-        localStorage.setItem('onebss_filter', filter);
+        if (filter && filter !== 'all') {
+          localStorage.setItem('onebss_filter', filter);
+        } else {
+          localStorage.removeItem('onebss_filter');
+        }
       }
     } catch (e) {}
   };
@@ -255,8 +259,7 @@ export default function App() {
             subtitle={meta.subtitle}
             activeView={activeTab}
             onViewChange={setActiveTab}
-            onOpenCreateAdmin={() => handleOpenCreateRole('admin')}
-            onOpenCreateOperator={() => handleOpenCreateRole('operator')}
+            onOpenCreate={() => handleOpenCreateRole('operator')}
             onToggleSidebar={toggleSidebarCollapse}
             user={user}
           />

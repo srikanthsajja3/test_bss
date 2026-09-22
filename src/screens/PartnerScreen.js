@@ -97,6 +97,17 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     setTimeout(() => setToastMsg(''), 5000);
   };
 
+  if (isCreateOpen) {
+    return (
+      <CreateAccountModal
+        visible={true}
+        onClose={() => setIsCreateOpen(false)}
+        initialRole={createRole}
+        onAccountCreated={handleAccountCreated}
+      />
+    );
+  }
+
   return (
     <ScrollView
       style={styles.container}
@@ -126,23 +137,13 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
           </Text>
         </View>
         {user?.role !== 'operator' && (
-          <View style={[styles.actionBtnGroup, isMobile && { width: '100%', flexDirection: 'row' }]}>
-            <TouchableOpacity
-              style={[styles.addAdminBtn, isMobile && { flex: 1, justifyContent: 'center' }]}
-              onPress={() => handleOpenCreate('admin')}
-            >
-              <Feather name="shield" size={15} color="#fff" />
-              <Text style={styles.addAdminBtnText}>Add Admin</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.addOperatorBtn, isMobile && { flex: 1, justifyContent: 'center' }]}
-              onPress={() => handleOpenCreate('operator')}
-            >
-              <Feather name="briefcase" size={15} color="#fff" />
-              <Text style={styles.addOperatorBtnText}>Add Operator</Text>
-            </TouchableOpacity>
-          </View>
+          <TouchableOpacity
+            style={[styles.addOperatorBtn, isMobile && { width: '100%', justifyContent: 'center' }]}
+            onPress={() => handleOpenCreate('operator')}
+          >
+            <Feather name="plus-circle" size={15} color="#fff" />
+            <Text style={styles.addOperatorBtnText}>Add Operator</Text>
+          </TouchableOpacity>
         )}
       </View>
 
@@ -180,14 +181,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
 
       {/* STRUCTURED DATA TABLE VIEW */}
       <View style={styles.card}>
-        <View style={styles.cardHeader}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <MaterialCommunityIcons name="table-large" size={18} color={COLORS.primary} />
-            <Text style={styles.cardTitle}>
-              Partner & Operator Accounts Registry ({filteredPartners.length} Total Records)
-            </Text>
-          </View>
-        </View>
+
 
         {loading ? (
           <ActivityIndicator size="large" color={COLORS.primary} style={{ marginVertical: 40 }} />

@@ -223,6 +223,20 @@ export const OneBssApi = {
     return request(`/partner.php?id=${partnerId}`, { method: 'DELETE' });
   },
 
+  fetchInternetPartners: async (internetToken = '', internetBaseUrl = '') => {
+    return request('/internet_partners_fetch.php', {
+      method: 'POST',
+      body: JSON.stringify({ internet_token: internetToken, internet_base_url: internetBaseUrl }),
+    });
+  },
+
+  fetchInternetBranches: async (internetToken = '', internetBaseUrl = '', internetPartnerId = '') => {
+    return request('/internet_branches_fetch.php', {
+      method: 'POST',
+      body: JSON.stringify({ internet_token: internetToken, internet_base_url: internetBaseUrl, internet_partner_id: internetPartnerId }),
+    });
+  },
+
   getGatewayBranches: async (partnerId) => {
     return request(`/get_gateway_partners_branches.php?partner_id=${partnerId}`, { method: 'GET' });
   },

@@ -177,50 +177,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         </View>
       ) : null}
 
-      {/* SYNC ACTIONS CONTROL BAR */}
-      <View style={styles.operatorHeaderCard}>
-        {/* Sync API Buttons Group */}
-        <View style={styles.syncBtnGroup}>
-          <TouchableOpacity
-            style={styles.syncBtnPrimary}
-            onPress={handleSyncInternet}
-            disabled={syncingInet}
-          >
-            {syncingInet ? (
-              <ActivityIndicator size="small" color="#ffffff" />
-            ) : (
-              <Feather name="refresh-cw" size={13} color="#ffffff" />
-            )}
-            <Text style={styles.syncBtnText}>
-              {syncingInet ? 'Syncing...' : 'Sync Internet'}
-            </Text>
-          </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.syncBtnPurple}
-            onPress={handleSyncIptv}
-            disabled={syncingIptv}
-          >
-            {syncingIptv ? (
-              <ActivityIndicator size="small" color="#ffffff" />
-            ) : (
-              <Feather name="tv" size={13} color="#ffffff" />
-            )}
-            <Text style={styles.syncBtnText}>
-              {syncingIptv ? 'Syncing...' : 'Sync IPTV'}
-            </Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.syncBtnSecondary}
-            onPress={refreshData}
-            disabled={loading}
-          >
-            <Feather name="rotate-cw" size={13} color={COLORS.primary} />
-            <Text style={styles.syncBtnSecondaryText}>Refresh</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
 
       {/* INTERNET TELEMETRY GRID */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
@@ -229,116 +186,67 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
 
       <View style={styles.statsGrid7}>
         {/* TOTAL USERS */}
-        {!isOperator ? (
-          <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('all')}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={styles.statLabel}>TOTAL USERS</Text>
-              <Feather name="arrow-up-right" size={13} color={COLORS.primary} />
-            </View>
-            <Text style={styles.statValueMetric}>{inet.total}</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.statCardMetric}>
+        <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('all')}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={styles.statLabel}>TOTAL USERS</Text>
-            <Text style={styles.statValueMetric}>{inet.total}</Text>
+            <Feather name="arrow-up-right" size={13} color={COLORS.primary} />
           </View>
-        )}
+          <Text style={styles.statValueMetric}>{inet.total}</Text>
+        </TouchableOpacity>
 
         {/* ACTIVE USERS */}
-        {!isOperator ? (
-          <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('active')}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={styles.statLabel}>ACTIVE USERS</Text>
-              <Feather name="arrow-up-right" size={13} color={COLORS.accentEmerald} />
-            </View>
-            <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>{inet.active}</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.statCardMetric}>
+        <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('active')}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={styles.statLabel}>ACTIVE USERS</Text>
-            <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>{inet.active}</Text>
+            <Feather name="arrow-up-right" size={13} color={COLORS.accentEmerald} />
           </View>
-        )}
+          <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>{inet.active}</Text>
+        </TouchableOpacity>
 
         {/* ONLINE USERS */}
-        {!isOperator ? (
-          <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('online')}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={styles.statLabel}>ONLINE USERS</Text>
-              <Feather name="arrow-up-right" size={13} color="#3b82f6" />
-            </View>
-            <Text style={[styles.statValueMetric, { color: '#3b82f6' }]}>{inet.online}</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.statCardMetric}>
+        <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('online')}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={styles.statLabel}>ONLINE USERS</Text>
-            <Text style={[styles.statValueMetric, { color: '#3b82f6' }]}>{inet.online}</Text>
+            <Feather name="arrow-up-right" size={13} color="#3b82f6" />
           </View>
-        )}
+          <Text style={[styles.statValueMetric, { color: '#3b82f6' }]}>{inet.online}</Text>
+        </TouchableOpacity>
 
         {/* EXPIRED USERS */}
-        {!isOperator ? (
-          <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('expired')}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={styles.statLabel}>EXPIRED USERS</Text>
-              <Feather name="arrow-up-right" size={13} color={COLORS.accentRose} />
-            </View>
-            <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>{inet.expired}</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.statCardMetric}>
+        <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('expired')}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={styles.statLabel}>EXPIRED USERS</Text>
-            <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>{inet.expired}</Text>
+            <Feather name="arrow-up-right" size={13} color={COLORS.accentRose} />
           </View>
-        )}
+          <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>{inet.expired}</Text>
+        </TouchableOpacity>
 
         {/* SUSPENDED USERS */}
-        {!isOperator ? (
-          <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('suspend')}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={styles.statLabel}>SUSPENDED USERS</Text>
-              <Feather name="arrow-up-right" size={13} color={COLORS.accentAmber} />
-            </View>
-            <Text style={[styles.statValueMetric, { color: COLORS.accentAmber }]}>{inet.suspend ?? 1}</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.statCardMetric}>
+        <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('suspend')}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={styles.statLabel}>SUSPENDED USERS</Text>
-            <Text style={[styles.statValueMetric, { color: COLORS.accentAmber }]}>{inet.suspend ?? 1}</Text>
+            <Feather name="arrow-up-right" size={13} color={COLORS.accentAmber} />
           </View>
-        )}
+          <Text style={[styles.statValueMetric, { color: COLORS.accentAmber }]}>{inet.suspend ?? 1}</Text>
+        </TouchableOpacity>
 
         {/* DISABLED USERS */}
-        {!isOperator ? (
-          <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('suspend')}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={styles.statLabel}>DISABLED USERS</Text>
-              <Feather name="arrow-up-right" size={13} color="#64748b" />
-            </View>
-            <Text style={[styles.statValueMetric, { color: '#64748b' }]}>{inet.disabled ?? 0}</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.statCardMetric}>
+        <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('suspend')}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={styles.statLabel}>DISABLED USERS</Text>
-            <Text style={[styles.statValueMetric, { color: '#64748b' }]}>{inet.disabled ?? 0}</Text>
+            <Feather name="arrow-up-right" size={13} color="#64748b" />
           </View>
-        )}
+          <Text style={[styles.statValueMetric, { color: '#64748b' }]}>{inet.disabled ?? 0}</Text>
+        </TouchableOpacity>
 
         {/* NEW USERS */}
-        {!isOperator ? (
-          <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('all')}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-              <Text style={styles.statLabel}>NEW USERS</Text>
-              <Feather name="arrow-up-right" size={13} color="#8b5cf6" />
-            </View>
-            <Text style={[styles.statValueMetric, { color: '#8b5cf6' }]}>{inet.new ?? 0}</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.statCardMetric}>
+        <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('all')}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <Text style={styles.statLabel}>NEW USERS</Text>
-            <Text style={[styles.statValueMetric, { color: '#8b5cf6' }]}>{inet.new ?? 0}</Text>
+            <Feather name="arrow-up-right" size={13} color="#8b5cf6" />
           </View>
-        )}
+          <Text style={[styles.statValueMetric, { color: '#8b5cf6' }]}>{inet.new ?? 0}</Text>
+        </TouchableOpacity>
       </View>
 
       {/* IPTV TELEMETRY DATA CARD */}
@@ -352,52 +260,31 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
 
         <View style={styles.iptvGrid}>
           {/* TOTAL IPTV USERS */}
-          {!isOperator ? (
-            <TouchableOpacity style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('iptv')}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={styles.iptvLabel}>TOTAL IPTV USERS</Text>
-                <Feather name="arrow-up-right" size={13} color="#8b5cf6" />
-              </View>
-              <Text style={styles.iptvVal}>{iptv.total}</Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.iptvCard}>
+          <TouchableOpacity style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('all')}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={styles.iptvLabel}>TOTAL IPTV USERS</Text>
-              <Text style={styles.iptvVal}>{iptv.total}</Text>
+              <Feather name="arrow-up-right" size={13} color="#8b5cf6" />
             </View>
-          )}
+            <Text style={styles.iptvVal}>{iptv.total}</Text>
+          </TouchableOpacity>
 
           {/* ACTIVE IPTV USERS */}
-          {!isOperator ? (
-            <TouchableOpacity style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('iptv_active')}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={styles.iptvLabel}>ACTIVE IPTV USERS</Text>
-                <Feather name="arrow-up-right" size={13} color={COLORS.accentEmerald} />
-              </View>
-              <Text style={[styles.iptvVal, { color: COLORS.accentEmerald }]}>{iptv.active}</Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.iptvCard}>
+          <TouchableOpacity style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('active')}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={styles.iptvLabel}>ACTIVE IPTV USERS</Text>
-              <Text style={[styles.iptvVal, { color: COLORS.accentEmerald }]}>{iptv.active}</Text>
+              <Feather name="arrow-up-right" size={13} color={COLORS.accentEmerald} />
             </View>
-          )}
+            <Text style={[styles.iptvVal, { color: COLORS.accentEmerald }]}>{iptv.active}</Text>
+          </TouchableOpacity>
 
           {/* EXPIRED IPTV USERS */}
-          {!isOperator ? (
-            <TouchableOpacity style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('iptv_expired')}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={styles.iptvLabel}>EXPIRED IPTV USERS</Text>
-                <Feather name="arrow-up-right" size={13} color={COLORS.accentRose} />
-              </View>
-              <Text style={[styles.iptvVal, { color: COLORS.accentRose }]}>{iptv.expired}</Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={styles.iptvCard}>
+          <TouchableOpacity style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('expired')}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={styles.iptvLabel}>EXPIRED IPTV USERS</Text>
-              <Text style={[styles.iptvVal, { color: COLORS.accentRose }]}>{iptv.expired}</Text>
+              <Feather name="arrow-up-right" size={13} color={COLORS.accentRose} />
             </View>
-          )}
+            <Text style={[styles.iptvVal, { color: COLORS.accentRose }]}>{iptv.expired}</Text>
+          </TouchableOpacity>
         </View>
       </View>
     </ScrollView>

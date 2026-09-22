@@ -19,8 +19,7 @@ export const Header = ({
   const isMobile = width < 768;
 
   const isOperator = user?.role === 'operator';
-  const handleAdminClick = onOpenCreateAdmin || (() => onOpenCreate && onOpenCreate('admin'));
-  const handleOperatorClick = onOpenCreateOperator || (() => onOpenCreate && onOpenCreate('operator'));
+  const handleAddClick = onOpenCreate || onOpenCreateOperator || onOpenCreateAdmin;
 
   return (
     <View style={[styles.headerContainer, { paddingHorizontal: isMobile ? 16 : 28 }]}>
@@ -52,16 +51,9 @@ export const Header = ({
           </TouchableOpacity>
         ) : null}
 
-        {!isOperator && (onOpenCreate || onOpenCreateAdmin) ? (
-          <TouchableOpacity style={styles.btnAdmin} onPress={handleAdminClick}>
-            <Feather name="shield" size={14} color="#fff" />
-            <Text style={styles.btnAdminText}>Add Admin</Text>
-          </TouchableOpacity>
-        ) : null}
-
-        {!isOperator && (onOpenCreate || onOpenCreateOperator) ? (
-          <TouchableOpacity style={styles.btnOperator} onPress={handleOperatorClick}>
-            <Feather name="briefcase" size={14} color="#fff" />
+        {!isOperator && handleAddClick ? (
+          <TouchableOpacity style={styles.btnOperator} onPress={handleAddClick}>
+            <Feather name="plus-circle" size={15} color="#fff" />
             <Text style={styles.btnOperatorText}>Add Operator</Text>
           </TouchableOpacity>
         ) : null}

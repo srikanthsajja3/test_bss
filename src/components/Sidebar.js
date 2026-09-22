@@ -14,8 +14,6 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
         { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
         { id: 'customers', label: 'Subscribers', icon: 'users' },
         { id: 'partners', label: 'Partners', icon: 'briefcase' },
-        { id: 'apiConsole', label: 'API Console', icon: 'terminal' },
-        { id: 'login', label: 'Login', icon: 'log-in' },
       ];
 
   return (
