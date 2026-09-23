@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { StyleSheet, View, SafeAreaView, StatusBar, useWindowDimensions, Text, TouchableOpacity } from 'react-native';
 import { COLORS } from './src/constants/theme';
-import { setApiConfig } from './src/services/oneBssApi';
+import { setApiConfig, onUnauthorized, isJwtExpired } from './src/services/oneBssApi';
 import { Sidebar } from './src/components/Sidebar';
 import { Header } from './src/components/Header';
 import { DashboardScreen } from './src/screens/DashboardScreen';
@@ -9,7 +9,7 @@ import { PartnerScreen } from './src/screens/PartnerScreen';
 import { CustomerScreen } from './src/screens/CustomerScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { LoginModal } from './src/screens/LoginModal';
-import { ToastContainer } from 'react-toastify';
+import { ToastContainer, toast } from 'react-toastify';
 
 export default function App() {
   const { width } = useWindowDimensions();
@@ -47,6 +47,12 @@ export default function App() {
           if (parsed && (parsed.role || parsed.partner_id)) {
             const token = parsed.token || savedToken;
             if (token) {
+              if (isJwtExpired(token)) {
+                localStorage.removeItem('onebss_user');
+                localStorage.removeItem('onebss_token');
+                setApiConfig(undefined, '');
+                return null;
+              }
               parsed.token = token;
               setApiConfig(undefined, token);
             }
@@ -131,6 +137,31 @@ export default function App() {
       return () => window.removeEventListener('hashchange', handleHashChange);
     }
   }, []);
+
+  // Listen for API 401/403 or session expiration events to log out and show login screen
+  React.useEffect(() => {
+    const unsubscribe = onUnauthorized((reason) => {
+      toast.error(reason || 'Session expired. Please log in again.');
+      handleLogout();
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Periodically check if active user session token has expired
+  React.useEffect(() => {
+    if (!user?.token) return;
+
+    const checkTokenExpiry = () => {
+      if (isJwtExpired(user.token)) {
+        toast.error('Session expired. Please log in again.');
+        handleLogout();
+      }
+    };
+
+    checkTokenExpiry();
+    const interval = setInterval(checkTokenExpiry, 15000);
+    return () => clearInterval(interval);
+  }, [user]);
 
   // Sidebar Auto-Closing / Collapsible State (Defaults to collapsed, expands on hover)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);

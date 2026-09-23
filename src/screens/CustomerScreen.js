@@ -30,8 +30,8 @@ const mapCustomersListToBroadbandRow = (item, index) => {
   const mobile = resolveApiField(item.mobile, intAcc.mobile);
   const fullName = resolveApiField(item.full_name, item.name);
   const username = resolveApiField(item.username, intAcc.username);
-  const packageName = resolveApiField(item.package_name, intAcc.package_name, intAcc.plan_name || item.plan) || 'Broadband Plan';
-  const subplanName = resolveApiField(item.subplan_name, intAcc.subplan_name) || 'Monthly';
+  const packageName = resolveApiField(item.package_name, intAcc.package_name, intAcc.plan_name || item.plan) || '-';
+  const subplanName = resolveApiField(item.subplan_name, intAcc.subplan_name) || '-';
   const expiration = resolveApiField(item.expiration, intAcc.expiration);
 
   return {
@@ -228,6 +228,36 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
   };
 
+  const [rechargingAccount, setRechargingAccount] = useState(false);
+
+  const handleRechargeAccount = async (cust) => {
+    if (!cust) return;
+    const internetId = cust.internet_id || cust.cust_id || 113;
+    const packageId = cust.package_id || 6;
+    const subPlanId = cust.subplan_id || 12;
+
+    setRechargingAccount(true);
+    try {
+      if (user?.token) setApiConfig(undefined, user.token);
+      const res = await OneBssApi.rechargeInternetAccount(internetId, packageId, subPlanId);
+      const data = res.data || {};
+
+      if (data.success === false) {
+        toast.error(`Recharge Failed: ${data.message || 'Subscriber account not found'}`);
+      } else {
+        toast.success(data.message || `Recharge successful for ${cust.name || cust.full_name}! Operator wallet debited.`);
+        const nextMonthDate = new Date();
+        nextMonthDate.setDate(nextMonthDate.getDate() + 30);
+        const formattedDate = nextMonthDate.toISOString().replace('T', ' ').substring(0, 19);
+        setActiveSubProfile((prev) => (prev ? { ...prev, status_text: 'Active', status: 'active', expiration: formattedDate, expiryDate: formattedDate } : prev));
+      }
+    } catch (e) {
+      toast.error(`Plan recharge failed for ${cust.name || cust.full_name}.`);
+    } finally {
+      setRechargingAccount(false);
+    }
+  };
+
   const handleIptvCustomerDetailSync = async (cust, silent = false) => {
     if (!cust) return;
     const rawMobile = cust.mobile || '';
@@ -350,9 +380,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     if (onAutoCloseSidebar) {
       onAutoCloseSidebar();
     }
-    // Auto-trigger POST /iptv_customer_sync.php as soon as customer detail is opened
+    // Auto-trigger POST /iptv_customer_sync.php as soon as customer detail is opened (silent mode)
     if (cust) {
-      handleIptvCustomerDetailSync(cust, false);
+      handleIptvCustomerDetailSync(cust, true);
       if (cust.internet_id) {
         handleAccountDetailSync(cust.internet_id, true);
       }
@@ -452,6 +482,29 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           <TouchableOpacity style={styles.backBtn} onPress={() => setActiveSubProfile(null)}>
             <Feather name="arrow-left" size={16} color={COLORS.textMain} />
             <Text style={styles.backBtnText}>Back to Subscribers List</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              backgroundColor: '#10b981',
+              paddingHorizontal: 14,
+              paddingVertical: 8,
+              borderRadius: 6,
+            }}
+            onPress={() => handleRechargeAccount(activeSubProfile)}
+            disabled={rechargingAccount}
+          >
+            {rechargingAccount ? (
+              <ActivityIndicator size="small" color="#fff" />
+            ) : (
+              <>
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>₹</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#fff' }}>Recharge Account</Text>
+              </>
+            )}
           </TouchableOpacity>
 
           <View style={styles.subHeaderInfo}>

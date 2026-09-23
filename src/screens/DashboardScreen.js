@@ -90,10 +90,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
       if (currentRole === 'operator') {
         try {
           if (user?.token) setApiConfig(undefined, user.token);
-          const res = await OneBssApi.syncInternetCustomersBulk();
-          if (res.data?.summary) {
-            toast.success(`Operator RADIUS Sync Complete! Created: ${res.data.summary.customers_created || 0}, Matched: ${res.data.summary.customers_matched || 0}, Added: ${res.data.summary.accounts_added || 0}`);
-          }
+          await OneBssApi.syncInternetCustomersBulk();
         } catch (e) {}
       }
       await refreshData();

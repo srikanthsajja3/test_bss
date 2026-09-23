@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS_STYLE } from '../constants/theme';
+import { OneBssApi } from '../services/oneBssApi';
 
 export const Header = ({
   title,
@@ -18,14 +19,24 @@ export const Header = ({
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
+  const [liveWalletBalance, setLiveWalletBalance] = useState(user?.wallet_balance);
+
+  useEffect(() => {
+    if (user?.partner_id) {
+      OneBssApi.getWallet(user.partner_id).then((res) => {
+        if (res.data && res.data.wallet_balance !== undefined) {
+          setLiveWalletBalance(res.data.wallet_balance);
+        }
+      }).catch(() => {});
+    }
+  }, [user?.partner_id, user?.wallet_balance]);
+
   const userRole = (user?.role || '').toLowerCase();
   const isOperator = userRole === 'operator';
   const isSuperAdminOrAdmin = userRole === 'superadmin' || userRole === 'admin';
   const showWallet = isOperator && !isSuperAdminOrAdmin;
-  const formattedBalance =
-    user?.wallet_balance !== undefined
-      ? `₹ ${Number(user.wallet_balance).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
-      : '₹ 12,450.00';
+  const balanceVal = liveWalletBalance !== undefined ? liveWalletBalance : (user?.wallet_balance !== undefined ? user.wallet_balance : 0);
+  const formattedBalance = `₹ ${Number(balanceVal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
   const handleAddClick = onOpenCreate || onOpenCreateOperator || onOpenCreateAdmin;
 
   return (
