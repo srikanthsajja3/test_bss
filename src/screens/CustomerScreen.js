@@ -4,6 +4,7 @@ import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi, setApiConfig } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
+import { AddCustomerScreen } from './AddCustomerScreen';
 
 const formatApiValue = (val) => {
   if (val === null || val === undefined || val === 'null') return '';
@@ -117,19 +118,28 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [viewMode, setViewMode] = useState(isIptvMode ? 'iptv' : 'broadband');
   const [activeFilter, setActiveFilter] = useState(initialFilter);
   const [searchQuery, setSearchQuery] = useState('');
+  const [recordsLimit, setRecordsLimit] = useState(100);
+  const [resetPasswordModalItem, setResetPasswordModalItem] = useState(null);
+  const [newPasswordInput, setNewPasswordInput] = useState('');
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [resettingPassword, setResettingPassword] = useState(false);
+  const [showAddCustomer, setShowAddCustomer] = useState(false);
 
   // Live datasets loaded from API
   const [iptvDataset, setIptvDataset] = useState([]);
   const [broadbandDataset, setBroadbandDataset] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
 
-  const loadCustomerDataFromApi = async () => {
+  const loadCustomerDataFromApi = async (overrideLimit) => {
     setLoadingData(true);
     try {
       if (user?.token) setApiConfig(undefined, user.token);
 
+      const targetLimit = overrideLimit !== undefined ? overrideLimit : recordsLimit;
+      const limitVal = (targetLimit === 'all' || targetLimit === 'ALL') ? 5000 : Number(targetLimit);
+
       // Fetch live customer records directly from /customers_list.php
-      const custRes = await OneBssApi.getCustomersList(1, 100);
+      const custRes = await OneBssApi.getCustomersList(1, limitVal);
       const rawCustomers = custRes.data && Array.isArray(custRes.data) ? custRes.data : (custRes.data?.data || []);
 
       const list = Array.isArray(rawCustomers) ? rawCustomers : [];
@@ -143,8 +153,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   };
 
   useEffect(() => {
-    loadCustomerDataFromApi();
-  }, [user]);
+    loadCustomerDataFromApi(recordsLimit);
+  }, [user, recordsLimit]);
 
   // Dedicated Full-Screen Subscriber Details State (no popup!)
   const [activeSubProfile, setActiveSubProfile] = useState(null);
@@ -390,6 +400,31 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   };
 
   // Open Edit Modal
+  const handleOpenResetPassword = (cust) => {
+    setResetPasswordModalItem(cust);
+    const randomPass = 'Pass@' + Math.floor(1000 + Math.random() * 9000);
+    setNewPasswordInput(randomPass);
+    setShowNewPassword(true);
+  };
+
+  const handleConfirmResetPassword = async () => {
+    if (!resetPasswordModalItem || !newPasswordInput.trim()) return;
+    setResettingPassword(true);
+    try {
+      await OneBssApi.resetPassword(
+        resetPasswordModalItem.username,
+        newPasswordInput.trim(),
+        resetPasswordModalItem.cust_id || resetPasswordModalItem.id
+      );
+      toast.success(`Password reset successfully for ${resetPasswordModalItem.username}! New Password: ${newPasswordInput.trim()}`);
+      setResetPasswordModalItem(null);
+    } catch (e) {
+      toast.error('Failed to reset password.');
+    } finally {
+      setResettingPassword(false);
+    }
+  };
+
   const handleOpenEdit = (cust) => {
     setEditingCustomer(cust);
     setEditForm({
@@ -457,6 +492,20 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       setSaving(false);
     }
   };
+
+  if (showAddCustomer) {
+    return (
+      <AddCustomerScreen
+        user={user}
+        operatorId={user?.partner_id || user?.operator_id || 1114}
+        onCancel={() => setShowAddCustomer(false)}
+        onSuccess={() => {
+          setShowAddCustomer(false);
+          loadCustomerDataFromApi();
+        }}
+      />
+    );
+  }
 
   if (activeSubProfile) {
     return (
@@ -682,10 +731,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 </Text>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.actionBtnDark} onPress={() => {
-                setToastMsg(`✅ Password reset for ${activeSubProfile.username}`);
-                setTimeout(() => setToastMsg(''), 4000);
-              }}>
+              <TouchableOpacity style={styles.actionBtnDark} onPress={() => handleOpenResetPassword(activeSubProfile)}>
                 <Feather name="key" size={16} color="#ffffff" />
                 <Text style={styles.actionBtnDarkText}>Reset Password</Text>
               </TouchableOpacity>
@@ -716,8 +762,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
       {/* UNIFIED SEARCH CONTROL CARD */}
       <View style={styles.unifiedControlCard}>
-        {/* Search Bar Only */}
-        <View style={styles.topControlRow}>
+        {/* Search Bar & Add Customer Button */}
+        <View style={[styles.topControlRow, { gap: 10, flexWrap: 'wrap' }]}>
           <View style={[styles.searchBox, { flex: 1, maxWidth: '100%' }]}>
             <Feather name="search" size={15} color={COLORS.textDim} />
             <TextInput
@@ -727,6 +773,35 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               onChangeText={setSearchQuery}
               placeholderTextColor={COLORS.textDim}
             />
+          </View>
+          {((user?.role || user?.account_role || '').toLowerCase() === 'operator') && (
+            <TouchableOpacity style={styles.addCustomerHeaderBtn} onPress={() => setShowAddCustomer(true)}>
+              <Feather name="user-plus" size={14} color="#ffffff" />
+              <Text style={styles.addCustomerHeaderBtnText}>Add Customer</Text>
+            </TouchableOpacity>
+          )}
+
+          {/* Page Limits Selector (100, 200, 500, ALL) */}
+          <View style={styles.limitRowContainer}>
+            <Text style={styles.limitLabelText}>Limit:</Text>
+            {[100, 200, 500, 'ALL'].map((limitOpt) => {
+              const limitKey = limitOpt === 'ALL' ? 'all' : limitOpt;
+              const isSelected = recordsLimit === limitKey || (recordsLimit === 'all' && limitOpt === 'ALL');
+              return (
+                <TouchableOpacity
+                  key={String(limitOpt)}
+                  style={[styles.limitChip, isSelected && styles.limitChipActive]}
+                  onPress={() => {
+                    const val = limitOpt === 'ALL' ? 'all' : limitOpt;
+                    setRecordsLimit(val);
+                  }}
+                >
+                  <Text style={[styles.limitChipText, isSelected && styles.limitChipTextActive]}>
+                    {limitOpt}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
         </View>
 
@@ -804,8 +879,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 </View>
               )}
 
-              {filteredCustomers.map((cust) => (
-                <View key={cust.id} style={styles.tr}>
+              {filteredCustomers.map((cust, idx) => (
+                <View key={cust.id ? `cust_${cust.id}_${idx}` : idx} style={styles.tr}>
                   {viewMode === 'iptv' ? (
                     <>
                       <View style={{ flex: 1.5 }}>
@@ -978,8 +1053,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </View>
             )}
 
-            {filteredCustomers.map((cust) => (
-              <View key={cust.id} style={styles.tr}>
+            {filteredCustomers.map((cust, idx) => (
+              <View key={cust.id ? `cust_${cust.id}_${idx}` : idx} style={styles.tr}>
                 {viewMode === 'iptv' ? (
                   <>
                     <View style={{ flex: 1.5 }}>
@@ -1250,6 +1325,51 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 };
 
 const styles = StyleSheet.create({
+  limitRowContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  limitLabelText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+    marginRight: 2,
+  },
+  limitChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+    backgroundColor: COLORS.bgSecondary,
+  },
+  limitChipActive: {
+    backgroundColor: COLORS.primary,
+    borderColor: COLORS.primary,
+  },
+  limitChipText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: COLORS.textMuted,
+  },
+  limitChipTextActive: {
+    color: '#ffffff',
+  },
+  addCustomerHeaderBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  addCustomerHeaderBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
   container: { flex: 1, width: '100%', backgroundColor: COLORS.bgPrimary },
   content: { width: '100%', paddingHorizontal: '3%', paddingVertical: 20 },
   toastBanner: {

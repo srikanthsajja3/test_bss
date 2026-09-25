@@ -106,11 +106,19 @@ const request = async (endpoint, options = {}) => {
     };
   }
 
+  // File uploads (FormData): do NOT send 'Content-Type: application/json'.
+  // The browser must set 'multipart/form-data; boundary=...' itself.
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData;
   const headers = {
-    'Content-Type': 'application/json',
+    ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(activeToken ? { 'Authorization': `Bearer ${activeToken}` } : {}),
     ...(options.headers || {}),
   };
+  if (isFormData) {
+    Object.keys(headers).forEach((k) => {
+      if (k.toLowerCase() === 'content-type') delete headers[k];
+    });
+  }
 
   const startTime = Date.now();
   try {
@@ -305,6 +313,27 @@ export const OneBssApi = {
     return res;
   },
 
+  // Partner Reset Password (POST /reset_password.php)
+  resetPartnerPassword: async (partnerId, newPassword) => {
+    return request('/reset_password.php', {
+      method: 'POST',
+      body: JSON.stringify({
+        partner_id: Number(partnerId) || partnerId,
+        new_password: newPassword,
+      }),
+    });
+  },
+
+  // Partner Impersonate (POST /impersonate.php)
+  impersonatePartner: async (partnerId) => {
+    return request('/impersonate.php', {
+      method: 'POST',
+      body: JSON.stringify({
+        partner_id: Number(partnerId) || partnerId,
+      }),
+    });
+  },
+
   // 6. Delete Partner (DELETE /partner.php?id={partner_id})
   deletePartner: async (partnerId) => {
     const res = await request(`/partner.php?id=${encodeURIComponent(partnerId)}`, { method: 'DELETE' });
@@ -452,17 +481,21 @@ export const OneBssApi = {
   // -------------------------------------------------------------
   // Module 6: Aadhaar KYC Verification (4 APIs)
   // -------------------------------------------------------------
+
+  kycProviders: async (partnerId) => {
+    return request(`/kyc_provider_mapping.php?partner_id=${partnerId}`, { method: 'GET' });
+  },
+
   // 15. DigiLocker: Initialize (POST /digilocker_initialize.php)
-  digilockerInitialize: async () => {
+  digilockerInitialize: async (operatorId) => {
     return request('/digilocker_initialize.php', {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify({ operator_id: Number(operatorId) || operatorId }),
     });
   },
 
-  // 16. DigiLocker: Download Aadhaar (POST /digilocker_download_aadhaar.php)
-  digilockerDownloadAadhaar: async (clientId = '', userId = null) => {
-    const body = { client_id: clientId };
+  digilockerDownloadAadhaar: async (clientId, operatorId, userId = null) => {
+    const body = { client_id: clientId, operator_id: Number(operatorId) || operatorId };
     if (userId) body.user_id = Number(userId);
     return request('/digilocker_download_aadhaar.php', {
       method: 'POST',
@@ -507,10 +540,10 @@ export const OneBssApi = {
   },
 
   // 20. Add Internet Customer (Manual) (POST /add_internet_customer_manual.php)
-  addInternetCustomerManual: async (customerPayload) => {
+  addInternetCustomerManual: async (formData) => {
     return request('/add_internet_customer_manual.php', {
       method: 'POST',
-      body: typeof customerPayload === 'string' ? customerPayload : JSON.stringify(customerPayload),
+      body: formData,
     });
   },
 
@@ -579,6 +612,15 @@ export const OneBssApi = {
     return res;
   },
 
+  // Internet username availability (GET /check_internet_username.php?username=..&operator_id=..)
+  // -> { success, username, available, reason: 'available'|'taken'|'invalid', message }
+  checkInternetUsername: async (username, operatorId) => {
+    return request(
+      `/check_internet_username.php?username=${encodeURIComponent(username)}&operator_id=${encodeURIComponent(operatorId)}`,
+      { method: 'GET' }
+    );
+  },
+
   // 24. Customer Lookup (GET /customer_lookup.php?mobile={mobile})
   customerLookup: async (mobile = '9125253535') => {
     return request(`/customer_lookup.php?mobile=${encodeURIComponent(mobile)}`, { method: 'GET' });
@@ -589,6 +631,20 @@ export const OneBssApi = {
     if (type) query += `&type=${encodeURIComponent(type)}`;
     if (search) query += `&search=${encodeURIComponent(search)}`;
     return request(`/customers_list.php?${query}`, { method: 'GET' });
+  },
+
+  resetPassword: async (username, newPassword, custId) => {
+    try {
+      const res = await request('/reset_password.php', {
+        method: 'POST',
+        body: JSON.stringify({ username, new_password: newPassword, cust_id: custId }),
+      });
+      if (res.status === 200 || res.data?.success) return res;
+    } catch (e) {}
+    return request('/update_internet_customer.php', {
+      method: 'POST',
+      body: JSON.stringify({ id: custId, username, password: newPassword }),
+    });
   },
 
   updateInternetCustomer: async (customerPayload) => {
