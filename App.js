@@ -211,11 +211,6 @@ export default function App() {
   };
 
   const handleNavigateToCustomers = (filterKey = 'all') => {
-    const isSuperAdminUser = (user?.role || '').toLowerCase() === 'superadmin' || (user?.role || '').toLowerCase() === 'admin';
-    if (isSuperAdminUser) {
-      setActiveTab('partners');
-      return;
-    }
     if (filterKey.startsWith('iptv') || filterKey === 'iptv') {
       const cleanFilter = (filterKey === 'iptv' || filterKey === 'iptv_all') ? 'all' : filterKey.replace('iptv_', '');
       setActiveTab('iptv_customers', cleanFilter);
@@ -240,8 +235,6 @@ export default function App() {
     );
   }
 
-  const isSuperAdminUser = (user?.role || '').toLowerCase() === 'superadmin' || (user?.role || '').toLowerCase() === 'admin';
-
   const renderActiveScreen = () => {
     switch (activeTab) {
       case 'dashboard':
@@ -249,14 +242,8 @@ export default function App() {
       case 'partners':
         return <PartnerScreen initialCreateRole={partnerCreateRole} onOpenCreate={(r) => setPartnerCreateRole(r)} user={user} />;
       case 'customers':
-        if (isSuperAdminUser) {
-          return <PartnerScreen initialCreateRole={partnerCreateRole} onOpenCreate={(r) => setPartnerCreateRole(r)} user={user} />;
-        }
         return <CustomerScreen user={user} isIptvMode={false} initialFilter={customerInitialFilter} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
       case 'iptv_customers':
-        if (isSuperAdminUser) {
-          return <PartnerScreen initialCreateRole={partnerCreateRole} onOpenCreate={(r) => setPartnerCreateRole(r)} user={user} />;
-        }
         return <CustomerScreen user={user} isIptvMode={true} initialFilter={customerInitialFilter} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
       default:
         return <DashboardScreen user={user} onNavigateToCustomers={handleNavigateToCustomers} />;
