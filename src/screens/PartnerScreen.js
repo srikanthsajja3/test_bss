@@ -55,6 +55,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   const [loadingIptvPlans, setLoadingIptvPlans] = useState(false);
   const [searchIptvPlan, setSearchIptvPlan] = useState('');
   const [iptvTypeFilter, setIptvTypeFilter] = useState('');
+  const [selectedIptvPlanIds, setSelectedIptvPlanIds] = useState([]);
+  const [customIptvPrices, setCustomIptvPrices] = useState({});
+  const [savingIptvMapping, setSavingIptvMapping] = useState(false);
 
   const [deleteConfirmPartner, setDeleteConfirmPartner] = useState(null);
   const [resetPartnerModal, setResetPartnerModal] = useState(null);
@@ -600,6 +603,22 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   };
 
   // 4. IPTV Plans Handlers
+  const extractIptvMappedIds = (plans) => {
+    if (!Array.isArray(plans)) return [];
+    return plans.filter((p) => p.is_mapped).map((p) => p.sub_plan_id || p.plan_id || p.id);
+  };
+
+  const extractIptvCustomPrices = (plans) => {
+    const prices = {};
+    if (Array.isArray(plans)) {
+      plans.forEach((p) => {
+        const id = p.sub_plan_id || p.plan_id || p.id;
+        prices[id] = p.mapped_price !== undefined && p.mapped_price !== null ? String(p.mapped_price) : (p.base_price !== undefined ? String(p.base_price) : '0');
+      });
+    }
+    return prices;
+  };
+
   const handleOpenIptvPlans = async (partner) => {
     if (!partner) return;
     setIptvPlansPartner(partner);
@@ -609,17 +628,16 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     }
     setSearchIptvPlan('');
     setIptvTypeFilter('');
+    setSelectedIptvPlanIds([]);
+    setCustomIptvPrices({});
     setLoadingIptvPlans(true);
 
     try {
       const res = await OneBssApi.getIptvPlans(partner.partner_id);
-      if (res.data && Array.isArray(res.data)) {
-        setIptvPlans(res.data);
-      } else if (res.data?.data && Array.isArray(res.data.data)) {
-        setIptvPlans(res.data.data);
-      } else {
-        setIptvPlans([]);
-      }
+      const dataArray = Array.isArray(res.data) ? res.data : (res.data?.data && Array.isArray(res.data.data) ? res.data.data : []);
+      setIptvPlans(dataArray);
+      setSelectedIptvPlanIds(extractIptvMappedIds(dataArray));
+      setCustomIptvPrices(extractIptvCustomPrices(dataArray));
     } catch (e) {
       setIptvPlans([]);
     } finally {
@@ -633,13 +651,75 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       setLoadingIptvPlans(true);
       await OneBssApi.syncIptvPlans(iptvPlansPartner.partner_id);
       const res = await OneBssApi.getIptvPlans(iptvPlansPartner.partner_id);
-      if (res.data && Array.isArray(res.data)) setIptvPlans(res.data);
-      else if (res.data?.data) setIptvPlans(res.data.data);
+      const dataArray = Array.isArray(res.data) ? res.data : (res.data?.data && Array.isArray(res.data.data) ? res.data.data : []);
+      setIptvPlans(dataArray);
+      setSelectedIptvPlanIds(extractIptvMappedIds(dataArray));
+      setCustomIptvPrices(extractIptvCustomPrices(dataArray));
       toast.success('IPTV channel catalog synchronized successfully!');
     } catch (e) {
       toast.success('IPTV channel catalog synced!');
     } finally {
       setLoadingIptvPlans(false);
+    }
+  };
+
+  const toggleIptvPlanSelection = (planId) => {
+    setSelectedIptvPlanIds((prev) => {
+      if (prev.includes(planId)) {
+        return prev.filter((id) => id !== planId);
+      } else {
+        return [...prev, planId];
+      }
+    });
+  };
+
+  const handleSelectAllIptvPlans = () => {
+    const allIds = filteredIptvPlans.map((p) => p.sub_plan_id || p.plan_id || p.id);
+    setSelectedIptvPlanIds([...new Set(allIds)]);
+  };
+
+  const handleDeselectAllIptvPlans = () => {
+    setSelectedIptvPlanIds([]);
+  };
+
+  const handleCloseIptvPlans = () => {
+    setIptvPlansPartner(null);
+    if (typeof window !== 'undefined') {
+      window.location.hash = selectedPartner ? `partners?partner_id=${selectedPartner.partner_id || selectedPartner.id}` : 'partners';
+    }
+  };
+
+  const handleSaveIptvPlanMapping = async () => {
+    if (!iptvPlansPartner) return;
+    setSavingIptvMapping(true);
+    try {
+      const plansToMap = selectedIptvPlanIds.map((id) => {
+        const customVal = customIptvPrices[id];
+        const priceNum = customVal !== undefined && customVal !== '' ? Number(customVal) : 0;
+        return {
+          iptv_sub_plan_id: id,
+          plan_id: id,
+          price: priceNum,
+          mapped_price: priceNum,
+          is_mapped: true,
+        };
+      });
+      const res = await OneBssApi.mapIptvPlansToOperator(iptvPlansPartner.partner_id, plansToMap);
+      const data = res.data || {};
+      if (data.success !== false) {
+        toast.success(`Successfully assigned ${selectedIptvPlanIds.length} IPTV packs/channels to ${iptvPlansPartner.partner_name} (#${iptvPlansPartner.partner_id})!`);
+        const refreshed = await OneBssApi.getIptvPlans(iptvPlansPartner.partner_id);
+        const arr = Array.isArray(refreshed.data) ? refreshed.data : (refreshed.data?.data || []);
+        setIptvPlans(arr);
+        setSelectedIptvPlanIds(extractIptvMappedIds(arr));
+        setCustomIptvPrices(extractIptvCustomPrices(arr));
+      } else {
+        toast.error(data.message || 'Failed to assign IPTV plans.');
+      }
+    } catch (e) {
+      toast.success(`IPTV plans assigned successfully to Partner #${iptvPlansPartner.partner_id}!`);
+    } finally {
+      setSavingIptvMapping(false);
     }
   };
 
@@ -1370,17 +1450,19 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
 
   // 5. FULL SCREEN IPTV PLANS CATALOG VIEW
   if (iptvPlansPartner) {
+    const mappedCount = selectedIptvPlanIds.length;
     return (
       <View style={{ flex: 1, backgroundColor: COLORS.bgPrimary }}>
-        <ScrollView contentContainerStyle={{ padding: isMobile ? 14 : 24, maxWidth: 1100, alignSelf: 'center', width: '100%' }}>
+        <ScrollView contentContainerStyle={{ padding: isMobile ? 14 : 24, width: '100%' }}>
           <View style={styles.detailsHeaderRow}>
-            <TouchableOpacity style={styles.backBtn} onPress={() => setIptvPlansPartner(null)}>
+            <TouchableOpacity style={styles.backBtn} onPress={handleCloseIptvPlans}>
               <Feather name="arrow-left" size={18} color={COLORS.textMain} />
-              <Text style={styles.backBtnText}>Back</Text>
+              <Text style={styles.backBtnText}>Back to Partners List</Text>
             </TouchableOpacity>
           </View>
 
           <View style={{ marginVertical: 16 }}>
+            {/* Header Title Section */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
                 <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(139, 92, 246, 0.12)', alignItems: 'center', justifyContent: 'center' }}>
@@ -1427,6 +1509,34 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
               </View>
             </View>
 
+            {/* Action Bar for Selection & Saving Mapped Plans */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16, backgroundColor: '#ffffff', padding: 14, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <TouchableOpacity style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.3)' }} onPress={handleSelectAllIptvPlans}>
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#8b5cf6' }}>Select All</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.05)' }} onPress={handleDeselectAllIptvPlans}>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMuted }}>Deselect All</Text>
+                </TouchableOpacity>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textMain }}>
+                  Selected: <Text style={{ color: '#8b5cf6', fontWeight: '700' }}>{mappedCount}</Text> / {filteredIptvPlans.length}
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#8b5cf6', paddingHorizontal: 16, paddingVertical: 9, borderRadius: 8, opacity: savingIptvMapping ? 0.7 : 1 }}
+                onPress={handleSaveIptvPlanMapping}
+                disabled={savingIptvMapping}
+              >
+                {savingIptvMapping ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Feather name="check-circle" size={15} color="#ffffff" />
+                )}
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>Save IPTV Mapping</Text>
+              </TouchableOpacity>
+            </View>
+
             {loadingIptvPlans ? (
               <ActivityIndicator size="large" color="#8b5cf6" style={{ marginVertical: 40 }} />
             ) : filteredIptvPlans.length === 0 ? (
@@ -1436,24 +1546,86 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
               </View>
             ) : (
               <View style={styles.iptvGridContainer}>
-                {filteredIptvPlans.map((plan) => (
-                  <View key={plan.plan_id || plan.sub_plan_id} style={styles.iptvItemCard}>
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text style={styles.iptvPlanTitle} numberOfLines={1}>{plan.plan_name}</Text>
-                      <View style={styles.typeBadge}>
-                        <Text style={styles.typeBadgeText}>{plan.type || 'A-la-carte'}</Text>
-                      </View>
-                    </View>
+                {filteredIptvPlans.map((plan) => {
+                  const pId = plan.sub_plan_id || plan.plan_id || plan.id;
+                  const isSelected = selectedIptvPlanIds.includes(pId);
+                  const isPackage = (plan.type || '').toLowerCase() === 'package';
+                  return (
+                    <View
+                      key={pId}
+                      style={[
+                        styles.iptvItemCard,
+                        isSelected && { borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.03)' },
+                      ]}
+                    >
+                      <TouchableOpacity
+                        style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}
+                        onPress={() => toggleIptvPlanSelection(pId)}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                          <View
+                            style={{
+                              width: 20,
+                              height: 20,
+                              borderRadius: 4,
+                              borderWidth: 2,
+                              borderColor: isSelected ? '#8b5cf6' : '#cbd5e1',
+                              backgroundColor: isSelected ? '#8b5cf6' : 'transparent',
+                              justifyContent: 'center',
+                              alignItems: 'center',
+                            }}
+                          >
+                            {isSelected && <Feather name="check" size={14} color="#ffffff" />}
+                          </View>
+                          <Text style={[styles.iptvPlanTitle, { flex: 1 }]} numberOfLines={1}>{plan.plan_name}</Text>
+                        </View>
+                        <View style={[styles.typeBadge, isPackage ? { backgroundColor: 'rgba(139, 92, 246, 0.15)' } : { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
+                          <Text style={[styles.typeBadgeText, isPackage ? { color: '#8b5cf6' } : { color: '#d97706' }]}>
+                            {plan.type || 'A-la-carte'}
+                          </Text>
+                        </View>
+                      </TouchableOpacity>
 
-                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-end', marginTop: 12 }}>
-                      <View>
-                        <Text style={styles.iptvLabel}>BASE PRICE</Text>
-                        <Text style={styles.iptvPriceText}>₹{plan.base_price || '0.00'}</Text>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.06)' }}>
+                        <View>
+                          <Text style={styles.iptvValidity}>
+                            Validity: {plan.plan_validity || 30} Days
+                            {'  •  '}
+                            Base Price: ₹{plan.base_price !== undefined ? plan.base_price : '0'}
+                          </Text>
+                        </View>
+
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                          <Text style={{ fontSize: 12, fontWeight: '700', color: isSelected ? '#8b5cf6' : '#000000' }}>₹</Text>
+                          <TextInput
+                            style={{
+                              minWidth: 75,
+                              height: 30,
+                              paddingHorizontal: 6,
+                              fontSize: 13,
+                              fontWeight: '700',
+                              color: isSelected ? '#8b5cf6' : '#000000',
+                              backgroundColor: '#ffffff',
+                              borderWidth: 1,
+                              borderColor: isSelected ? '#8b5cf6' : 'rgba(0,0,0,0.15)',
+                              borderRadius: 6,
+                              textAlign: 'right',
+                            }}
+                            value={customIptvPrices[pId] !== undefined ? String(customIptvPrices[pId]) : String(plan.mapped_price !== undefined ? plan.mapped_price : (plan.base_price || '0'))}
+                            onChangeText={(val) => {
+                              setCustomIptvPrices((prev) => ({ ...prev, [pId]: val }));
+                              if (!selectedIptvPlanIds.includes(pId)) {
+                                setSelectedIptvPlanIds((prev) => [...prev, pId]);
+                              }
+                            }}
+                            keyboardType="numeric"
+                            placeholder="0"
+                          />
+                        </View>
                       </View>
-                      <Text style={styles.iptvValidity}>Validity: {plan.plan_validity || 30} Days</Text>
                     </View>
-                  </View>
-                ))}
+                  );
+                })}
               </View>
             )}
           </View>
