@@ -289,6 +289,46 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   };
 
   // 3. Internet Plans Handlers
+  const groupInternetPlans = (rawPlans) => {
+    if (!Array.isArray(rawPlans)) return [];
+    
+    // Check if rawPlans is already grouped with subplans or sub_plans
+    const first = rawPlans[0];
+    if (first && ((Array.isArray(first.subplans) && first.subplans.length > 0) || (Array.isArray(first.sub_plans) && first.sub_plans.length > 0))) {
+      return rawPlans.map((p) => ({
+        ...p,
+        plan_id: p.plan_id || p.id,
+        plan_name: p.plan_name || p.name || 'Broadband Plan',
+        subplans: (p.subplans || p.sub_plans || []).map((s) => ({
+          ...s,
+          sub_plan_id: s.sub_plan_id || s.id || s.internet_sub_plan_id,
+          sub_plan_name: s.sub_plan_name || s.name || s.plan_name || 'Option',
+        })),
+      }));
+    }
+
+    // If rawPlans is a flat list, group by plan_id or plan_name
+    const groupsMap = {};
+    rawPlans.forEach((item) => {
+      const groupKey = String(item.plan_id || item.plan_name || 'broadband_plans');
+      if (!groupsMap[groupKey]) {
+        groupsMap[groupKey] = {
+          plan_id: item.plan_id || groupKey,
+          plan_name: item.plan_name || item.name || 'Broadband Plan',
+          data: item.data || item.plan_data || 'Unlimited',
+          subplans: [],
+        };
+      }
+      groupsMap[groupKey].subplans.push({
+        ...item,
+        sub_plan_id: item.sub_plan_id || item.id || item.internet_sub_plan_id,
+        sub_plan_name: item.sub_plan_name || item.name || (item.plan_validity ? `${item.plan_validity} Days` : 'Option'),
+      });
+    });
+
+    return Object.values(groupsMap);
+  };
+
   const extractMappedSubPlanIds = (plansArray) => {
     const ids = [];
     if (Array.isArray(plansArray)) {
@@ -331,6 +371,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     setSearchInetPlan('');
     setSelectedSubPlanIds([]);
     setCustomPrices({});
+    setExpandedPlanIds([]);
     setLoadingInternetPlans(true);
     
     try {
@@ -342,9 +383,10 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       const dataArray = Array.isArray(res.data) 
         ? res.data 
         : (res.data?.data && Array.isArray(res.data.data) ? res.data.data : []);
-      setInternetPlans(dataArray);
-      setSelectedSubPlanIds(extractMappedSubPlanIds(dataArray));
-      setCustomPrices(extractInitialCustomPrices(dataArray));
+      const groupedPlans = groupInternetPlans(dataArray);
+      setInternetPlans(groupedPlans);
+      setSelectedSubPlanIds(extractMappedSubPlanIds(groupedPlans));
+      setCustomPrices(extractInitialCustomPrices(groupedPlans));
     } catch (e) {
       setInternetPlans([]);
     } finally {
@@ -361,9 +403,10 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       const dataArray = Array.isArray(res.data) 
         ? res.data 
         : (res.data?.data && Array.isArray(res.data.data) ? res.data.data : []);
-      setInternetPlans(dataArray);
-      setSelectedSubPlanIds(extractMappedSubPlanIds(dataArray));
-      setCustomPrices(extractInitialCustomPrices(dataArray));
+      const groupedPlans = groupInternetPlans(dataArray);
+      setInternetPlans(groupedPlans);
+      setSelectedSubPlanIds(extractMappedSubPlanIds(groupedPlans));
+      setCustomPrices(extractInitialCustomPrices(groupedPlans));
       toast.success('Internet plans catalog synchronized successfully!');
     } catch (e) {
       toast.success('Internet plans synced!');
@@ -974,7 +1017,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                               height: 40,
                               borderRadius: 10,
                               backgroundColor: isExpanded ? 'rgba(6, 182, 212, 0.15)' : 'rgba(6, 182, 212, 0.08)',
-                              justify: 'center',
+                              justifyContent: 'center',
                               alignItems: 'center',
                             }}
                           >
@@ -1007,6 +1050,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                           {packageSubIds.length > 0 && (
                             <TouchableOpacity
                               onPress={(e) => {
+                                e?.stopPropagation?.();
                                 toggleAllSubPlansInPackage(plan);
                               }}
                               style={{
