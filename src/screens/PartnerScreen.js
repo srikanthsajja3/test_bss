@@ -46,6 +46,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   const [loadingInternetPlans, setLoadingInternetPlans] = useState(false);
   const [searchInetPlan, setSearchInetPlan] = useState('');
   const [selectedSubPlanIds, setSelectedSubPlanIds] = useState([]);
+  const [customPrices, setCustomPrices] = useState({});
   const [savingPlanMapping, setSavingPlanMapping] = useState(false);
 
   const [iptvPlansPartner, setIptvPlansPartner] = useState(null);
@@ -305,11 +306,30 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     return ids;
   };
 
+  const extractInitialCustomPrices = (plansArray) => {
+    const priceMap = {};
+    if (Array.isArray(plansArray)) {
+      plansArray.forEach((plan) => {
+        if (plan.subplans && Array.isArray(plan.subplans)) {
+          plan.subplans.forEach((sub) => {
+            const subId = sub.sub_plan_id || sub.id;
+            priceMap[subId] = String(sub.mapped_price !== null && sub.mapped_price !== undefined ? sub.mapped_price : (sub.base_price || '0'));
+          });
+        } else {
+          const planId = plan.sub_plan_id || plan.plan_id || plan.id;
+          priceMap[planId] = String(plan.mapped_price !== null && plan.mapped_price !== undefined ? plan.mapped_price : (plan.base_price || '0'));
+        }
+      });
+    }
+    return priceMap;
+  };
+
   const handleOpenInternetPlans = async (partner) => {
     if (!partner) return;
     setInternetPlansPartner(partner);
     setSearchInetPlan('');
     setSelectedSubPlanIds([]);
+    setCustomPrices({});
     setLoadingInternetPlans(true);
     
     try {
@@ -323,6 +343,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
         : (res.data?.data && Array.isArray(res.data.data) ? res.data.data : []);
       setInternetPlans(dataArray);
       setSelectedSubPlanIds(extractMappedSubPlanIds(dataArray));
+      setCustomPrices(extractInitialCustomPrices(dataArray));
     } catch (e) {
       setInternetPlans([]);
     } finally {
@@ -341,6 +362,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
         : (res.data?.data && Array.isArray(res.data.data) ? res.data.data : []);
       setInternetPlans(dataArray);
       setSelectedSubPlanIds(extractMappedSubPlanIds(dataArray));
+      setCustomPrices(extractInitialCustomPrices(dataArray));
       toast.success('Internet plans catalog synchronized successfully!');
     } catch (e) {
       toast.success('Internet plans synced!');
@@ -393,11 +415,17 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     if (!internetPlansPartner) return;
     setSavingPlanMapping(true);
     try {
-      const plansToMap = selectedSubPlanIds.map((id) => ({
-        internet_sub_plan_id: id,
-        sub_plan_id: id,
-        is_mapped: true,
-      }));
+      const plansToMap = selectedSubPlanIds.map((id) => {
+        const customVal = customPrices[id];
+        const priceNum = customVal !== undefined && customVal !== '' ? Number(customVal) : 0;
+        return {
+          internet_sub_plan_id: id,
+          sub_plan_id: id,
+          price: priceNum,
+          mapped_price: priceNum,
+          is_mapped: true,
+        };
+      });
       const res = await OneBssApi.mapInternetPlansToOperator(internetPlansPartner.partner_id, plansToMap);
       const data = res.data || {};
       if (data.success !== false) {
@@ -406,6 +434,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
         const arr = Array.isArray(refreshed.data) ? refreshed.data : (refreshed.data?.data || []);
         setInternetPlans(arr);
         setSelectedSubPlanIds(extractMappedSubPlanIds(arr));
+        setCustomPrices(extractInitialCustomPrices(arr));
       } else {
         toast.error(data.message || 'Failed to assign internet plans.');
       }
@@ -942,18 +971,34 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                                   </View>
                                 </View>
 
-                                <View style={{ alignItems: 'flex-end', gap: 4 }}>
-                                  <Text style={{ fontSize: 14, fontWeight: '700', color: isSelected ? '#10b981' : '#000000' }}>
-                                    ₹{sub.mapped_price !== null && sub.mapped_price !== undefined ? sub.mapped_price : (sub.base_price || '0.00')}
-                                  </Text>
-
-                                  {isSelected ? (
-                                    <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                                      <Text style={{ fontSize: 9, fontWeight: '700', color: '#10b981' }}>ASSIGNED</Text>
-                                    </View>
-                                  ) : (
-                                    <Text style={{ fontSize: 10, color: '#94a3b8' }}>Unassigned</Text>
-                                  )}
+                                <View style={{ alignItems: 'flex-end' }}>
+                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                    <Text style={{ fontSize: 12, fontWeight: '700', color: isSelected ? '#10b981' : '#000000' }}>₹</Text>
+                                    <TextInput
+                                      style={{
+                                        minWidth: 75,
+                                        height: 30,
+                                        paddingHorizontal: 6,
+                                        fontSize: 13,
+                                        fontWeight: '700',
+                                        color: isSelected ? '#10b981' : '#000000',
+                                        backgroundColor: '#ffffff',
+                                        borderWidth: 1,
+                                        borderColor: isSelected ? '#10b981' : 'rgba(0,0,0,0.15)',
+                                        borderRadius: 6,
+                                        textAlign: 'right',
+                                      }}
+                                      value={customPrices[subId] !== undefined ? String(customPrices[subId]) : String(sub.mapped_price !== null && sub.mapped_price !== undefined ? sub.mapped_price : (sub.base_price || '0'))}
+                                      onChangeText={(val) => {
+                                        setCustomPrices((prev) => ({ ...prev, [subId]: val }));
+                                        if (!selectedSubPlanIds.includes(subId)) {
+                                          setSelectedSubPlanIds((prev) => [...prev, subId]);
+                                        }
+                                      }}
+                                      keyboardType="numeric"
+                                      placeholder="0"
+                                    />
+                                  </View>
                                 </View>
                               </TouchableOpacity>
                             );
