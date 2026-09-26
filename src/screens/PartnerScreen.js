@@ -555,10 +555,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     if (!resetPartnerModal || !partnerNewPass.trim()) return;
     setResettingPartnerPass(true);
     try {
-      const res = await OneBssApi.resetPartnerPassword(resetPartnerModal.partner_id, partnerNewPass.trim());
+      const pId = resetPartnerModal.partner_id || resetPartnerModal.id;
+      const uname = resetPartnerModal.account_username || resetPartnerModal.login?.username || resetPartnerModal.partner_email || '';
+      const res = await OneBssApi.resetPartnerPassword(pId, partnerNewPass.trim(), uname);
       const data = res.data || {};
       if (res.status === 200 || data.success !== false) {
-        toast.success(`Password reset for ${resetPartnerModal.partner_name} (#${resetPartnerModal.partner_id})! New Password: ${partnerNewPass.trim()}`);
+        toast.success(`Password reset for ${resetPartnerModal.partner_name || 'Partner'} (#${pId})! New Password: ${partnerNewPass.trim()}`);
         setResetPartnerModal(null);
       } else {
         toast.error(data.message || 'Failed to reset partner password.');
