@@ -20,6 +20,14 @@ export const Header = ({
   const isMobile = width < 768;
 
   const [liveWalletBalance, setLiveWalletBalance] = useState(user?.wallet_balance);
+  const [hasSuperAdminSession, setHasSuperAdminSession] = useState(false);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const session = localStorage.getItem('onebss_super_admin_session');
+      setHasSuperAdminSession(!!session);
+    }
+  }, [user]);
 
   useEffect(() => {
     if (user?.partner_id) {
@@ -30,6 +38,27 @@ export const Header = ({
       }).catch(() => {});
     }
   }, [user?.partner_id, user?.wallet_balance]);
+
+  const handleReturnToSuperAdmin = () => {
+    if (typeof window !== 'undefined') {
+      const sessionStr = localStorage.getItem('onebss_super_admin_session');
+      if (sessionStr) {
+        try {
+          const session = JSON.parse(sessionStr);
+          if (session.token) {
+            localStorage.setItem('onebss_token', session.token);
+          }
+          if (session.user) {
+            localStorage.setItem('onebss_user', JSON.stringify(session.user));
+          }
+        } catch (e) {}
+      }
+      localStorage.removeItem('onebss_super_admin_session');
+      localStorage.setItem('onebss_active_tab', 'partners');
+      window.location.hash = '#partners';
+      window.location.reload();
+    }
+  };
 
   const userRole = (user?.role || '').toLowerCase();
   const isOperator = userRole === 'operator';
@@ -54,6 +83,13 @@ export const Header = ({
       </View>
 
       <View style={styles.actionSection}>
+        {hasSuperAdminSession && (
+          <TouchableOpacity style={styles.btnBackToSuperAdmin} onPress={handleReturnToSuperAdmin}>
+            <Feather name="arrow-left-circle" size={16} color="#ffffff" />
+            <Text style={styles.btnBackToSuperAdminText}>Back to Super Admin Portal</Text>
+          </TouchableOpacity>
+        )}
+
         {/* Wallet Balance Card Pill - Hidden for Super Admin and Admin, displayed for Operator */}
         {showWallet && (
           <View style={styles.walletCard}>
@@ -121,6 +157,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     flexWrap: 'wrap',
+  },
+  btnBackToSuperAdmin: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#6366f1',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+    gap: 6,
+  },
+  btnBackToSuperAdminText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 12,
   },
   walletCard: {
     flexDirection: 'row',

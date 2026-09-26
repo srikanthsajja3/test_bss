@@ -593,6 +593,22 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   const handleImpersonatePartner = async (partner) => {
     setImpersonatingId(partner.partner_id);
     try {
+      if (typeof window !== 'undefined') {
+        const existingSuperSession = localStorage.getItem('onebss_super_admin_session');
+        if (!existingSuperSession) {
+          const currentToken = localStorage.getItem('onebss_token');
+          const currentUser = localStorage.getItem('onebss_user');
+          if (currentToken && currentUser) {
+            try {
+              const parsedUser = JSON.parse(currentUser);
+              localStorage.setItem('onebss_super_admin_session', JSON.stringify({ token: currentToken, user: parsedUser }));
+            } catch (err) {
+              localStorage.setItem('onebss_super_admin_session', JSON.stringify({ token: currentToken, user: currentUser }));
+            }
+          }
+        }
+      }
+
       const res = await OneBssApi.impersonatePartner(partner.partner_id);
       const data = res.data || {};
       if (data.success && data.token) {
@@ -605,15 +621,15 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
           localStorage.setItem('onebss_filter', 'all');
           window.location.hash = '#dashboard';
         }
-        toast.success(`Impersonating ${partner.partner_name} (#${partner.partner_id})! Token issued.`);
+        toast.success(`Logging in as ${partner.partner_name} (#${partner.partner_id})...`);
         setTimeout(() => {
           if (typeof window !== 'undefined') window.location.reload();
         }, 1000);
       } else {
-        toast.error(data.message || 'Impersonation failed.');
+        toast.error(data.message || 'Login failed.');
       }
     } catch (e) {
-      toast.error('Impersonation request failed.');
+      toast.error('Login request failed.');
     } finally {
       setImpersonatingId(null);
     }
@@ -1200,9 +1216,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                                   />
                                   <View>
                                     <Text style={{ fontSize: 13, fontWeight: isSelected ? '700' : '600', color: '#000000' }}>{sub.sub_plan_name}</Text>
-                                    {sub.plan_validity ? (
-                                      <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>Validity: {sub.plan_validity} Days</Text>
-                                    ) : null}
+                                    <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>
+                                      {sub.plan_validity ? `Validity: ${sub.plan_validity} Days` : 'Validity: 30 Days'}
+                                      {'  •  '}
+                                      Base Price: ₹{sub.base_price !== null && sub.base_price !== undefined ? sub.base_price : '0'}
+                                    </Text>
                                   </View>
                                 </View>
 
@@ -1589,9 +1607,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                 onPress={() => handleImpersonatePartner(selectedPartner)}
                 disabled={impersonatingId === selectedPartner.partner_id}
               >
-                <Feather name="user-check" size={14} color="#ec4899" />
+                <Feather name="log-in" size={14} color="#ec4899" />
                 <Text style={[styles.simpleActionBtnText, { color: '#ec4899' }]}>
-                  {impersonatingId === selectedPartner.partner_id ? 'Logging in...' : 'Impersonate'}
+                  {impersonatingId === selectedPartner.partner_id ? 'Logging in...' : 'Login'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -1735,15 +1753,28 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                           <Feather name="mail" size={12} color={COLORS.textMuted} />
                           <Text style={styles.contactText}>{item.partner_email || 'N/A'}</Text>
                         </View>
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4, alignItems: 'center' }}>
                           <TouchableOpacity onPress={() => handleOpenWallet(item)}>
                             <Text style={{ fontSize: 12, color: '#10b981', fontWeight: '700' }}>
                               Wallet: ₹{(item.wallet_balance !== undefined && item.wallet_balance !== null ? item.wallet_balance : 0).toLocaleString('en-IN')}
                             </Text>
                           </TouchableOpacity>
                           <Text style={styles.subMonoText}>
-                            Sessions: {item.active_sessions !== undefined ? item.active_sessions.toLocaleString() : '1,200'}
+                            Sessions: {item.active_sessions !== undefined ? item.active_sessions.toLocaleString() : '0'}
                           </Text>
+                        </View>
+
+                        <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                          <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5 }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>
+                              {item.active_internet_accounts !== undefined && item.active_internet_accounts !== null ? item.active_internet_accounts : 0} Active
+                            </Text>
+                          </View>
+                          <View style={{ backgroundColor: 'rgba(59, 130, 246, 0.12)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5 }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6' }}>
+                              {item.online_internet_accounts !== undefined && item.online_internet_accounts !== null ? item.online_internet_accounts : 0} Online
+                            </Text>
+                          </View>
                         </View>
                       </View>
 
@@ -1771,9 +1802,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                             onPress={() => handleImpersonatePartner(item)}
                             disabled={impersonatingId === item.partner_id}
                           >
-                            <Feather name="user-check" size={12} color="#ec4899" />
+                            <Feather name="log-in" size={12} color="#ec4899" />
                             <Text style={{ fontSize: 11, fontWeight: '600', color: '#ec4899' }}>
-                              {impersonatingId === item.partner_id ? 'Wait...' : 'Impersonate'}
+                              {impersonatingId === item.partner_id ? 'Wait...' : 'Login'}
                             </Text>
                           </TouchableOpacity>
                         </View>
@@ -1787,12 +1818,13 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
             <View style={{ width: '100%' }}>
               <View style={styles.tableHeader}>
                 <Text style={[styles.th, { flex: 0.8 }]}>ID</Text>
-                <Text style={[styles.th, { flex: 2.2 }]}>Partner & Company Name</Text>
-                <Text style={[styles.th, { flex: 2.0 }]}>Contact Info</Text>
+                <Text style={[styles.th, { flex: 2.0 }]}>Partner & Company Name</Text>
+                <Text style={[styles.th, { flex: 1.8 }]}>Contact Info</Text>
                 <Text style={[styles.th, { flex: 1.2 }]}>Wallet (₹)</Text>
-                <Text style={[styles.th, { flex: 1.0 }]}>Role</Text>
+                <Text style={[styles.th, { flex: 1.8 }]}>Active / Online</Text>
+                <Text style={[styles.th, { flex: 0.9 }]}>Role</Text>
                 <Text style={[styles.th, { flex: 1.0 }]}>Status</Text>
-                <Text style={[styles.th, { flex: 2.0 }]}>Actions</Text>
+                <Text style={[styles.th, { flex: 1.8 }]}>Actions</Text>
               </View>
 
               {filteredPartners.length === 0 ? (
@@ -1811,14 +1843,14 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                         </View>
                       </View>
 
-                      <View style={[{ flex: 2.5 }, styles.td]}>
+                      <View style={[{ flex: 2.0 }, styles.td]}>
                         <TouchableOpacity onPress={() => setSelectedPartner(item)}>
                           <Text style={styles.partnerNameText}>{item.partner_name}</Text>
                           <Text style={styles.companyNameText}>{item.company_name}</Text>
                         </TouchableOpacity>
                       </View>
 
-                      <View style={[{ flex: 2.2 }, styles.td]}>
+                      <View style={[{ flex: 1.8 }, styles.td]}>
                         <View style={styles.contactRow}>
                           <Feather name="phone" size={12} color={COLORS.textMuted} />
                           <Text style={styles.contactText}>{item.partner_mobile || 'N/A'}</Text>
@@ -1829,12 +1861,27 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                         </View>
                       </View>
 
-                      <View style={[{ flex: 1.5 }, styles.td]}>
+                      <View style={[{ flex: 1.2 }, styles.td]}>
                         <TouchableOpacity onPress={() => handleOpenWallet(item)}>
                           <Text style={{ fontSize: 13, fontWeight: '700', color: '#10b981' }}>
                             ₹{(item.wallet_balance !== undefined && item.wallet_balance !== null ? item.wallet_balance : 0).toLocaleString('en-IN')}
                           </Text>
                         </TouchableOpacity>
+                      </View>
+
+                      <View style={[{ flex: 1.8 }, styles.td]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                          <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5 }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>
+                              {item.active_internet_accounts !== undefined && item.active_internet_accounts !== null ? item.active_internet_accounts : 0} Active
+                            </Text>
+                          </View>
+                          <View style={{ backgroundColor: 'rgba(59, 130, 246, 0.12)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5 }}>
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6' }}>
+                              {item.online_internet_accounts !== undefined && item.online_internet_accounts !== null ? item.online_internet_accounts : 0} Online
+                            </Text>
+                          </View>
+                        </View>
                       </View>
 
                       <View style={[{ flex: 1.2 }, styles.td]}>
@@ -1880,9 +1927,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                           onPress={() => handleImpersonatePartner(item)}
                           disabled={impersonatingId === item.partner_id}
                         >
-                          <Feather name="user-check" size={12} color="#ec4899" />
+                          <Feather name="log-in" size={12} color="#ec4899" />
                           <Text style={{ fontSize: 11, fontWeight: '600', color: '#ec4899' }}>
-                            {impersonatingId === item.partner_id ? 'Wait...' : 'Impersonate'}
+                            {impersonatingId === item.partner_id ? 'Wait...' : 'Login'}
                           </Text>
                         </TouchableOpacity>
                       </View>
