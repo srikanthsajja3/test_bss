@@ -1216,7 +1216,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   </View>
                   <Feather name="arrow-up-right" size={13} color={COLORS.primary} />
                 </View>
-                <Text style={styles.statValueMetric}>{partnerTelemetry?.total ?? 113}</Text>
+                <Text style={styles.statValueMetric}>{partnerTelemetry?.total ?? 0}</Text>
               </View>
 
               {/* ACTIVE USERS */}
@@ -1228,7 +1228,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   </View>
                   <Feather name="arrow-up-right" size={13} color={COLORS.accentEmerald} />
                 </View>
-                <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>{partnerTelemetry?.active ?? 101}</Text>
+                <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>{partnerTelemetry?.active ?? 0}</Text>
               </View>
 
               {/* ONLINE USERS */}
@@ -1240,7 +1240,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   </View>
                   <Feather name="arrow-up-right" size={13} color="#3b82f6" />
                 </View>
-                <Text style={[styles.statValueMetric, { color: '#3b82f6' }]}>{partnerTelemetry?.online ?? 80}</Text>
+                <Text style={[styles.statValueMetric, { color: '#3b82f6' }]}>{partnerTelemetry?.online ?? 0}</Text>
               </View>
 
               {/* EXPIRED USERS */}
@@ -1252,7 +1252,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   </View>
                   <Feather name="arrow-up-right" size={13} color={COLORS.accentRose} />
                 </View>
-                <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>{partnerTelemetry?.expired ?? 11}</Text>
+                <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>{partnerTelemetry?.expired ?? 0}</Text>
               </View>
 
               {/* SUSPENDED USERS */}
@@ -1288,7 +1288,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   </View>
                   <Feather name="arrow-up-right" size={13} color="#8b5cf6" />
                 </View>
-                <Text style={[styles.statValueMetric, { color: '#8b5cf6' }]}>{partnerTelemetry?.new ?? 1}</Text>
+                <Text style={[styles.statValueMetric, { color: '#8b5cf6' }]}>{partnerTelemetry?.new ?? 0}</Text>
               </View>
             </View>
           </View>
@@ -1388,7 +1388,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
               </View>
               <View style={styles.detailsGridItem}>
                 <Text style={styles.detailsGridLabel}>REGION / LOCATION</Text>
-                <Text style={styles.detailsGridVal}>{selectedPartner.partner_region || 'Vijayawada'}</Text>
+                <Text style={styles.detailsGridVal}>{selectedPartner.partner_region || '—'}</Text>
               </View>
               <View style={styles.detailsGridItem}>
                 <Text style={styles.detailsGridLabel}>ACCOUNT USERNAME</Text>
