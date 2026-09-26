@@ -110,6 +110,48 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   }, [selectedPartner?.partner_id]);
 
   useEffect(() => {
+    const handleSubHashChange = () => {
+      if (typeof window !== 'undefined') {
+        const hash = window.location.hash;
+        if (!hash.includes('partner_id=')) {
+          setSelectedPartner(null);
+        }
+        if (!hash.includes('edit=')) {
+          setEditingPartner(null);
+        }
+        if (!hash.includes('wallet=')) {
+          setWalletPartner(null);
+        }
+        if (!hash.includes('internet=')) {
+          setInternetPlansPartner(null);
+        }
+        if (!hash.includes('iptv=')) {
+          setIptvPlansPartner(null);
+        }
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('hashchange', handleSubHashChange);
+      return () => window.removeEventListener('hashchange', handleSubHashChange);
+    }
+  }, []);
+
+  const handleSelectPartner = (partner) => {
+    setSelectedPartner(partner);
+    if (typeof window !== 'undefined' && partner) {
+      const pId = partner.partner_id || partner.id;
+      window.location.hash = `partners?partner_id=${pId}`;
+    }
+  };
+
+  const handleClosePartnerDetails = () => {
+    setSelectedPartner(null);
+    if (typeof window !== 'undefined') {
+      window.location.hash = 'partners';
+    }
+  };
+
+  useEffect(() => {
     if (initialCreateRole) {
       setCreateRole(initialCreateRole);
       setIsCreateOpen(true);
@@ -1381,7 +1423,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
         >
           {/* Navigation Bar */}
           <View style={styles.detailsHeaderRow}>
-            <TouchableOpacity style={styles.backBtn} onPress={() => setSelectedPartner(null)}>
+            <TouchableOpacity style={styles.backBtn} onPress={handleClosePartnerDetails}>
               <Feather name="arrow-left" size={18} color={COLORS.textMain} />
               <Text style={styles.backBtnText}>Back to Partners List</Text>
             </TouchableOpacity>
@@ -1722,7 +1764,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                           <View style={styles.idBadge}>
                             <Text style={styles.idText}>#{item.partner_id}</Text>
                           </View>
-                          <TouchableOpacity onPress={() => setSelectedPartner(item)} style={{ flex: 1 }}>
+                          <TouchableOpacity onPress={() => handleSelectPartner(item)} style={{ flex: 1 }}>
                             <Text style={styles.partnerNameText} numberOfLines={1}>{item.partner_name}</Text>
                             <Text style={styles.companyNameText} numberOfLines={1}>{item.company_name}</Text>
                           </TouchableOpacity>
@@ -1844,7 +1886,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                       </View>
 
                       <View style={[{ flex: 2.0 }, styles.td]}>
-                        <TouchableOpacity onPress={() => setSelectedPartner(item)}>
+                        <TouchableOpacity onPress={() => handleSelectPartner(item)}>
                           <Text style={styles.partnerNameText}>{item.partner_name}</Text>
                           <Text style={styles.companyNameText}>{item.company_name}</Text>
                         </TouchableOpacity>

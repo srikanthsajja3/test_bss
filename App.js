@@ -19,11 +19,14 @@ export default function App() {
   const getInitialNavigationState = () => {
     try {
       if (typeof window !== 'undefined') {
-        const hash = window.location.hash.replace('#', '');
+        const hash = window.location.hash.replace(/^#/, '');
         if (hash) {
-          const [tab, filter] = hash.split('?filter=');
+          const [routePart] = hash.split('&');
+          const [rawTab, rawFilter] = routePart.split('?filter=');
+          const tab = rawTab ? rawTab.split('?')[0] : '';
           if (['dashboard', 'partners', 'customers', 'iptv_customers'].includes(tab)) {
-            return { tab, filter: filter || 'all' };
+            const filter = rawFilter ? rawFilter.split('?')[0].split('&')[0] : 'all';
+            return { tab, filter };
           }
         }
         const savedTab = localStorage.getItem('onebss_active_tab');
@@ -70,6 +73,16 @@ export default function App() {
   const [user, setUserState] = useState(getInitialUserState());
   const [isLoginVisible, setIsLoginVisible] = useState(false);
   const [partnerCreateRole, setPartnerCreateRole] = useState(null);
+
+  // Initialize base URL hash on first render if missing so browser back history doesn't land on a blank hash
+  React.useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const currentHash = window.location.hash.replace(/^#/, '');
+      if (!currentHash) {
+        window.history.replaceState(null, '', `#${initialNav.tab}`);
+      }
+    }
+  }, []);
 
   const handleOpenCreateRole = (role) => {
     setPartnerCreateRole(role);
@@ -121,7 +134,10 @@ export default function App() {
     try {
       if (typeof window !== 'undefined') {
         const hashVal = filter && filter !== 'all' ? `${tab}?filter=${filter}` : tab;
-        window.location.hash = hashVal;
+        const currentHash = window.location.hash.replace(/^#/, '');
+        if (currentHash !== hashVal) {
+          window.location.hash = hashVal;
+        }
         localStorage.setItem('onebss_active_tab', tab);
         if (filter && filter !== 'all') {
           localStorage.setItem('onebss_filter', filter);
@@ -132,12 +148,24 @@ export default function App() {
     } catch (e) {}
   };
 
-  // Sync hash changes if user hits browser back/forward
+  // Sync hash changes if user hits browser back/forward (left arrow in web)
   React.useEffect(() => {
     const handleHashChange = () => {
       const nav = getInitialNavigationState();
-      setActiveTabState(nav.tab);
-      setCustomerInitialFilter(nav.filter);
+      if (nav && nav.tab) {
+        setActiveTabState(nav.tab);
+        setCustomerInitialFilter(nav.filter);
+        try {
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('onebss_active_tab', nav.tab);
+            if (nav.filter && nav.filter !== 'all') {
+              localStorage.setItem('onebss_filter', nav.filter);
+            } else {
+              localStorage.removeItem('onebss_filter');
+            }
+          }
+        } catch (e) {}
+      }
     };
     if (typeof window !== 'undefined') {
       window.addEventListener('hashchange', handleHashChange);
