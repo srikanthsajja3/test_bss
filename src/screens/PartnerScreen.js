@@ -893,9 +893,17 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   });
 
   const filteredIptvPlans = iptvPlans.filter((plan) => {
-    const q = searchIptvPlan.toLowerCase();
-    const matchType = !iptvTypeFilter || (plan.type || '').toLowerCase() === iptvTypeFilter.toLowerCase();
-    const matchQuery = !q || plan.plan_name?.toLowerCase().includes(q) || String(plan.plan_id).includes(q);
+    const q = searchIptvPlan.toLowerCase().trim();
+    const planType = (plan.type || '').toLowerCase().trim();
+    let matchType = true;
+    if (iptvTypeFilter === 'A-la-carte') {
+      matchType = planType === 'a-la-carte' || planType === 'alacarte' || planType === 'a la carte';
+    } else if (iptvTypeFilter === 'DPO') {
+      matchType = planType === 'dpo' || planType === 'package' || planType === 'combo';
+    } else if (iptvTypeFilter === 'Broadcast') {
+      matchType = planType === 'broadcast' || planType === 'broadcaster' || planType === 'bouquet';
+    }
+    const matchQuery = !q || plan.plan_name?.toLowerCase().includes(q) || String(plan.plan_id || '').includes(q);
     return matchType && matchQuery;
   });
 
@@ -1489,14 +1497,19 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                 </View>
 
                 <View style={{ flexDirection: 'row', gap: 6 }}>
-                  {['', 'A-la-carte', 'Package'].map((t) => (
+                  {[
+                    { id: '', label: 'All' },
+                    { id: 'DPO', label: 'DPO' },
+                    { id: 'A-la-carte', label: 'A-la-carte' },
+                    { id: 'Broadcast', label: 'Broadcast' },
+                  ].map((t) => (
                     <TouchableOpacity
-                      key={t}
-                      style={[styles.typeChip, iptvTypeFilter === t && styles.typeChipActive]}
-                      onPress={() => setIptvTypeFilter(t)}
+                      key={t.id}
+                      style={[styles.typeChip, iptvTypeFilter === t.id && styles.typeChipActive]}
+                      onPress={() => setIptvTypeFilter(t.id)}
                     >
-                      <Text style={[styles.typeChipText, iptvTypeFilter === t && styles.typeChipTextActive]}>
-                        {t === '' ? 'All Types' : t}
+                      <Text style={[styles.typeChipText, iptvTypeFilter === t.id && styles.typeChipTextActive]}>
+                        {t.label}
                       </Text>
                     </TouchableOpacity>
                   ))}
