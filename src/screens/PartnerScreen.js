@@ -1370,25 +1370,6 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
           },
         ]}
       >
-        {/* Header & Add Admin / Add Operator Buttons */}
-        <View style={[styles.topRow, isMobile && { flexDirection: 'column', alignItems: 'stretch', gap: 12 }]}>
-          <View>
-            <Text style={[styles.title, isMobile && { fontSize: 18 }]}>Partner & Gateway Console</Text>
-            <Text style={styles.subtitle}>
-              Manage telecom operators, RADIUS servers, and IPTV gateway bindings in a structured table
-            </Text>
-          </View>
-          {user?.role !== 'operator' && (
-            <TouchableOpacity
-              style={[styles.addOperatorBtn, isMobile && { width: '100%', justifyContent: 'center' }]}
-              onPress={() => handleOpenCreate('operator')}
-            >
-              <Feather name="plus-circle" size={15} color="#fff" />
-              <Text style={styles.addOperatorBtnText}>Add Operator</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-
         {/* Filter Controls Row */}
         <View style={[styles.filterRow, isMobile && { flexDirection: 'column', alignItems: 'stretch', gap: 10 }]}>
           <View style={[styles.searchBox, isMobile && { maxWidth: '100%', width: '100%', height: 42 }]}>

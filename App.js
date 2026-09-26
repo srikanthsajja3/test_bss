@@ -73,7 +73,13 @@ export default function App() {
 
   const handleOpenCreateRole = (role) => {
     setPartnerCreateRole(role);
-    setActiveTab('partners');
+    setActiveTabState('partners');
+    try {
+      if (typeof window !== 'undefined') {
+        window.location.hash = 'partners';
+        localStorage.setItem('onebss_active_tab', 'partners');
+      }
+    } catch (e) {}
   };
 
   const handleSetUser = (userData) => {
