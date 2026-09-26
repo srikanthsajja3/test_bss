@@ -621,9 +621,17 @@ export const OneBssApi = {
     );
   },
 
-  // 24. Customer Lookup (GET /customer_lookup.php?mobile={mobile})
-  customerLookup: async (mobile = '9125253535') => {
-    return request(`/customer_lookup.php?mobile=${encodeURIComponent(mobile)}`, { method: 'GET' });
+  // 24. Customer Lookup (GET /customer_lookup.php?mobile={mobile}&cust_id={cust_id}&username={username})
+  customerLookup: async (query = '9125253535') => {
+    let q = String(query).trim();
+    if (!q) return request('/customer_lookup.php', { method: 'GET' });
+    if (/^\d{10}$/.test(q)) {
+      return request(`/customer_lookup.php?mobile=${encodeURIComponent(q)}`, { method: 'GET' });
+    } else if (/^\d+$/.test(q)) {
+      return request(`/customer_lookup.php?cust_id=${encodeURIComponent(q)}`, { method: 'GET' });
+    } else {
+      return request(`/customer_lookup.php?username=${encodeURIComponent(q)}`, { method: 'GET' });
+    }
   },
 
   getCustomersList: async (page = 1, limit = 100, type = '', search = '') => {

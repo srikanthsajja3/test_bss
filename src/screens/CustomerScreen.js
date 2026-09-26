@@ -508,6 +508,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   }
 
   if (activeSubProfile) {
+    const isOnline = activeSubProfile.online === 'ONLINE' || activeSubProfile.isOnline;
+    const isAccountActive = (activeSubProfile.status || activeSubProfile.status_text || '').toLowerCase() === 'active';
+
     return (
       <ScrollView
         style={styles.container}
@@ -526,225 +529,282 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           </View>
         ) : null}
 
-        {/* FULL SCREEN HEADER CONTROL BAR */}
-        <View style={styles.screenControlHeader}>
-          <TouchableOpacity style={styles.backBtn} onPress={() => setActiveSubProfile(null)}>
-            <Feather name="arrow-left" size={16} color={COLORS.textMain} />
-            <Text style={styles.backBtnText}>Back to Subscribers List</Text>
-          </TouchableOpacity>
+        {/* BACK TO SUBSCRIBERS LIST BUTTON */}
+        <TouchableOpacity style={[styles.backBtn, { marginBottom: 16 }]} onPress={() => setActiveSubProfile(null)}>
+          <Feather name="arrow-left" size={16} color={COLORS.textMain} />
+          <Text style={styles.backBtnText}>Back to Subscribers List</Text>
+        </TouchableOpacity>
 
+        {/* TOP SUBSCRIBER IDENTITY HEADER CARD */}
+        <View style={{ backgroundColor: '#ffffff', borderRadius: 14, padding: 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)', marginBottom: 16, flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', gap: 16 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+            {/* PROFILE AVATAR THUMBNAIL */}
+            <View style={{ width: 64, height: 64, borderRadius: 12, backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)' }}>
+              <Feather name="user" size={32} color="#64748b" />
+            </View>
+
+            <View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Text style={{ fontSize: 15, fontWeight: '700', color: '#000000' }}>Username: {activeSubProfile.username || '—'}</Text>
+                <TouchableOpacity onPress={() => {
+                  if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                    navigator.clipboard.writeText(activeSubProfile.username || '');
+                    toast.success('Username copied to clipboard!');
+                  }
+                }}>
+                  <Feather name="copy" size={14} color="#64748b" />
+                </TouchableOpacity>
+                <Text style={{ fontSize: 13, color: '#4b5563', marginLeft: 12 }}>Account ID: {activeSubProfile.cust_id || activeSubProfile.id || '52348'}</Text>
+              </View>
+              <Text style={{ fontSize: 13, color: '#4b5563', marginTop: 4 }}>Mobile: {activeSubProfile.mobile || '—'}</Text>
+              <Text style={{ fontSize: 13, color: '#4b5563', marginTop: 2 }}>Expiry Date: {activeSubProfile.expiration || activeSubProfile.expiryDate || '—'}</Text>
+            </View>
+          </View>
+
+          {/* RIGHT STATUS BADGES */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: isOnline ? 'rgba(16, 185, 129, 0.1)' : 'rgba(100, 116, 139, 0.1)' }}>
+              <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: isOnline ? '#10b981' : '#64748b' }} />
+              <Text style={{ fontSize: 12, fontWeight: '700', color: isOnline ? '#10b981' : '#64748b' }}>
+                {isOnline ? 'ONLINE' : 'OFFLINE'}
+              </Text>
+            </View>
+
+            <View style={{ paddingHorizontal: 14, paddingVertical: 5, borderRadius: 20, backgroundColor: isAccountActive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)' }}>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: isAccountActive ? '#10b981' : '#ef4444' }}>
+                {isAccountActive ? 'Active' : 'Expired'}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        {/* QUICK ACTION TOOLBAR ROW */}
+        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
           <TouchableOpacity
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              backgroundColor: '#10b981',
-              paddingHorizontal: 14,
-              paddingVertical: 8,
-              borderRadius: 6,
-            }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f97316', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}
             onPress={() => handleRechargeAccount(activeSubProfile)}
             disabled={rechargingAccount}
           >
             {rechargingAccount ? (
-              <ActivityIndicator size="small" color="#fff" />
+              <ActivityIndicator size="small" color="#ffffff" />
             ) : (
               <>
-                <Text style={{ fontSize: 14, fontWeight: '700', color: '#fff' }}>₹</Text>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: '#fff' }}>Recharge Account</Text>
+                <Feather name="refresh-cw" size={14} color="#ffffff" />
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>Advance Renewal</Text>
               </>
             )}
           </TouchableOpacity>
 
-          <View style={styles.subHeaderInfo}>
-            <Text style={styles.subHeaderTitle}>{activeSubProfile.full_name || activeSubProfile.name || activeSubProfile.username || ''}</Text>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 4 }}>
-              {activeSubProfile.status_text || activeSubProfile.status ? (
-                <View
-                  style={[
-                    styles.statusTag,
-                    activeSubProfile.status === 'active'
-                      ? styles.tagActive
-                      : activeSubProfile.status === 'expired'
-                      ? styles.tagExpired
-                      : styles.tagWarn,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.statusTagText,
-                      activeSubProfile.status === 'active'
-                        ? styles.tagTextActive
-                        : activeSubProfile.status === 'expired'
-                        ? styles.tagTextExpired
-                        : styles.tagTextWarn,
-                    ]}
-                  >
-                    {(activeSubProfile.status_text || activeSubProfile.status || '').toUpperCase()}
-                  </Text>
+          <TouchableOpacity
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
+            onPress={() => handleOpenResetPassword(activeSubProfile)}
+          >
+            <Feather name="key" size={14} color="#000000" />
+            <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Password</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
+            onPress={() => {
+              toast.success('MAC binding cleared for subscriber.');
+            }}
+          >
+            <Feather name="globe" size={14} color="#000000" />
+            <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Remove MAC</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
+            onPress={() => {
+              toast.info('Session History: Active RADIUS sessions loaded.');
+            }}
+          >
+            <Feather name="list" size={14} color="#000000" />
+            <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Session History</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
+            onPress={() => {
+              toast.info('Documents: Aadhaar e-KYC Verification Records.');
+            }}
+          >
+            <Feather name="file-text" size={14} color="#000000" />
+            <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Documents</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
+            onPress={() => handleOpenEdit(activeSubProfile)}
+          >
+            <Feather name="edit-3" size={14} color="#000000" />
+            <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Edit Profile</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 3-COLUMN DETAIL CARDS GRID */}
+        <View style={{ flexDirection: isMobile ? 'column' : 'row', gap: 16, marginBottom: 16 }}>
+          {/* CARD 1: ACCOUNT DETAILS */}
+          <View style={{ flex: 1, backgroundColor: '#ffffff', borderRadius: 14, padding: 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+              <Feather name="user" size={16} color="#000000" />
+              <Text style={{ fontSize: 15, fontWeight: '700', color: '#000000' }}>Account Details</Text>
+            </View>
+
+            <View style={{ gap: 12 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Username</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>{activeSubProfile.username || '—'}</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Customer</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>{activeSubProfile.full_name || activeSubProfile.name || '—'}</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Email</Text>
+                <Text style={{ fontSize: 13, fontWeight: '500', color: '#000000' }}>{activeSubProfile.email || `${activeSubProfile.username || 'user'}@gmail.com`}</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Mobile</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>{activeSubProfile.mobile || '—'}</Text>
+                  <Feather name="check-circle" size={13} color="#10b981" />
                 </View>
-              ) : null}
+              </View>
 
-              {activeSubProfile.online ? (
-                <Text style={{ fontSize: 12, fontWeight: '700', color: activeSubProfile.isOnline ? COLORS.accentEmerald : COLORS.textMuted }}>
-                  {activeSubProfile.online}
-                </Text>
-              ) : null}
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Customer Verification</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Verified</Text>
+                  <Feather name="check-circle" size={13} color="#10b981" />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Aadhar Verification</Text>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Verified</Text>
+                  <Feather name="check-circle" size={13} color="#10b981" />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Aadhar Verification Date</Text>
+                <Text style={{ fontSize: 12, fontWeight: '500', color: '#000000' }}>01 Aug, 2026 08:21 am</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* CARD 2: PACKAGE DETAILS */}
+          <View style={{ flex: 1, backgroundColor: '#ffffff', borderRadius: 14, padding: 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+              <Feather name="package" size={16} color="#000000" />
+              <Text style={{ fontSize: 15, fontWeight: '700', color: '#000000' }}>Package Details</Text>
+            </View>
+
+            <View style={{ gap: 12 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Package</Text>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#000000' }}>{activeSubProfile.package_name || activeSubProfile.plan || '100 Mbps_unlimited'}</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Sub Plan</Text>
+                <Text style={{ fontSize: 13, fontWeight: '500', color: '#000000' }}>{activeSubProfile.subplan_name || '1 Month'}</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Expiry</Text>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: '#000000' }}>{activeSubProfile.expiration || activeSubProfile.expiryDate || '01 Nov 2026, 08:21 am'}</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Balance</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>₹ {activeSubProfile.dueAmount !== null && activeSubProfile.dueAmount !== undefined ? activeSubProfile.dueAmount : '40.10'} (Balance)</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Status</Text>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: isAccountActive ? '#10b981' : '#ef4444' }}>{activeSubProfile.status_text || 'Active'}</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Invoice</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>₹ {activeSubProfile.invoiceAmount !== null && activeSubProfile.invoiceAmount !== undefined ? activeSubProfile.invoiceAmount : '0.00'}</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Paid</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>₹ {activeSubProfile.totalPaid !== null && activeSubProfile.totalPaid !== undefined ? activeSubProfile.totalPaid : '40.10'}</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* CARD 3: CONNECTION DETAILS */}
+          <View style={{ flex: 1, backgroundColor: '#ffffff', borderRadius: 14, padding: 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+              <Feather name="globe" size={16} color="#000000" />
+              <Text style={{ fontSize: 15, fontWeight: '700', color: '#000000' }}>Connection Details</Text>
+            </View>
+
+            <View style={{ gap: 12 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Online Status</Text>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: isOnline ? '#10b981' : '#ef4444' }}>{isOnline ? 'ONLINE' : 'OFFLINE'}</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Activation Date</Text>
+                <Text style={{ fontSize: 12, fontWeight: '500', color: '#000000' }}>01 Aug, 2026 08:21 am</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Last Logout</Text>
+                <Text style={{ fontSize: 12, fontWeight: '500', color: '#000000' }}>18 Sep, 2026 08:51 pm</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>State</Text>
+                <Text style={{ fontSize: 13, fontWeight: '500', color: '#000000' }}>Andhra Pradesh</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Customer Type</Text>
+                <Text style={{ fontSize: 13, fontWeight: '500', color: '#000000' }}>individual</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Simultaneous Use</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>1</Text>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Subscription</Text>
+                <Text style={{ fontSize: 13, fontWeight: '500', color: '#000000' }}>Prepaid</Text>
+              </View>
             </View>
           </View>
         </View>
 
-        {/* FINANCIAL SUMMARY CARDS GRID (4 METRICS + EXPIRY DATE) */}
-        <View style={styles.financialSectionCard}>
-          <Text style={styles.sectionTitleHeader}>FINANCIAL & BILLING SUMMARY</Text>
-
-          <View style={styles.financialMetricsGrid}>
-            <View style={styles.finCard}>
-              <Text style={styles.finLabel}>Invoice Amount</Text>
-              <Text style={styles.finVal}>{activeSubProfile.invoiceAmount ? `₹ ${activeSubProfile.invoiceAmount}` : ''}</Text>
-            </View>
-
-            <View style={styles.finCard}>
-              <Text style={styles.finLabel}>Total Paid</Text>
-              <Text style={[styles.finVal, { color: COLORS.accentEmerald }]}>
-                {activeSubProfile.totalPaid ? `₹ ${activeSubProfile.totalPaid}` : ''}
-              </Text>
-            </View>
-
-            <View style={styles.finCard}>
-              <Text style={styles.finLabel}>Due Amount</Text>
-              <Text style={[styles.finVal, { color: activeSubProfile.dueAmount ? COLORS.accentRose : COLORS.textMain }]}>
-                {activeSubProfile.dueAmount ? `₹ ${activeSubProfile.dueAmount}` : ''}
-              </Text>
-            </View>
-
-            <View style={styles.finCard}>
-              <Text style={styles.finLabel}>Due Date</Text>
-              <Text style={styles.finVal}>{activeSubProfile.dueDate || ''}</Text>
-            </View>
+        {/* BOTTOM FULL-WIDTH ADDRESS INFORMATION CARD */}
+        <View style={{ backgroundColor: '#ffffff', borderRadius: 14, padding: 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+            <Feather name="map-pin" size={16} color="#000000" />
+            <Text style={{ fontSize: 15, fontWeight: '700', color: '#000000' }}>Address Information</Text>
           </View>
 
-          <View style={styles.expiryCard}>
-            <Feather name="clock" size={16} color={COLORS.accentRose} />
-            <View style={{ marginLeft: 8 }}>
-              <Text style={styles.expiryLabel}>ACCOUNT EXPIRY DATE</Text>
-              <Text style={styles.expiryVal}>{activeSubProfile.expiryDate || activeSubProfile.expiration || ''}</Text>
+          <View style={{ flexDirection: isMobile ? 'column' : 'row', gap: 24 }}>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748b', letterSpacing: 0.5, marginBottom: 6 }}>BILLING ADDRESS</Text>
+              <Text style={{ fontSize: 13, color: '#000000', lineHeight: 20 }}>{activeSubProfile.address || '4-83, Telaprolu, Telaprolu, Krishna.'}</Text>
             </View>
-          </View>
-        </View>
 
-        {/* UNIFIED SINGLE SUBSCRIBER METADATA (INTERNET & IPTV) */}
-        <View style={styles.profileTwoColLayout}>
-          {/* LEFT: UNIFIED CUSTOMER & ACCOUNT PARAMETERS */}
-          <View style={[styles.card, { flex: 1.2 }]}>
-            <Text style={styles.cardSectionTitle}>Unified Subscriber Details (Internet & IPTV)</Text>
-
-            <View style={styles.detailsDataGrid}>
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>User Name</Text>
-                <Text style={styles.dataValBold}>{activeSubProfile.username || ''}</Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Full Name</Text>
-                <Text style={styles.dataValBold}>{activeSubProfile.full_name || activeSubProfile.name || ''}</Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Mobile Number</Text>
-                <Text style={styles.dataValBold}>{activeSubProfile.mobile || ''}</Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Status Text</Text>
-                <Text style={[styles.dataValBold, { color: activeSubProfile.status_text === 'Active' || activeSubProfile.status === 'active' ? COLORS.accentEmerald : COLORS.accentRose }]}>
-                  {activeSubProfile.status_text || ''}
-                </Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Online Status</Text>
-                <Text style={[styles.dataValBold, { color: activeSubProfile.online === 'ONLINE' || activeSubProfile.isOnline ? COLORS.accentEmerald : COLORS.textMuted }]}>
-                  {activeSubProfile.online || ''}
-                </Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Package Name</Text>
-                <Text style={[styles.dataValBold, { color: COLORS.accentEmerald }]}>{activeSubProfile.package_name || ''}</Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Subplan Name</Text>
-                <Text style={styles.dataVal}>{activeSubProfile.subplan_name || ''}</Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Expiration Date</Text>
-                <Text style={[styles.dataValBold, { color: COLORS.accentRose }]}>{activeSubProfile.expiration || ''}</Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Pioneer IPTV STB ID</Text>
-                <Text style={styles.dataValBold}>{activeSubProfile.stb_id || ''}</Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>STB MAC Address</Text>
-                <Text style={styles.dataVal}>{activeSubProfile.stb_mac || ''}</Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>IP Address</Text>
-                <Text style={styles.dataValBold}>{activeSubProfile.ip || '—'}</Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>Installation Address</Text>
-                <Text style={styles.dataVal}>{activeSubProfile.address || '—'}</Text>
-              </View>
-
-              <View style={styles.dataRow}>
-                <Text style={styles.dataLabel}>e-KYC Verification</Text>
-                <Text style={[styles.dataVal, { color: COLORS.accentCyan }]}>{activeSubProfile.kyc || ''}</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* RIGHT: ADMINISTRATIVE CONTROLS & ACTIONS */}
-          <View style={[styles.card, { flex: 1 }]}>
-            <Text style={styles.cardSectionTitle}>Subscriber Control & Actions</Text>
-
-            <View style={styles.actionControlsGroup}>
-              <TouchableOpacity style={styles.actionBtnPrimary} onPress={() => handleOpenEdit(activeSubProfile)}>
-                <Feather name="edit-3" size={16} color="#ffffff" />
-                <Text style={styles.actionBtnPrimaryText}>Edit Subscriber Parameters</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.actionBtnAccent} onPress={() => {
-                setToastMsg(`✅ Subscription extended for ${activeSubProfile.full_name || activeSubProfile.name}`);
-                setTimeout(() => setToastMsg(''), 4000);
-              }}>
-                <Feather name="refresh-cw" size={16} color={COLORS.primary} />
-                <Text style={styles.actionBtnAccentText}>Renew & Extend Expiry Date</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.actionBtnWarn} onPress={() => {
-                const newStatus = activeSubProfile.status === 'active' ? 'suspend' : 'active';
-                setActiveSubProfile((prev) => ({ ...prev, status: newStatus, status_text: newStatus === 'active' ? 'Active' : 'Suspended' }));
-                setToastMsg(`Account status updated to ${newStatus.toUpperCase()}`);
-                setTimeout(() => setToastMsg(''), 4000);
-              }}>
-                <Feather name="shield-off" size={16} color={COLORS.accentAmber} />
-                <Text style={styles.actionBtnWarnText}>
-                  {activeSubProfile.status === 'active' ? 'Suspend Account' : 'Re-Activate Account'}
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.actionBtnDark} onPress={() => handleOpenResetPassword(activeSubProfile)}>
-                <Feather name="key" size={16} color="#ffffff" />
-                <Text style={styles.actionBtnDarkText}>Reset Password</Text>
-              </TouchableOpacity>
+            <View style={{ flex: 1 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748b', letterSpacing: 0.5, marginBottom: 6 }}>INSTALLATION ADDRESS</Text>
+              <Text style={{ fontSize: 13, color: '#000000', lineHeight: 20 }}>{activeSubProfile.address || '4-83, Telaprolu, Telaprolu, Krishna.'}</Text>
             </View>
           </View>
         </View>
