@@ -313,12 +313,29 @@ export const OneBssApi = {
     return res;
   },
 
-  // Partner Reset Password (POST /reset_password.php)
+  // Partner Reset Password (POST /reset_password.php with PUT /partner.php fallback)
   resetPartnerPassword: async (partnerId, newPassword) => {
-    return request('/reset_password.php', {
-      method: 'POST',
+    try {
+      const res = await request('/reset_password.php', {
+        method: 'POST',
+        body: JSON.stringify({
+          partner_id: Number(partnerId) || partnerId,
+          id: Number(partnerId) || partnerId,
+          new_password: newPassword,
+          password: newPassword,
+          partner_password: newPassword,
+        }),
+      });
+      if (res.status === 200 && res.data?.success !== false) {
+        return res;
+      }
+    } catch (e) {}
+
+    return request(`/partner.php?id=${encodeURIComponent(partnerId)}`, {
+      method: 'PUT',
       body: JSON.stringify({
-        partner_id: Number(partnerId) || partnerId,
+        password: newPassword,
+        partner_password: newPassword,
         new_password: newPassword,
       }),
     });

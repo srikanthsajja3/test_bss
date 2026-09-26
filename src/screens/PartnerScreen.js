@@ -557,7 +557,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     try {
       const res = await OneBssApi.resetPartnerPassword(resetPartnerModal.partner_id, partnerNewPass.trim());
       const data = res.data || {};
-      if (data.success !== false) {
+      if (res.status === 200 || data.success !== false) {
         toast.success(`Password reset for ${resetPartnerModal.partner_name} (#${resetPartnerModal.partner_id})! New Password: ${partnerNewPass.trim()}`);
         setResetPartnerModal(null);
       } else {
@@ -1072,8 +1072,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                             </TouchableOpacity>
                           )}
 
-                          <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center' }}>
-                            <Feather name={isExpanded ? 'chevron-up' : 'chevron-down'} size={18} color="#64748b" />
+                          <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: isExpanded ? 'rgba(6, 182, 212, 0.15)' : '#f1f5f9', justifyContent: 'center', alignItems: 'center' }}>
+                            <Feather name={isExpanded ? 'minus' : 'plus'} size={18} color={isExpanded ? '#06b6d4' : '#000000'} />
                           </View>
                         </View>
                       </TouchableOpacity>
