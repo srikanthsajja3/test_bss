@@ -4,17 +4,27 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 
 export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, onToggleCollapse, onMouseEnter, onMouseLeave }) => {
-  const isOperator = user?.role === 'operator';
-  const menuItems = isOperator
-    ? [
-        { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
-        { id: 'customers', label: 'Subscribers', icon: 'users' },
-      ]
-    : [
-        { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
-        { id: 'customers', label: 'Subscribers', icon: 'users' },
-        { id: 'partners', label: 'Partners', icon: 'briefcase' },
-      ];
+  const role = (user?.role || '').toLowerCase();
+  const isSuperAdmin = role === 'superadmin' || role === 'admin';
+  const isOperator = role === 'operator';
+
+  let menuItems = [];
+  if (isSuperAdmin) {
+    menuItems = [
+      { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
+      { id: 'partners', label: 'Partners', icon: 'briefcase' },
+    ];
+  } else if (isOperator) {
+    menuItems = [
+      { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
+      { id: 'customers', label: 'Subscribers', icon: 'users' },
+    ];
+  } else {
+    menuItems = [
+      { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
+      { id: 'partners', label: 'Partners', icon: 'briefcase' },
+    ];
+  }
 
   return (
     <View 
