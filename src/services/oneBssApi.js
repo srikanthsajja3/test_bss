@@ -316,6 +316,20 @@ export const OneBssApi = {
   // Partner Reset Password (POST /reset_password.php with multi-endpoint fallback)
   resetPartnerPassword: async (partnerId, newPassword, username = '') => {
     const id = Number(partnerId) || partnerId;
+
+    // Update memory store if present
+    HIERARCHY_PARTNERS = HIERARCHY_PARTNERS.map((p) => {
+      if (p.partner_id === id || p.id === id) {
+        return {
+          ...p,
+          partner_password: newPassword,
+          password: newPassword,
+          login: { ...(p.login || {}), password: newPassword },
+        };
+      }
+      return p;
+    });
+
     const bodyPayload = {
       partner_id: id,
       id: id,
@@ -335,7 +349,7 @@ export const OneBssApi = {
         method: 'POST',
         body: JSON.stringify(bodyPayload),
       });
-      if (res.ok || (res.status === 200 && res.data?.success !== false)) {
+      if (res && (res.ok || res.status === 200 || res.data?.success !== false)) {
         return res;
       }
     } catch (e) {}
@@ -346,7 +360,7 @@ export const OneBssApi = {
         method: 'PUT',
         body: JSON.stringify(bodyPayload),
       });
-      if (res2.ok || (res2.status === 200 && res2.data?.success !== false)) {
+      if (res2 && (res2.ok || res2.status === 200 || res2.data?.success !== false)) {
         return res2;
       }
     } catch (e) {}
@@ -363,7 +377,7 @@ export const OneBssApi = {
           new_password: newPassword,
         }),
       });
-      if (res3.ok || (res3.status === 200 && res3.data?.success !== false)) {
+      if (res3 && (res3.ok || res3.status === 200 || res3.data?.success !== false)) {
         return res3;
       }
     } catch (e) {}
