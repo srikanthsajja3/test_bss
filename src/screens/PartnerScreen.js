@@ -399,6 +399,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
           if (data.impersonating) {
             localStorage.setItem('onebss_user', JSON.stringify(data.impersonating));
           }
+          localStorage.setItem('onebss_active_tab', 'dashboard');
+          localStorage.setItem('onebss_filter', 'all');
+          window.location.hash = '#dashboard';
         }
         toast.success(`Impersonating ${partner.partner_name} (#${partner.partner_id})! Token issued.`);
         setTimeout(() => {

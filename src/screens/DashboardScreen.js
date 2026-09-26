@@ -289,7 +289,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
 
         <View style={styles.iptvGrid}>
           {/* TOTAL IPTV USERS */}
-          <TouchableOpacity style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('all')}>
+          <TouchableOpacity style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('iptv_all')}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={styles.iptvLabel}>TOTAL IPTV USERS</Text>
               <Feather name="arrow-up-right" size={13} color="#8b5cf6" />
@@ -298,7 +298,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
           </TouchableOpacity>
 
           {/* ACTIVE IPTV USERS */}
-          <TouchableOpacity style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('active')}>
+          <TouchableOpacity style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('iptv_active')}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={styles.iptvLabel}>ACTIVE IPTV USERS</Text>
               <Feather name="arrow-up-right" size={13} color={COLORS.accentEmerald} />
@@ -307,7 +307,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
           </TouchableOpacity>
 
           {/* EXPIRED IPTV USERS */}
-          <TouchableOpacity style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('expired')}>
+          <TouchableOpacity style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('iptv_expired')}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
               <Text style={styles.iptvLabel}>EXPIRED IPTV USERS</Text>
               <Feather name="arrow-up-right" size={13} color={COLORS.accentRose} />

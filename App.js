@@ -177,7 +177,8 @@ export default function App() {
 
   const handleNavigateToCustomers = (filterKey = 'all') => {
     if (filterKey.startsWith('iptv') || filterKey === 'iptv') {
-      setActiveTab('iptv_customers', filterKey === 'iptv' ? 'all' : filterKey);
+      const cleanFilter = (filterKey === 'iptv' || filterKey === 'iptv_all') ? 'all' : filterKey.replace('iptv_', '');
+      setActiveTab('iptv_customers', cleanFilter);
     } else {
       setActiveTab('customers', filterKey);
     }
