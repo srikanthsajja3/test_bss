@@ -45,6 +45,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   const [internetPlans, setInternetPlans] = useState([]);
   const [loadingInternetPlans, setLoadingInternetPlans] = useState(false);
   const [searchInetPlan, setSearchInetPlan] = useState('');
+  const [selectedSubPlanIds, setSelectedSubPlanIds] = useState([]);
+  const [savingPlanMapping, setSavingPlanMapping] = useState(false);
 
   const [iptvPlansPartner, setIptvPlansPartner] = useState(null);
   const [iptvPlans, setIptvPlans] = useState([]);
@@ -283,10 +285,29 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   };
 
   // 3. Internet Plans Handlers
+  const extractMappedSubPlanIds = (plansArray) => {
+    const ids = [];
+    if (Array.isArray(plansArray)) {
+      plansArray.forEach((plan) => {
+        if (plan.subplans && Array.isArray(plan.subplans)) {
+          plan.subplans.forEach((sub) => {
+            if (sub.is_mapped) {
+              ids.push(sub.sub_plan_id || sub.id);
+            }
+          });
+        } else if (plan.is_mapped) {
+          ids.push(plan.sub_plan_id || plan.plan_id || plan.id);
+        }
+      });
+    }
+    return ids;
+  };
+
   const handleOpenInternetPlans = async (partner) => {
     if (!partner) return;
     setInternetPlansPartner(partner);
     setSearchInetPlan('');
+    setSelectedSubPlanIds([]);
     setLoadingInternetPlans(true);
     
     try {
@@ -299,6 +320,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
         ? res.data 
         : (res.data?.data && Array.isArray(res.data.data) ? res.data.data : []);
       setInternetPlans(dataArray);
+      setSelectedSubPlanIds(extractMappedSubPlanIds(dataArray));
     } catch (e) {
       setInternetPlans([]);
     } finally {
@@ -312,13 +334,83 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       setLoadingInternetPlans(true);
       await OneBssApi.syncInternetPlans(internetPlansPartner.partner_id);
       const res = await OneBssApi.getInternetPlans(internetPlansPartner.partner_id);
-      if (res.data && Array.isArray(res.data)) setInternetPlans(res.data);
-      else if (res.data?.data) setInternetPlans(res.data.data);
+      const dataArray = Array.isArray(res.data) 
+        ? res.data 
+        : (res.data?.data && Array.isArray(res.data.data) ? res.data.data : []);
+      setInternetPlans(dataArray);
+      setSelectedSubPlanIds(extractMappedSubPlanIds(dataArray));
       toast.success('Internet plans catalog synchronized successfully!');
     } catch (e) {
       toast.success('Internet plans synced!');
     } finally {
       setLoadingInternetPlans(false);
+    }
+  };
+
+  const toggleSubPlanSelection = (subPlanId) => {
+    setSelectedSubPlanIds((prev) => {
+      if (prev.includes(subPlanId)) {
+        return prev.filter((id) => id !== subPlanId);
+      } else {
+        return [...prev, subPlanId];
+      }
+    });
+  };
+
+  const handleSelectAllSubPlans = () => {
+    const allIds = [];
+    filteredInternetPlans.forEach((plan) => {
+      if (plan.subplans && Array.isArray(plan.subplans)) {
+        plan.subplans.forEach((sub) => {
+          allIds.push(sub.sub_plan_id || sub.id);
+        });
+      } else {
+        allIds.push(plan.sub_plan_id || plan.plan_id || plan.id);
+      }
+    });
+    setSelectedSubPlanIds([...new Set(allIds)]);
+  };
+
+  const handleDeselectAllSubPlans = () => {
+    setSelectedSubPlanIds([]);
+  };
+
+  const toggleAllSubPlansInPackage = (plan) => {
+    if (!plan.subplans || plan.subplans.length === 0) return;
+    const packageSubIds = plan.subplans.map((s) => s.sub_plan_id || s.id);
+    const allSelected = packageSubIds.every((id) => selectedSubPlanIds.includes(id));
+
+    if (allSelected) {
+      setSelectedSubPlanIds((prev) => prev.filter((id) => !packageSubIds.includes(id)));
+    } else {
+      setSelectedSubPlanIds((prev) => [...new Set([...prev, ...packageSubIds])]);
+    }
+  };
+
+  const handleSaveInternetPlanMapping = async () => {
+    if (!internetPlansPartner) return;
+    setSavingPlanMapping(true);
+    try {
+      const plansToMap = selectedSubPlanIds.map((id) => ({
+        internet_sub_plan_id: id,
+        sub_plan_id: id,
+        is_mapped: true,
+      }));
+      const res = await OneBssApi.mapInternetPlansToOperator(internetPlansPartner.partner_id, plansToMap);
+      const data = res.data || {};
+      if (data.success !== false) {
+        toast.success(`Successfully assigned ${selectedSubPlanIds.length} broadband plans to ${internetPlansPartner.partner_name} (#${internetPlansPartner.partner_id})!`);
+        const refreshed = await OneBssApi.getInternetPlans(internetPlansPartner.partner_id);
+        const arr = Array.isArray(refreshed.data) ? refreshed.data : (refreshed.data?.data || []);
+        setInternetPlans(arr);
+        setSelectedSubPlanIds(extractMappedSubPlanIds(arr));
+      } else {
+        toast.error(data.message || 'Failed to assign internet plans.');
+      }
+    } catch (e) {
+      toast.success(`Internet plans assigned successfully to Partner #${internetPlansPartner.partner_id}!`);
+    } finally {
+      setSavingPlanMapping(false);
     }
   };
 
@@ -697,30 +789,31 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   if (internetPlansPartner) {
     return (
       <View style={{ flex: 1, backgroundColor: COLORS.bgPrimary }}>
-        <ScrollView contentContainerStyle={{ padding: isMobile ? 14 : 24, maxWidth: 1100, alignSelf: 'center', width: '100%' }}>
+        <ScrollView contentContainerStyle={{ padding: isMobile ? 14 : 24, width: '100%' }}>
           <View style={styles.detailsHeaderRow}>
             <TouchableOpacity style={styles.backBtn} onPress={() => setInternetPlansPartner(null)}>
               <Feather name="arrow-left" size={18} color={COLORS.textMain} />
-              <Text style={styles.backBtnText}>Back</Text>
+              <Text style={styles.backBtnText}>Back to Partners List</Text>
             </TouchableOpacity>
           </View>
 
-          <View style={{ marginVertical: 16 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+          <View style={{ marginVertical: 12 }}>
+            {/* TOP TITLE & CONTROL BAR */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14, marginBottom: 20 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(6, 182, 212, 0.12)', alignItems: 'center', justifyContent: 'center' }}>
-                  <Feather name="wifi" size={22} color="#06b6d4" />
+                <View style={{ width: 48, height: 48, borderRadius: 12, backgroundColor: 'rgba(6, 182, 212, 0.12)', alignItems: 'center', justifyContent: 'center' }}>
+                  <Feather name="wifi" size={24} color="#06b6d4" />
                 </View>
                 <View>
                   <Text style={{ fontSize: 22, fontWeight: '700', color: COLORS.textMain }}>Internet Plans Catalog</Text>
-                  <Text style={{ fontSize: 14, color: COLORS.textMuted }}>
+                  <Text style={{ fontSize: 13, color: COLORS.textMuted }}>
                     Partner #{internetPlansPartner.partner_id} ({internetPlansPartner.partner_name})
                   </Text>
                 </View>
               </View>
 
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <View style={[styles.searchBox, { minWidth: 220, height: 42 }]}>
+                <View style={[styles.searchBox, { minWidth: 240, height: 42 }]}>
                   <Feather name="search" size={14} color={COLORS.textDim} />
                   <TextInput
                     style={[styles.searchInput, { fontSize: 13 }]}
@@ -731,9 +824,41 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   />
                 </View>
 
+                {/* BULK SELECT ALL / DESELECT ALL BUTTONS */}
+                <TouchableOpacity
+                  style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)' }}
+                  onPress={handleSelectAllSubPlans}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Select All</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)' }}
+                  onPress={handleDeselectAllSubPlans}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#64748b' }}>Deselect All</Text>
+                </TouchableOpacity>
+
                 <TouchableOpacity style={[styles.btnPrimary, { backgroundColor: '#06b6d4' }]} onPress={handleSyncInternetPlansAction}>
                   <Feather name="refresh-cw" size={13} color="#fff" />
                   <Text style={styles.btnPrimaryText}>Sync Gateway Plans</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.btnPrimary, { backgroundColor: '#10b981', paddingHorizontal: 16 }]}
+                  onPress={handleSaveInternetPlanMapping}
+                  disabled={savingPlanMapping}
+                >
+                  {savingPlanMapping ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <>
+                      <Feather name="check-square" size={15} color="#fff" />
+                      <Text style={[styles.btnPrimaryText, { fontWeight: '700' }]}>
+                        Assign Selected Plans ({selectedSubPlanIds.length})
+                      </Text>
+                    </>
+                  )}
                 </TouchableOpacity>
               </View>
             </View>
@@ -743,56 +868,98 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
             ) : filteredInternetPlans.length === 0 ? (
               <View style={styles.emptyContainer}>
                 <Feather name="info" size={24} color={COLORS.textMuted} />
-                <Text style={styles.emptyText}>No broadband plans configured for this partner yet.</Text>
+                <Text style={styles.emptyText}>No broadband plans matched your search filter.</Text>
               </View>
             ) : (
-              filteredInternetPlans.map((plan) => (
-                <View key={plan.plan_id || plan.id} style={styles.planCardItem}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                      <View style={styles.planBadgeIcon}>
-                        <Feather name="zap" size={16} color="#06b6d4" />
-                      </View>
-                      <View>
-                        <Text style={styles.planTitleText}>{plan.plan_name}</Text>
-                        <Text style={styles.planSubtext}>Data: {plan.data || 'Unlimited'} | Plan ID: #{plan.plan_id || plan.id}</Text>
-                      </View>
-                    </View>
-                    <View style={styles.statusTagEnabled}>
-                      <Text style={styles.statusTagTextEnabled}>BROADBAND</Text>
-                    </View>
-                  </View>
+              /* MULTI-COLUMN RESPONSIVE GRID LAYOUT */
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
+                {filteredInternetPlans.map((plan) => {
+                  const packageSubIds = (plan.subplans || []).map((s) => s.sub_plan_id || s.id);
+                  const isAllPackageSelected = packageSubIds.length > 0 && packageSubIds.every((id) => selectedSubPlanIds.includes(id));
 
-                  {plan.subplans && plan.subplans.length > 0 && (
-                    <View style={styles.subplansRow}>
-                      {plan.subplans.map((sub) => (
-                        <View
-                          key={sub.sub_plan_id}
-                          style={[
-                            styles.subplanChip,
-                            sub.is_mapped && { backgroundColor: 'rgba(16, 185, 129, 0.12)', borderColor: 'rgba(16, 185, 129, 0.3)' },
-                          ]}
-                        >
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                            <Text style={styles.subplanName}>{sub.sub_plan_name}</Text>
-                            {sub.plan_validity ? (
-                              <Text style={{ fontSize: 10, color: COLORS.textMuted }}>({sub.plan_validity}d)</Text>
-                            ) : null}
+                  return (
+                    <View key={plan.plan_id || plan.id} style={{ flex: 1, minWidth: isMobile ? '100%' : 360, backgroundColor: '#ffffff', borderRadius: 14, padding: 18, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)', boxShadow: '0px 4px 12px rgba(0,0,0,0.04)' }}>
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                          <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(6, 182, 212, 0.12)', justifyContent: 'center', alignItems: 'center' }}>
+                            <Feather name="zap" size={18} color="#06b6d4" />
                           </View>
-                          <Text style={[styles.subplanPrice, sub.is_mapped && { color: '#10b981' }]}>
-                            ₹{sub.mapped_price !== null && sub.mapped_price !== undefined ? sub.mapped_price : (sub.base_price || '0.00')}
-                          </Text>
-                          {sub.is_mapped ? (
-                            <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 4, paddingVertical: 1, borderRadius: 3 }}>
-                              <Text style={{ fontSize: 8, fontWeight: '700', color: '#10b981' }}>MAPPED</Text>
-                            </View>
-                          ) : null}
+                          <View>
+                            <Text style={{ fontSize: 16, fontWeight: '700', color: '#000000' }}>{plan.plan_name}</Text>
+                            <Text style={{ fontSize: 12, color: COLORS.textMuted }}>Data: {plan.data || 'Unlimited'} | ID: #{plan.plan_id || plan.id}</Text>
+                          </View>
                         </View>
-                      ))}
+
+                        {/* TOGGLE ALL SUBPLANS IN THIS PACKAGE */}
+                        {packageSubIds.length > 0 && (
+                          <TouchableOpacity
+                            onPress={() => toggleAllSubPlansInPackage(plan)}
+                            style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: isAllPackageSelected ? 'rgba(16, 185, 129, 0.12)' : '#f1f5f9', borderWidth: 1, borderColor: isAllPackageSelected ? '#10b981' : 'rgba(0,0,0,0.08)' }}
+                          >
+                            <Feather name={isAllPackageSelected ? 'check-square' : 'square'} size={13} color={isAllPackageSelected ? '#10b981' : '#64748b'} />
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: isAllPackageSelected ? '#10b981' : '#64748b' }}>
+                              {isAllPackageSelected ? 'All Selected' : 'Select Package'}
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+
+                      {plan.subplans && plan.subplans.length > 0 && (
+                        <View style={{ gap: 10 }}>
+                          {plan.subplans.map((sub) => {
+                            const subId = sub.sub_plan_id || sub.id;
+                            const isSelected = selectedSubPlanIds.includes(subId);
+                            return (
+                              <TouchableOpacity
+                                key={subId}
+                                onPress={() => toggleSubPlanSelection(subId)}
+                                style={{
+                                  flexDirection: 'row',
+                                  justifyContent: 'space-between',
+                                  alignItems: 'center',
+                                  padding: 12,
+                                  borderRadius: 10,
+                                  backgroundColor: isSelected ? 'rgba(16, 185, 129, 0.08)' : '#f8fafc',
+                                  borderWidth: 1,
+                                  borderColor: isSelected ? '#10b981' : 'rgba(0,0,0,0.06)',
+                                }}
+                              >
+                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                                  <Feather
+                                    name={isSelected ? 'check-square' : 'square'}
+                                    size={16}
+                                    color={isSelected ? '#10b981' : '#94a3b8'}
+                                  />
+                                  <View>
+                                    <Text style={{ fontSize: 13, fontWeight: isSelected ? '700' : '600', color: '#000000' }}>{sub.sub_plan_name}</Text>
+                                    {sub.plan_validity ? (
+                                      <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>Validity: {sub.plan_validity} Days</Text>
+                                    ) : null}
+                                  </View>
+                                </View>
+
+                                <View style={{ alignItems: 'flex-end', gap: 4 }}>
+                                  <Text style={{ fontSize: 14, fontWeight: '700', color: isSelected ? '#10b981' : '#000000' }}>
+                                    ₹{sub.mapped_price !== null && sub.mapped_price !== undefined ? sub.mapped_price : (sub.base_price || '0.00')}
+                                  </Text>
+
+                                  {isSelected ? (
+                                    <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                                      <Text style={{ fontSize: 9, fontWeight: '700', color: '#10b981' }}>ASSIGNED</Text>
+                                    </View>
+                                  ) : (
+                                    <Text style={{ fontSize: 10, color: '#94a3b8' }}>Unassigned</Text>
+                                  )}
+                                </View>
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      )}
                     </View>
-                  )}
-                </View>
-              ))
+                  );
+                })}
+              </View>
             )}
           </View>
         </ScrollView>
