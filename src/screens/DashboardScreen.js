@@ -11,7 +11,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
 
   const currentRole = user?.role ? user.role.toLowerCase() : 'superadmin';
   const isSuperAdmin = currentRole === 'superadmin';
-  const currentPartnerId = user?.partner_id || 1112;
+  const currentPartnerId = user?.partner_id;
 
   const [telemetry, setTelemetry] = useState(null);
   const [loading, setLoading] = useState(true);

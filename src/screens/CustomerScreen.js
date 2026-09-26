@@ -168,7 +168,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     setSyncingBulkRadius(true);
     try {
       if (user?.token) setApiConfig(undefined, user.token);
-      const res = await OneBssApi.syncInternetCustomersBulk(user?.partner_id || 1116);
+      const res = await OneBssApi.syncInternetCustomersBulk(user?.partner_id);
       const data = res.data || {};
 
       if (res.status === 403 || data.success === false) {
@@ -190,7 +190,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     setSyncingIptvStb(true);
     try {
       if (user?.token) setApiConfig(undefined, user.token);
-      const res = await OneBssApi.syncIptvCustomers('9125253535');
+      const res = await OneBssApi.syncIptvCustomers(user?.mobile || user?.partner_mobile || user?.username || '');
       const data = res.data || {};
 
       if (res.status === 403 || data.success === false) {
@@ -242,9 +242,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
   const handleRechargeAccount = async (cust) => {
     if (!cust) return;
-    const internetId = cust.internet_id || cust.cust_id || 113;
-    const packageId = cust.package_id || 6;
-    const subPlanId = cust.subplan_id || 12;
+    const internetId = cust.internet_id || cust.cust_id;
+    const packageId = cust.package_id || cust.plan_id;
+    const subPlanId = cust.subplan_id || cust.sub_plan_id;
 
     setRechargingAccount(true);
     try {
@@ -497,7 +497,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     return (
       <AddCustomerScreen
         user={user}
-        operatorId={user?.partner_id || user?.operator_id || 1114}
+        operatorId={user?.partner_id || user?.operator_id}
         onCancel={() => setShowAddCustomer(false)}
         onSuccess={() => {
           setShowAddCustomer(false);

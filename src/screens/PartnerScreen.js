@@ -198,7 +198,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       partner_email: partner.partner_email || '',
       wallet_balance: partner.wallet_balance !== undefined ? String(partner.wallet_balance) : '0',
       status: partner.status || 'enabled',
-      partner_region: partner.partner_region || 'Vijayawada',
+      partner_region: partner.partner_region || '',
     });
   };
 

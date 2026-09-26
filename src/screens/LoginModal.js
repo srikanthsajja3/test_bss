@@ -53,12 +53,12 @@ export const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
 
       const serverUser = data.user || {};
       const role = (decoded?.role || serverUser.role || (u === 'oper1' || u.includes('oper') ? 'operator' : 'superadmin')).toLowerCase();
-      const partnerId = decoded?.partner_id || serverUser.partner_id || 1112;
+      const partnerId = decoded?.partner_id || serverUser.partner_id || null;
 
       onLoginSuccess({
         username: u,
         role: role,
-        partner_name: decoded?.partner_name || serverUser.partner_name || (role === 'operator' ? 'Airtel Broadband Ltd' : 'Global Super Admin'),
+        partner_name: decoded?.partner_name || serverUser.partner_name || (role === 'operator' ? 'Operator' : 'Super Admin'),
         partner_id: partnerId,
         token: token,
       });

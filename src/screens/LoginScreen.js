@@ -69,8 +69,8 @@ export const LoginScreen = ({ onLoginSuccess }) => {
 
       const serverUser = data.user || {};
       const role = (decoded?.role || serverUser.role || (u === 'oper1' || u.includes('oper') ? 'operator' : 'superadmin')).toLowerCase();
-      const partnerId = decoded?.partner_id || serverUser.partner_id || 1112;
-      const partnerName = decoded?.partner_name || serverUser.partner_name || (role === 'operator' ? 'Airtel Broadband Ltd' : 'Global Super Admin');
+      const partnerId = decoded?.partner_id || serverUser.partner_id || null;
+      const partnerName = decoded?.partner_name || serverUser.partner_name || (role === 'operator' ? 'Operator' : 'Super Admin');
 
       toast.success(`Welcome back, ${partnerName}!`);
 
