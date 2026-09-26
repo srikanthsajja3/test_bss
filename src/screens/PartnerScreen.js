@@ -191,6 +191,45 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     fetchPartners();
   }, [search, selectedRole]);
 
+  useEffect(() => {
+    if (partners && partners.length > 0 && typeof window !== 'undefined') {
+      const hash = window.location.hash;
+      const getPartnerFromHash = (key) => {
+        const match = hash.match(new RegExp(`${key}=([^&]+)`));
+        if (match && match[1]) {
+          const targetId = match[1];
+          return partners.find((p) => String(p.partner_id || p.id) === String(targetId));
+        }
+        return null;
+      };
+
+      const detailPartner = getPartnerFromHash('partner_id');
+      if (detailPartner && (!selectedPartner || String(selectedPartner.partner_id) !== String(detailPartner.partner_id))) {
+        setSelectedPartner(detailPartner);
+      }
+
+      const editP = getPartnerFromHash('edit');
+      if (editP && (!editingPartner || String(editingPartner.partner_id) !== String(editP.partner_id))) {
+        handleOpenEdit(editP);
+      }
+
+      const walletP = getPartnerFromHash('wallet');
+      if (walletP && (!walletPartner || String(walletPartner.partner_id) !== String(walletP.partner_id))) {
+        handleOpenWallet(walletP);
+      }
+
+      const inetP = getPartnerFromHash('internet');
+      if (inetP && (!internetPlansPartner || String(internetPlansPartner.partner_id) !== String(inetP.partner_id))) {
+        handleOpenInternetPlans(inetP);
+      }
+
+      const iptvP = getPartnerFromHash('iptv');
+      if (iptvP && (!iptvPlansPartner || String(iptvPlansPartner.partner_id) !== String(iptvP.partner_id))) {
+        handleOpenIptvPlans(iptvP);
+      }
+    }
+  }, [partners]);
+
   const filteredPartners = partners.filter((p) => {
     const query = search.toLowerCase().trim();
     const matchesSearch =
@@ -233,7 +272,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
 
   // 1. Edit Partner Handlers
   const handleOpenEdit = (partner) => {
+    if (!partner) return;
     setEditingPartner(partner);
+    if (typeof window !== 'undefined') {
+      const pId = partner.partner_id || partner.id;
+      window.location.hash = `partners?edit=${pId}`;
+    }
     setEditForm({
       partner_name: partner.partner_name || '',
       company_name: partner.company_name || '',
@@ -274,7 +318,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
 
   // 2. Wallet Handlers
   const handleOpenWallet = async (partner) => {
+    if (!partner) return;
     setWalletPartner(partner);
+    if (typeof window !== 'undefined') {
+      const pId = partner.partner_id || partner.id;
+      window.location.hash = `partners?wallet=${pId}`;
+    }
     setTopupAmount('');
     setWalletRemark('');
     setPaymentMode('Online Transfer');
@@ -410,6 +459,10 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   const handleOpenInternetPlans = async (partner) => {
     if (!partner) return;
     setInternetPlansPartner(partner);
+    if (typeof window !== 'undefined') {
+      const pId = partner.partner_id || partner.id;
+      window.location.hash = `partners?internet=${pId}`;
+    }
     setSearchInetPlan('');
     setSelectedSubPlanIds([]);
     setCustomPrices({});
@@ -550,6 +603,10 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   const handleOpenIptvPlans = async (partner) => {
     if (!partner) return;
     setIptvPlansPartner(partner);
+    if (typeof window !== 'undefined') {
+      const pId = partner.partner_id || partner.id;
+      window.location.hash = `partners?iptv=${pId}`;
+    }
     setSearchIptvPlan('');
     setIptvTypeFilter('');
     setLoadingIptvPlans(true);

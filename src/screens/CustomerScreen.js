@@ -159,6 +159,37 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   // Dedicated Full-Screen Subscriber Details State (no popup!)
   const [activeSubProfile, setActiveSubProfile] = useState(null);
 
+  // Restore sub profile state from URL hash on page reload once datasets load
+  useEffect(() => {
+    const dataset = isIptvMode ? iptvDataset : broadbandDataset;
+    if (dataset && dataset.length > 0 && typeof window !== 'undefined') {
+      const hash = window.location.hash;
+      const match = hash.match(/sub_id=([^&]+)/);
+      if (match && match[1]) {
+        const targetId = match[1];
+        const found = dataset.find((s) => String(s.cust_id || s.id) === String(targetId) || String(s.username) === String(targetId));
+        if (found && (!activeSubProfile || String(activeSubProfile.cust_id || activeSubProfile.id) !== String(targetId))) {
+          setActiveSubProfile(found);
+        }
+      }
+    }
+  }, [broadbandDataset, iptvDataset, isIptvMode]);
+
+  useEffect(() => {
+    const handleSubHashChange = () => {
+      if (typeof window !== 'undefined') {
+        const hash = window.location.hash;
+        if (!hash.includes('sub_id=')) {
+          setActiveSubProfile(null);
+        }
+      }
+    };
+    if (typeof window !== 'undefined') {
+      window.addEventListener('hashchange', handleSubHashChange);
+      return () => window.removeEventListener('hashchange', handleSubHashChange);
+    }
+  }, []);
+
   // Sync APIs State
   const [syncingBulkRadius, setSyncingBulkRadius] = useState(false);
   const [syncingIptvStb, setSyncingIptvStb] = useState(false);
@@ -387,6 +418,11 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   // Open Full-Screen Subscriber Control View (No Popup!) & Auto-Close Sidebar
   const handleOpenSubscriberScreen = (cust) => {
     setActiveSubProfile(cust);
+    if (typeof window !== 'undefined' && cust) {
+      const modeTab = isIptvMode ? 'iptv_customers' : 'customers';
+      const cId = cust.cust_id || cust.id;
+      window.location.hash = `${modeTab}?sub_id=${cId}`;
+    }
     if (onAutoCloseSidebar) {
       onAutoCloseSidebar();
     }
@@ -396,6 +432,14 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       if (cust.internet_id) {
         handleAccountDetailSync(cust.internet_id, true);
       }
+    }
+  };
+
+  const handleCloseSubscriberScreen = () => {
+    setActiveSubProfile(null);
+    if (typeof window !== 'undefined') {
+      const modeTab = isIptvMode ? 'iptv_customers' : 'customers';
+      window.location.hash = modeTab;
     }
   };
 
@@ -530,7 +574,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         ) : null}
 
         {/* BACK TO SUBSCRIBERS LIST BUTTON */}
-        <TouchableOpacity style={[styles.backBtn, { marginBottom: 16 }]} onPress={() => setActiveSubProfile(null)}>
+        <TouchableOpacity style={[styles.backBtn, { marginBottom: 16 }]} onPress={handleCloseSubscriberScreen}>
           <Feather name="arrow-left" size={16} color={COLORS.textMain} />
           <Text style={styles.backBtnText}>Back to Subscribers List</Text>
         </TouchableOpacity>
@@ -565,7 +609,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: isOnline ? 'rgba(16, 185, 129, 0.1)' : 'rgba(100, 116, 139, 0.1)' }}>
               <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: isOnline ? '#10b981' : '#64748b' }} />
-              <Text style={{ fontSize: 12, fontWeight: '700', color: isOnline ? '#10b981' : '#64748b' }}>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: isOnline ? '#10b981' : '#ef4444' }}>
                 {isOnline ? 'ONLINE' : 'OFFLINE'}
               </Text>
             </View>
