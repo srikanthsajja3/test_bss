@@ -58,6 +58,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   const [selectedIptvPlanIds, setSelectedIptvPlanIds] = useState([]);
   const [customIptvPrices, setCustomIptvPrices] = useState({});
   const [savingIptvMapping, setSavingIptvMapping] = useState(false);
+  const [isAssignIptvModalOpen, setIsAssignIptvModalOpen] = useState(false);
 
   const [deleteConfirmPartner, setDeleteConfirmPartner] = useState(null);
   const [resetPartnerModal, setResetPartnerModal] = useState(null);
@@ -630,6 +631,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     setIptvTypeFilter('');
     setSelectedIptvPlanIds([]);
     setCustomIptvPrices({});
+    setIsAssignIptvModalOpen(false);
     setLoadingIptvPlans(true);
 
     try {
@@ -684,6 +686,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
 
   const handleCloseIptvPlans = () => {
     setIptvPlansPartner(null);
+    setIsAssignIptvModalOpen(false);
     if (typeof window !== 'undefined') {
       window.location.hash = selectedPartner ? `partners?partner_id=${selectedPartner.partner_id || selectedPartner.id}` : 'partners';
     }
@@ -708,6 +711,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       const data = res.data || {};
       if (data.success !== false) {
         toast.success(`Successfully assigned ${selectedIptvPlanIds.length} IPTV packs/channels to ${iptvPlansPartner.partner_name} (#${iptvPlansPartner.partner_id})!`);
+        setIsAssignIptvModalOpen(false);
         const refreshed = await OneBssApi.getIptvPlans(iptvPlansPartner.partner_id);
         const arr = Array.isArray(refreshed.data) ? refreshed.data : (refreshed.data?.data || []);
         setIptvPlans(arr);
@@ -718,9 +722,154 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       }
     } catch (e) {
       toast.success(`IPTV plans assigned successfully to Partner #${iptvPlansPartner.partner_id}!`);
+      setIsAssignIptvModalOpen(false);
     } finally {
       setSavingIptvMapping(false);
     }
+  };
+
+  const renderAssignIptvModal = () => {
+    if (!isAssignIptvModalOpen || !iptvPlansPartner) return null;
+
+    const selectedPlansList = iptvPlans.filter((plan) => {
+      const pId = plan.sub_plan_id || plan.plan_id || plan.id;
+      return selectedIptvPlanIds.includes(pId);
+    });
+
+    const dpoSelectedList = selectedPlansList.filter((plan) => {
+      const planType = (plan.type || '').toLowerCase().trim();
+      return planType === 'dpo' || planType === 'package' || planType === 'combo';
+    });
+
+    const displayPlansList = dpoSelectedList.length > 0 ? dpoSelectedList : selectedPlansList;
+
+    const totalPriceSum = displayPlansList.reduce((acc, plan) => {
+      const pId = plan.sub_plan_id || plan.plan_id || plan.id;
+      const customVal = customIptvPrices[pId];
+      const val = customVal !== undefined && customVal !== '' ? Number(customVal) : Number(plan.mapped_price !== undefined ? plan.mapped_price : (plan.base_price || 0));
+      return acc + (isNaN(val) ? 0 : val);
+    }, 0);
+
+    return (
+      <Modal
+        visible={isAssignIptvModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setIsAssignIptvModalOpen(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.65)', justifyContent: 'center', alignItems: 'center', padding: 16 }}>
+          <View style={{ width: '100%', maxWidth: 680, maxHeight: '85%', backgroundColor: '#ffffff', borderRadius: 16, overflow: 'hidden', borderWidth: 1, borderColor: '#e2e8f0' }}>
+            <View style={{ backgroundColor: '#8b5cf6', paddingHorizontal: 20, paddingVertical: 16, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{ width: 36, height: 36, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' }}>
+                  <Feather name="tv" size={18} color="#ffffff" />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#ffffff' }}>Confirm IPTV Plan Assignment</Text>
+                  <Text style={{ fontSize: 12, color: 'rgba(255,255,255,0.85)' }}>
+                    Partner: {iptvPlansPartner.partner_name} (#{iptvPlansPartner.partner_id})
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setIsAssignIptvModalOpen(false)}>
+                <Feather name="x" size={20} color="#ffffff" />
+              </TouchableOpacity>
+            </View>
+
+            <View style={{ padding: 20, flex: 1 }}>
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#1e293b' }}>
+                  {dpoSelectedList.length > 0 ? `Selected DPOs (${displayPlansList.length})` : `Selected IPTV Plans (${displayPlansList.length})`}
+                </Text>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: '#8b5cf6' }}>
+                  Total Value: ₹{totalPriceSum.toLocaleString('en-IN')}
+                </Text>
+              </View>
+
+              <ScrollView style={{ flex: 1, borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 8, backgroundColor: '#f8fafc' }} contentContainerStyle={{ padding: 10 }}>
+                {displayPlansList.length === 0 ? (
+                  <Text style={{ fontSize: 13, color: '#64748b', textAlign: 'center', paddingVertical: 20 }}>No items selected.</Text>
+                ) : (
+                  displayPlansList.map((plan, index) => {
+                    const pId = plan.sub_plan_id || plan.plan_id || plan.id;
+                    const customVal = customIptvPrices[pId];
+                    const configuredPrice = customVal !== undefined && customVal !== '' ? Number(customVal) : (plan.mapped_price !== undefined ? plan.mapped_price : (plan.base_price || 0));
+                    const isPkg = (plan.type || '').toLowerCase() === 'package' || (plan.type || '').toLowerCase() === 'dpo';
+
+                    return (
+                      <View
+                        key={pId || index}
+                        style={{
+                          flexDirection: 'row',
+                          justify: 'space-between',
+                          alignItems: 'center',
+                          paddingVertical: 10,
+                          paddingHorizontal: 12,
+                          backgroundColor: '#ffffff',
+                          borderRadius: 8,
+                          borderWidth: 1,
+                          borderColor: '#cbd5e1',
+                          marginBottom: 8,
+                        }}
+                      >
+                        <View style={{ flex: 1, paddingRight: 10 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: '#0f172a' }}>{plan.plan_name}</Text>
+                            <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: isPkg ? 'rgba(139, 92, 246, 0.12)' : 'rgba(245, 158, 11, 0.12)' }}>
+                              <Text style={{ fontSize: 10, fontWeight: '700', color: isPkg ? '#8b5cf6' : '#d97706' }}>{plan.type || 'DPO'}</Text>
+                            </View>
+                          </View>
+                          <Text style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                            Validity: {plan.plan_validity || 30} Days | Base Price: ₹{plan.base_price !== undefined ? plan.base_price : '0'}
+                          </Text>
+                        </View>
+
+                        <View style={{ alignItems: 'flex-end' }}>
+                          <Text style={{ fontSize: 11, color: '#64748b' }}>Assigned Price</Text>
+                          <Text style={{ fontSize: 14, fontWeight: '700', color: '#8b5cf6' }}>₹{Number(configuredPrice).toLocaleString('en-IN')}</Text>
+                        </View>
+                      </View>
+                    );
+                  })
+                )}
+              </ScrollView>
+            </View>
+
+            <View style={{ paddingHorizontal: 20, paddingVertical: 14, backgroundColor: '#f1f5f9', borderTopWidth: 1, borderTopColor: '#e2e8f0', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+              <TouchableOpacity
+                style={{ paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1' }}
+                onPress={() => setIsAssignIptvModalOpen(false)}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#475569' }}>Back to Selection</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{
+                  paddingVertical: 10,
+                  paddingHorizontal: 20,
+                  borderRadius: 8,
+                  backgroundColor: '#8b5cf6',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+                onPress={handleSaveIptvPlanMapping}
+                disabled={savingIptvMapping}
+              >
+                {savingIptvMapping ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <>
+                    <Feather name="check" size={16} color="#ffffff" />
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>Confirm & Assign to Partner</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
   };
 
   // Partner Reset Password & Impersonate Handlers
@@ -1515,39 +1664,30 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   ))}
                 </View>
 
-                <TouchableOpacity style={[styles.btnPrimary, { backgroundColor: '#8b5cf6' }]} onPress={handleSyncIptvPlansAction}>
-                  <Feather name="refresh-cw" size={13} color="#fff" />
-                  <Text style={styles.btnPrimaryText}>Sync IPTV Gateway</Text>
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: '#8b5cf6',
+                    paddingHorizontal: 16,
+                    paddingVertical: 10,
+                    borderRadius: 8,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                  onPress={() => {
+                    if (selectedIptvPlanIds.length === 0) {
+                      toast.warn('Please select at least one channel or pack to assign.');
+                      return;
+                    }
+                    setIsAssignIptvModalOpen(true);
+                  }}
+                >
+                  <Feather name="check-circle" size={16} color="#ffffff" />
+                  <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: '700' }}>
+                    Assign IPTV Plans ({selectedIptvPlanIds.length})
+                  </Text>
                 </TouchableOpacity>
               </View>
-            </View>
-
-            {/* Action Bar for Selection & Saving Mapped Plans */}
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 16, backgroundColor: '#ffffff', padding: 14, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                <TouchableOpacity style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.3)' }} onPress={handleSelectAllIptvPlans}>
-                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#8b5cf6' }}>Select All</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(0,0,0,0.05)' }} onPress={handleDeselectAllIptvPlans}>
-                  <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMuted }}>Deselect All</Text>
-                </TouchableOpacity>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textMain }}>
-                  Selected: <Text style={{ color: '#8b5cf6', fontWeight: '700' }}>{mappedCount}</Text> / {filteredIptvPlans.length}
-                </Text>
-              </View>
-
-              <TouchableOpacity
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#8b5cf6', paddingHorizontal: 16, paddingVertical: 9, borderRadius: 8, opacity: savingIptvMapping ? 0.7 : 1 }}
-                onPress={handleSaveIptvPlanMapping}
-                disabled={savingIptvMapping}
-              >
-                {savingIptvMapping ? (
-                  <ActivityIndicator size="small" color="#ffffff" />
-                ) : (
-                  <Feather name="check-circle" size={15} color="#ffffff" />
-                )}
-                <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>Save IPTV Mapping</Text>
-              </TouchableOpacity>
             </View>
 
             {loadingIptvPlans ? (
@@ -1643,6 +1783,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
             )}
           </View>
         </ScrollView>
+        {renderAssignIptvModal()}
       </View>
     );
   }
