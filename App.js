@@ -111,6 +111,7 @@ export default function App() {
   const setActiveTab = (tab, filter = 'all') => {
     setActiveTabState(tab);
     setCustomerInitialFilter(filter);
+    setPartnerCreateRole(null);
     try {
       if (typeof window !== 'undefined') {
         const hashVal = filter && filter !== 'all' ? `${tab}?filter=${filter}` : tab;
@@ -205,7 +206,7 @@ export default function App() {
       case 'dashboard':
         return <DashboardScreen user={user} onNavigateToCustomers={handleNavigateToCustomers} />;
       case 'partners':
-        return <PartnerScreen initialCreateRole={partnerCreateRole} user={user} />;
+        return <PartnerScreen initialCreateRole={partnerCreateRole} onOpenCreate={(r) => setPartnerCreateRole(r)} user={user} />;
       case 'customers':
         return <CustomerScreen user={user} isIptvMode={false} initialFilter={customerInitialFilter} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
       case 'iptv_customers':

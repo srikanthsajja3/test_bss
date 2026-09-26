@@ -111,6 +111,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     if (initialCreateRole) {
       setCreateRole(initialCreateRole);
       setIsCreateOpen(true);
+    } else {
+      setIsCreateOpen(false);
     }
   }, [initialCreateRole]);
 
@@ -526,9 +528,16 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     return (
       <CreateAccountModal
         visible={true}
-        onClose={() => setIsCreateOpen(false)}
+        onClose={() => {
+          setIsCreateOpen(false);
+          if (onOpenCreate) onOpenCreate(null);
+        }}
         initialRole={createRole}
-        onAccountCreated={handleAccountCreated}
+        onAccountCreated={(p) => {
+          setIsCreateOpen(false);
+          if (onOpenCreate) onOpenCreate(null);
+          handleAccountCreated(p);
+        }}
       />
     );
   }
