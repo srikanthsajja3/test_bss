@@ -839,11 +839,6 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   <Text style={{ fontSize: 13, fontWeight: '600', color: '#64748b' }}>Deselect All</Text>
                 </TouchableOpacity>
 
-                <TouchableOpacity style={[styles.btnPrimary, { backgroundColor: '#06b6d4' }]} onPress={handleSyncInternetPlansAction}>
-                  <Feather name="refresh-cw" size={13} color="#fff" />
-                  <Text style={styles.btnPrimaryText}>Sync Gateway Plans</Text>
-                </TouchableOpacity>
-
                 <TouchableOpacity
                   style={[styles.btnPrimary, { backgroundColor: '#10b981', paddingHorizontal: 16 }]}
                   onPress={handleSaveInternetPlanMapping}
