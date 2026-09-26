@@ -695,6 +695,16 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </View>
 
               <View style={styles.dataRow}>
+                <Text style={styles.dataLabel}>IP Address</Text>
+                <Text style={styles.dataValBold}>{activeSubProfile.ip || '—'}</Text>
+              </View>
+
+              <View style={styles.dataRow}>
+                <Text style={styles.dataLabel}>Installation Address</Text>
+                <Text style={styles.dataVal}>{activeSubProfile.address || '—'}</Text>
+              </View>
+
+              <View style={styles.dataRow}>
                 <Text style={styles.dataLabel}>e-KYC Verification</Text>
                 <Text style={[styles.dataVal, { color: COLORS.accentCyan }]}>{activeSubProfile.kyc || ''}</Text>
               </View>
