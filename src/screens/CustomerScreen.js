@@ -90,6 +90,7 @@ const mapCustomersListToBroadbandRow = (item, index, accIndex = 0) => {
   const packageName = resolveApiField(item.package_name, intAcc.package_name, intAcc.plan_name || item.plan) || (intAcc.package_id ? `Package #${intAcc.package_id}` : '-');
   const subplanName = resolveApiField(item.subplan_name, intAcc.subplan_name) || (intAcc.subplan_id ? `Sub plan #${intAcc.subplan_id}` : '-');
   const expiration = resolveApiField(item.expiration, intAcc.expiration);
+  const partnerName = resolveApiField(item.partner_name, intAcc.partner_name, item.partner, item.partner_title, item.partner_id);
 
   return {
     id: String(item.cust_id || item.id || index + 1),
@@ -99,6 +100,7 @@ const mapCustomersListToBroadbandRow = (item, index, accIndex = 0) => {
     full_name: fullName,
     mobile: mobile,
     username: username,
+    partner_name: partnerName,
     status_text: statusText,
     online: onlineStatus,
     package_name: packageName,
@@ -150,6 +152,7 @@ const mapCustomersListToIptvRow = (item, index, accIndex = 0) => {
   const packageName = resolveApiField(item.package_name, iptvAcc.package_name, intAcc.package_name, iptvAcc.plan_id) || 'Pioneer Premium Ultra HD';
   const subplanName = resolveApiField(item.subplan_name, iptvAcc.subplan_name, intAcc.subplan_name) || '1 Month';
   const expiration = resolveApiField(item.expiration, iptvAcc.expiration, iptvAcc.expriration, intAcc.expiration);
+  const partnerName = resolveApiField(item.partner_name, iptvAcc.partner_name, intAcc.partner_name, item.partner, item.partner_title, item.partner_id);
   const custNum = item.cust_id || index + 1;
 
   return {
@@ -159,6 +162,7 @@ const mapCustomersListToIptvRow = (item, index, accIndex = 0) => {
     full_name: fullName,
     mobile: mobile,
     username: username,
+    partner_name: partnerName,
     status_text: statusText,
     online: onlineStatus,
     package_name: packageName,
@@ -1509,10 +1513,10 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           {/* Table Header */}
           <View style={styles.tableHeader}>
             <Text style={[styles.th, { flex: 1.4 }]}>Username {viewMode === 'iptv' ? '/ STB' : ''}</Text>
-            <Text style={[styles.th, { flex: 1.1 }]}>Status</Text>
             <Text style={[styles.th, { flex: 1.1 }]}>Connectivity</Text>
             <Text style={[styles.th, { flex: 1.3 }]}>Mobile</Text>
             <Text style={[styles.th, { flex: 1.8 }]}>Full Name</Text>
+            <Text style={[styles.th, { flex: 1.5 }]}>Partner Name</Text>
             <Text style={[styles.th, { flex: 1.8 }]}>Package Name</Text>
             <Text style={[styles.th, { flex: 1.4 }]}>Subplan Name</Text>
             <TouchableOpacity
@@ -1552,34 +1556,11 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   {/* Username / STB */}
                   <View style={{ flex: 1.4 }}>
                     <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                      <Text style={styles.tdClickableUsername}>{cust.username}</Text>
+                      <Text style={[styles.tdClickableUsername, { color: isAccActive ? '#16a34a' : (isAccExpired ? '#dc2626' : COLORS.primary) }]}>
+                        {cust.username}
+                      </Text>
                     </TouchableOpacity>
                     {viewMode === 'iptv' && cust.stb_id ? <Text style={styles.tdSub}>STB: {cust.stb_id}</Text> : null}
-                  </View>
-
-                  {/* Status Badge */}
-                  <View style={{ flex: 1.1 }}>
-                    <View
-                      style={{
-                        paddingHorizontal: 8,
-                        paddingVertical: 3,
-                        borderRadius: 6,
-                        backgroundColor: isAccActive ? '#dcfce7' : (isAccExpired ? '#ffe4e6' : '#fef3c7'),
-                        borderWidth: 1,
-                        borderColor: isAccActive ? '#bbf7d0' : (isAccExpired ? '#fecdd3' : '#fde68a'),
-                        alignSelf: 'flex-start',
-                      }}
-                    >
-                      <Text
-                        style={{
-                          fontSize: 10,
-                          fontWeight: '700',
-                          color: isAccActive ? '#15803d' : (isAccExpired ? '#be123c' : '#b45309'),
-                        }}
-                      >
-                        {(cust.status_text || cust.status || 'Active').toUpperCase()}
-                      </Text>
-                    </View>
                   </View>
 
                   {/* Connectivity Badge */}
@@ -1623,6 +1604,11 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   {/* Full Name */}
                   <View style={{ flex: 1.8 }}>
                     <Text style={styles.tdText}>{cust.full_name || cust.name || '—'}</Text>
+                  </View>
+
+                  {/* Partner Name */}
+                  <View style={{ flex: 1.5 }}>
+                    <Text style={styles.tdText}>{cust.partner_name || '—'}</Text>
                   </View>
 
                   {/* Package Name */}
