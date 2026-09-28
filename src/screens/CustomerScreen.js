@@ -91,6 +91,7 @@ const mapCustomersListToBroadbandRow = (item, index, accIndex = 0) => {
   const subplanName = resolveApiField(item.subplan_name, intAcc.subplan_name) || (intAcc.subplan_id ? `Sub plan #${intAcc.subplan_id}` : '-');
   const expiration = resolveApiField(item.expiration, intAcc.expiration);
   const partnerName = resolveApiField(item.partner_name, intAcc.partner_name, item.partner, item.partner_title, item.partner_id);
+  const passwordVal = item.password !== undefined ? item.password : (intAcc.password !== undefined ? intAcc.password : (item.pass !== undefined ? item.pass : intAcc.pass));
 
   return {
     id: String(item.cust_id || item.id || index + 1),
@@ -100,6 +101,7 @@ const mapCustomersListToBroadbandRow = (item, index, accIndex = 0) => {
     full_name: fullName,
     mobile: mobile,
     username: username,
+    password: passwordVal,
     partner_name: partnerName,
     status_text: statusText,
     online: onlineStatus,
@@ -153,6 +155,7 @@ const mapCustomersListToIptvRow = (item, index, accIndex = 0) => {
   const subplanName = resolveApiField(item.subplan_name, iptvAcc.subplan_name, intAcc.subplan_name) || '1 Month';
   const expiration = resolveApiField(item.expiration, iptvAcc.expiration, iptvAcc.expriration, intAcc.expiration);
   const partnerName = resolveApiField(item.partner_name, iptvAcc.partner_name, intAcc.partner_name, item.partner, item.partner_title, item.partner_id);
+  const passwordVal = item.password !== undefined ? item.password : (iptvAcc.password !== undefined ? iptvAcc.password : (intAcc.password !== undefined ? intAcc.password : (item.pass !== undefined ? item.pass : iptvAcc.pass)));
   const custNum = item.cust_id || index + 1;
 
   return {
@@ -162,6 +165,7 @@ const mapCustomersListToIptvRow = (item, index, accIndex = 0) => {
     full_name: fullName,
     mobile: mobile,
     username: username,
+    password: passwordVal,
     partner_name: partnerName,
     status_text: statusText,
     online: onlineStatus,
@@ -1530,7 +1534,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 }
               }}
             >
-              <Text style={[styles.th, { flex: 0 }]}>Expiration</Text>
+              <Text style={[styles.th, { flex: 0 }]}>Expiration Date</Text>
               <Feather
                 name={sortField === 'expiration' ? (sortDirection === 'asc' ? 'arrow-up' : 'arrow-down') : 'arrow-down'}
                 size={12}
@@ -1549,17 +1553,26 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             paginatedCustomers.map((cust, idx) => {
               const isAccActive = cust.status === 'active' || (cust.status_text || '').toLowerCase() === 'active';
               const isAccExpired = cust.status === 'expired' || (cust.status_text || '').toLowerCase() === 'expired';
+              const isAccNew = cust.status === 'new' || (cust.status_text || '').toLowerCase() === 'new';
               const balInfo = calculateBalanceDays(cust.expiration || cust.expiryDate);
 
               return (
                 <View key={cust.id ? `cust_${cust.id}_${idx}` : idx} style={styles.tr}>
-                  {/* Username / STB */}
+                  {/* Username / Password / STB */}
                   <View style={{ flex: 1.4 }}>
                     <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                      <Text style={[styles.tdClickableUsername, { color: isAccActive ? '#16a34a' : (isAccExpired ? '#dc2626' : COLORS.primary) }]}>
+                      <Text
+                        style={[
+                          styles.tdClickableUsername,
+                          { color: isAccNew ? '#d97706' : (isAccActive ? '#16a34a' : (isAccExpired ? '#dc2626' : COLORS.primary)) }
+                        ]}
+                      >
                         {cust.username}
                       </Text>
                     </TouchableOpacity>
+                    <Text style={[styles.tdSub, { fontSize: 10, color: '#64748b' }]}>
+                      Pass: {cust.password !== undefined && cust.password !== null && cust.password !== '' ? String(cust.password) : 'null'}
+                    </Text>
                     {viewMode === 'iptv' && cust.stb_id ? <Text style={styles.tdSub}>STB: {cust.stb_id}</Text> : null}
                   </View>
 
@@ -1584,8 +1597,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                     </View>
                   </View>
 
-                  {/* Mobile (Dialer Link) */}
-                  <View style={{ flex: 1.3 }}>
+                  {/* Mobile (Dialer Link + Copy Button) */}
+                  <View style={{ flex: 1.3, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <TouchableOpacity
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
                       onPress={() => {
@@ -1599,6 +1612,22 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       <Feather name="phone-call" size={12} color="#06b6d4" />
                       <Text style={[styles.tdText, { color: '#06b6d4', fontWeight: '600' }]}>{cust.mobile || '—'}</Text>
                     </TouchableOpacity>
+
+                    {cust.mobile ? (
+                      <TouchableOpacity
+                        onPress={() => {
+                          const num = String(cust.mobile).replace(/[^\d+]/g, '');
+                          if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                            navigator.clipboard.writeText(num);
+                            toast.success('Mobile number copied to clipboard!');
+                          }
+                        }}
+                        style={{ padding: 2 }}
+                        title="Copy Mobile Number"
+                      >
+                        <Feather name="copy" size={12} color={COLORS.primary || '#3b82f6'} />
+                      </TouchableOpacity>
+                    ) : null}
                   </View>
 
                   {/* Full Name */}
