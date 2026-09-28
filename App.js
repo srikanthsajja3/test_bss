@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { StyleSheet, View, SafeAreaView, StatusBar, useWindowDimensions, Text, TouchableOpacity } from 'react-native';
+import { StyleSheet, View, SafeAreaView, StatusBar, useWindowDimensions, Text, TouchableOpacity, Platform } from 'react-native';
 import { COLORS } from './src/constants/theme';
 import { setApiConfig, onUnauthorized, isJwtExpired } from './src/services/oneBssApi';
 import { Sidebar } from './src/components/Sidebar';
@@ -10,6 +10,20 @@ import { CustomerScreen } from './src/screens/CustomerScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { LoginModal } from './src/screens/LoginModal';
 import { ToastContainer, toast } from 'react-toastify';
+import { createPortal } from 'react-dom';
+
+// react-native-web renders <Modal> in a portal on <body> (z-index 9999), while every RN View
+// is `position:relative; z-index:0` — a stacking context the toasts can't escape from inside
+// the app tree. So toasts were drawn BEHIND open modals. Render the toast container in its
+// own portal on <body>, above everything.
+const TOAST_CONTAINER_STYLE = { zIndex: 2147483647 };
+const ToastHost = () => {
+  const toasts = <ToastContainer position="top-right" autoClose={3500} theme="colored" style={TOAST_CONTAINER_STYLE} />;
+  if (Platform.OS === 'web' && typeof document !== 'undefined') {
+    return createPortal(toasts, document.body);
+  }
+  return toasts;
+};
 
 export default function App() {
   const { width } = useWindowDimensions();
@@ -230,7 +244,7 @@ export default function App() {
             setActiveTab('dashboard');
           }}
         />
-        <ToastContainer position="top-right" autoClose={3500} theme="colored" />
+        <ToastHost />
       </SafeAreaView>
     );
   }
@@ -341,7 +355,7 @@ export default function App() {
         onLoginSuccess={(userData) => handleSetUser(userData)}
       />
 
-      <ToastContainer position="top-right" autoClose={3500} theme="colored" />
+      <ToastHost />
     </SafeAreaView>
   );
 }

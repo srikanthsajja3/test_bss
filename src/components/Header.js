@@ -107,12 +107,12 @@ export const Header = ({
           </TouchableOpacity>
         ) : null}
 
-        {!isOperator && handleAddClick ? (
+        {/* {!isOperator && handleAddClick ? (
           <TouchableOpacity style={styles.btnOperator} onPress={handleAddClick}>
             <Feather name="plus-circle" size={15} color="#fff" />
             <Text style={styles.btnOperatorText}>Add Operator</Text>
           </TouchableOpacity>
-        ) : null}
+        ) : null} */}
       </View>
     </View>
   );

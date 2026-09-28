@@ -5,6 +5,12 @@ import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi, setApiConfig } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
 import { AddCustomerScreen } from './AddCustomerScreen';
+import { IptvAccountDetails } from '../components/IptvAccountDetails';
+import { InternetRechargeModal } from '../components/internet/InternetRechargeModal';
+import { PasswordModal, MacBindingsModal, SessionHistoryModal, VerifyCustomerModal, DocumentsModal } from '../components/internet/AccountActionModals';
+import { CustomerPhoto, isSuperAdmin, isAccountVerified } from '../components/internet/shared';
+import { IptvRechargeModal } from '../components/iptv/IptvRechargeModal';
+import { CustomerAccountsOverview, defaultRechargeType, formatApiDate, normaliseInternetAccount, normaliseIptvAccount } from '../components/CustomerAccountsOverview';
 
 const formatApiValue = (val) => {
   if (val === null || val === undefined || val === 'null') return '';
@@ -22,8 +28,9 @@ const resolveApiField = (...args) => {
 };
 
 // Map API customers_list entities directly to Broadband Table Rows
-const mapCustomersListToBroadbandRow = (item, index) => {
-  const intAcc = item.internet_accounts?.[0] || {};
+// accIndex picks which internet account to map (defaults to the first one for the list table)
+const mapCustomersListToBroadbandRow = (item, index, accIndex = 0) => {
+  const intAcc = item.internet_accounts?.[accIndex] || {};
   const statusText = resolveApiField(item.status_text, intAcc.status_text, item.status);
   const onlineStatus = resolveApiField(item.online, intAcc.online);
   const isOnline = onlineStatus === 'ONLINE';
@@ -31,8 +38,8 @@ const mapCustomersListToBroadbandRow = (item, index) => {
   const mobile = resolveApiField(item.mobile, intAcc.mobile);
   const fullName = resolveApiField(item.full_name, item.name);
   const username = resolveApiField(item.username, intAcc.username);
-  const packageName = resolveApiField(item.package_name, intAcc.package_name, intAcc.plan_name || item.plan) || '-';
-  const subplanName = resolveApiField(item.subplan_name, intAcc.subplan_name) || '-';
+  const packageName = resolveApiField(item.package_name, intAcc.package_name, intAcc.plan_name || item.plan) || (intAcc.package_id ? `Package #${intAcc.package_id}` : '-');
+  const subplanName = resolveApiField(item.subplan_name, intAcc.subplan_name) || (intAcc.subplan_id ? `Sub plan #${intAcc.subplan_id}` : '-');
   const expiration = resolveApiField(item.expiration, intAcc.expiration);
 
   return {
@@ -61,12 +68,28 @@ const mapCustomersListToBroadbandRow = (item, index) => {
     dueDate: resolveApiField(item.due_date, intAcc.due_date),
     expiryDate: expiration,
     address: resolveApiField(item.installation_address, item.billing_address, item.address),
+    billing_address: resolveApiField(item.billing_address, item.address),
+    installation_address: resolveApiField(item.installation_address, item.address),
+    email: resolveApiField(item.email),
+    account_type: 'internet',
+    verified: resolveApiField(intAcc.verified),
+    acc_id: intAcc.acc_id !== undefined ? intAcc.acc_id : null,
+    package_id: intAcc.package_id !== undefined ? intAcc.package_id : null,
+    subplan_id: intAcc.subplan_id !== undefined ? intAcc.subplan_id : null,
+    activation_date: resolveApiField(intAcc.activation_date),
+    last_logoff: resolveApiField(intAcc.last_loff_off),
+    customer_type: resolveApiField(intAcc.customer_type),
+    simultaneous_use: resolveApiField(intAcc.simultanious_use),
+    subscription_type: intAcc.subscription_type,
+    aadhar_verified: !!item.aadhar_verified,
+    aadhar_verified_date: resolveApiField(item.aadhar_verified_date),
+    mobile_verified: !!item.mobile_verified,
   };
 };
 
 // Map API customers_list entities directly to IPTV Table Rows
-const mapCustomersListToIptvRow = (item, index) => {
-  const iptvAcc = item.iptv_accounts?.[0] || {};
+const mapCustomersListToIptvRow = (item, index, accIndex = 0) => {
+  const iptvAcc = item.iptv_accounts?.[accIndex] || {};
   const intAcc = item.internet_accounts?.[0] || {};
   const statusText = resolveApiField(item.status_text, iptvAcc.sts, intAcc.status_text, item.status) || 'ACTIVE';
   const onlineStatus = resolveApiField(item.online, iptvAcc.online, intAcc.online);
@@ -108,8 +131,30 @@ const mapCustomersListToIptvRow = (item, index) => {
     dueDate: resolveApiField(item.due_date, iptvAcc.due_date, intAcc.due_date),
     expiryDate: expiration,
     address: resolveApiField(item.installation_address, item.billing_address, item.address),
+    billing_address: resolveApiField(item.billing_address, item.address),
+    installation_address: resolveApiField(item.installation_address, item.address),
+    email: resolveApiField(item.email),
+    account_type: 'iptv',
+    iptv_id: iptvAcc.id !== undefined ? iptvAcc.id : null,
+    package_id: iptvAcc.plan_id !== undefined ? iptvAcc.plan_id : null,
+    subplan_id: iptvAcc.subplan_id !== undefined ? iptvAcc.subplan_id : null,
+    activation_date: resolveApiField(iptvAcc.dad),
+    last_logoff: '',
+    customer_type: '',
+    simultaneous_use: '',
+    subscription_type: undefined,
+    aadhar_verified: !!item.aadhar_verified,
+    aadhar_verified_date: resolveApiField(item.aadhar_verified_date),
+    mobile_verified: !!item.mobile_verified,
   };
 };
+
+// Top-level fields on a customers_list row that really belong to one account
+const ACCOUNT_LEVEL_KEYS = [
+  'username', 'status_text', 'status', 'online', 'package_name', 'subplan_name', 'plan', 'expiration',
+  'ip', 'stb_id', 'stb_mac', 'stb_model', 'cas_status', 'total_bill_amount', 'paid_amount', 'balance', 'due_date',
+  'internet_id', 'package_id', 'subplan_id', 'acc_id',
+];
 
 export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all', onSwitchMode, onAutoCloseSidebar }) => {
   const { width } = useWindowDimensions();
@@ -128,6 +173,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   // Live datasets loaded from API
   const [iptvDataset, setIptvDataset] = useState([]);
   const [broadbandDataset, setBroadbandDataset] = useState([]);
+  const [rawCustomers, setRawCustomers] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
 
   const loadCustomerDataFromApi = async (overrideLimit) => {
@@ -143,6 +189,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       const rawCustomers = custRes.data && Array.isArray(custRes.data) ? custRes.data : (custRes.data?.data || []);
 
       const list = Array.isArray(rawCustomers) ? rawCustomers : [];
+      setRawCustomers(list);
       setBroadbandDataset(list.map(mapCustomersListToBroadbandRow));
       setIptvDataset(list.map(mapCustomersListToIptvRow));
     } catch (e) {
@@ -156,38 +203,235 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     loadCustomerDataFromApi(recordsLimit);
   }, [user, recordsLimit]);
 
-  // Dedicated Full-Screen Subscriber Details State (no popup!)
+  // Navigation inside this screen:
+  //   list  ->  customer accounts overview (cards)  ->  full account detail screen
+  // URL hash mirrors it:  customers?sub_id=<cust_id>[&acc=int_<n>|iptv_<n>]
+  const [activeCustomerId, setActiveCustomerId] = useState(null);
+  const [activeAccountSel, setActiveAccountSel] = useState(null); // { kind: 'internet'|'iptv', index }
   const [activeSubProfile, setActiveSubProfile] = useState(null);
 
-  // Restore sub profile state from URL hash on page reload once datasets load
-  useEffect(() => {
-    const dataset = isIptvMode ? iptvDataset : broadbandDataset;
-    if (dataset && dataset.length > 0 && typeof window !== 'undefined') {
-      const hash = window.location.hash;
-      const match = hash.match(/sub_id=([^&]+)/);
-      if (match && match[1]) {
-        const targetId = match[1];
-        const found = dataset.find((s) => String(s.cust_id || s.id) === String(targetId) || String(s.username) === String(targetId));
-        if (found && (!activeSubProfile || String(activeSubProfile.cust_id || activeSubProfile.id) !== String(targetId))) {
-          setActiveSubProfile(found);
-        }
-      }
+  // customers_list.php does not include internet_accounts / iptv_accounts, so the
+  // full record for the opened customer is fetched from customer_lookup.php.
+  const [customerDetails, setCustomerDetails] = useState({}); // { [cust_id]: full record }
+  const [verifiedOverrides, setVerifiedOverrides] = useState({}); // { [internet_id]: true }
+  const [loadingDetailsFor, setLoadingDetailsFor] = useState(null);
+
+  const extractLookupRecord = (res, custId) => {
+    const body = res?.data || {};
+    const payload = body.data !== undefined ? body.data : body;
+    const list = Array.isArray(payload) ? payload : (payload && typeof payload === 'object' ? [payload] : []);
+    return list.find((c) => String(c?.cust_id) === String(custId)) || null;
+  };
+
+  // Loads the full customer record from customer_lookup.php and caches it. Resolves to the
+  // record (or null). Concurrent calls share one request; a forced call waits for any
+  // in-flight one and then fetches again, so it always returns data newer than its caller.
+  const fetchCustomerDetails = async (custId, force = false) => {
+    if (custId === null || custId === undefined) return null;
+    const key = String(custId);
+    if (!force && customerDetailsRef.current[key]) return customerDetailsRef.current[key];
+    const pending = detailsInFlight.current[key];
+    if (pending) {
+      if (!force) return pending;
+      await pending.catch(() => null);
     }
-  }, [broadbandDataset, iptvDataset, isIptvMode]);
+    const run = (async () => {
+      setLoadingDetailsFor(key);
+      try {
+        if (user?.token) setApiConfig(undefined, user.token);
+        // 1st try by cust_id, then fall back to the customer's mobile
+        let record = extractLookupRecord(await OneBssApi.customerLookup(key), custId);
+        if (!record) {
+          const listItem = rawCustomersRef.current.find((c) => String(c.cust_id) === key);
+          const mobile = String(listItem?.mobile || '').replace(/\D/g, '').slice(-10);
+          if (mobile.length === 10) {
+            record = extractLookupRecord(await OneBssApi.customerLookup(mobile), custId);
+          }
+        }
+        if (record) {
+          customerDetailsRef.current = { ...customerDetailsRef.current, [key]: record };
+          setCustomerDetails((prev) => ({ ...prev, [key]: record }));
+        } else if (rawCustomersRef.current.length > 0) {
+          toast.error(`Could not load accounts for customer #${custId}.`);
+        }
+        return record;
+      } catch (e) {
+        toast.error(`Could not load accounts for customer #${custId}.`);
+        return null;
+      } finally {
+        if (detailsInFlight.current[key] === run) delete detailsInFlight.current[key];
+        setLoadingDetailsFor((cur) => (cur === key ? null : cur));
+      }
+    })();
+    detailsInFlight.current[key] = run;
+    return run;
+  };
+  const detailsInFlight = React.useRef({});
+
+  // ---- RADIUS -> local sync (internet_customer_detail_sync.php) ----
+  // Pulls each internet account's latest state from RADIUS into our DB, then re-reads
+  // customer_lookup so the screen shows it. Runs for ALL of the customer's internet
+  // accounts when the customer is opened (or Refresh is pressed), and for the recharged
+  // account after a successful recharge.
+  const [syncingFor, setSyncingFor] = useState(null);
+  const syncInFlight = React.useRef({});
+  const syncInternetAccounts = async (custId, internetIds) => {
+    if (custId === null || custId === undefined) return;
+    const key = String(custId);
+    const ids = [...new Set((internetIds || []).filter(Boolean).map(String))];
+    if (ids.length === 0) {
+      await fetchCustomerDetails(custId, true);
+      return;
+    }
+    if (syncInFlight.current[key]) await syncInFlight.current[key].catch(() => null);
+    const run = (async () => {
+      setSyncingFor(key);
+      try {
+        if (user?.token) setApiConfig(undefined, user.token);
+        const results = await Promise.allSettled(ids.map((id) => OneBssApi.syncInternetCustomerDetail(id)));
+        const failed = results
+          .map((r, i) => ({ r, id: ids[i] }))
+          .filter(({ r }) => r.status === 'rejected' || !r.value?.ok || r.value?.data?.success === false);
+        if (failed.length) {
+          const msg = failed[0].r.value?.data?.message || 'gateway unreachable';
+          toast.warning(`Could not sync ${failed.length} of ${ids.length} account${ids.length > 1 ? 's' : ''} from RADIUS (${msg}). Showing last saved data.`);
+        }
+        await fetchCustomerDetails(custId, true);
+      } finally {
+        if (syncInFlight.current[key] === run) delete syncInFlight.current[key];
+        setSyncingFor((cur) => (cur === key ? null : cur));
+      }
+    })();
+    syncInFlight.current[key] = run;
+    return run;
+  };
+
+  const syncAllAccountsOf = async (custId) => {
+    const record = await fetchCustomerDetails(custId);
+    const ids = (record?.internet_accounts || []).map((a) => a.internet_id);
+    return syncInternetAccounts(custId, ids);
+  };
+
+  const customerDetailsRef = React.useRef(customerDetails);
+  customerDetailsRef.current = customerDetails;
+  const rawCustomersRef = React.useRef(rawCustomers);
+  rawCustomersRef.current = rawCustomers;
+
+  // List row merged with the full lookup record (lookup wins)
+  const activeCustomer = useMemo(() => {
+    if (activeCustomerId === null) return null;
+    const listItem = rawCustomers.find((c) => String(c.cust_id) === String(activeCustomerId)) || {};
+    const details = customerDetails[String(activeCustomerId)] || {};
+    const merged = { cust_id: activeCustomerId, ...listItem, ...details };
+    // customer_lookup has only package/sub-plan IDs; customers_list has one row per internet
+    // account (same cust_id) with the plan names — copy those names onto the matching account.
+    const rowsForCustomer = rawCustomers.filter((c) => String(c.cust_id) === String(activeCustomerId));
+    if (Array.isArray(merged.internet_accounts)) {
+      merged.internet_accounts = merged.internet_accounts.map((acc) => {
+        const row = rowsForCustomer.find((r) => r.username && String(r.username) === String(acc.username));
+        if (!row) return acc;
+        return {
+          ...acc,
+          package_name: acc.package_name || resolveApiField(row.package_name),
+          subplan_name: acc.subplan_name || resolveApiField(row.subplan_name),
+        };
+      });
+    }
+    // Accounts verified in this session (RADIUS confirmed) stay verified even if the local
+    // cache hasn't caught up yet.
+    if (Array.isArray(merged.internet_accounts)) {
+      merged.internet_accounts = merged.internet_accounts.map((acc) =>
+        verifiedOverrides[String(acc.internet_id)] ? { ...acc, verified: 'Verified' } : acc
+      );
+    }
+    return merged;
+  }, [rawCustomers, customerDetails, activeCustomerId, verifiedOverrides]);
+
+  // Fetch when a customer is opened, and retry once the list has loaded (the mobile
+  // fallback needs the list row, e.g. after a page reload on a deep link).
+  useEffect(() => {
+    if (activeCustomerId !== null) fetchCustomerDetails(activeCustomerId);
+  }, [activeCustomerId, rawCustomers]);
+
+  // On opening a customer: once its accounts are known, sync every internet account from
+  // RADIUS and reload. Runs once per opening (reset when the customer is closed).
+  const autoSyncedFor = React.useRef(null);
+  const activeDetailsLoaded = activeCustomerId !== null && !!customerDetails[String(activeCustomerId)];
+  useEffect(() => {
+    if (activeCustomerId === null) {
+      autoSyncedFor.current = null;
+      return;
+    }
+    if (!activeDetailsLoaded || autoSyncedFor.current === String(activeCustomerId)) return;
+    autoSyncedFor.current = String(activeCustomerId);
+    const ids = (customerDetails[String(activeCustomerId)]?.internet_accounts || []).map((a) => a.internet_id);
+    syncInternetAccounts(activeCustomerId, ids);
+  }, [activeCustomerId, activeDetailsLoaded]);
+
+  // Build the detail-screen row for one specific account of a customer.
+  // customers_list rows carry the FIRST account's username / package / expiry / status at the
+  // top level, and the row mappers prefer top-level values — so those are stripped here to make
+  // the selected account's own values win. For IPTV the internet accounts are dropped as well,
+  // otherwise the internet username / online status would leak into the STB details.
+  const buildAccountProfile = (customer, kind, accIndex) => {
+    if (!customer) return null;
+    const idx = rawCustomers.findIndex((c) => String(c.cust_id) === String(customer.cust_id));
+    const base = { ...customer };
+    ACCOUNT_LEVEL_KEYS.forEach((k) => delete base[k]);
+    if (kind === 'iptv') {
+      base.internet_accounts = [];
+      const row = mapCustomersListToIptvRow(base, idx, accIndex);
+      const acc = customer.iptv_accounts?.[accIndex] || {};
+      const stb = resolveApiField(acc.pioneer_stb_id, acc.stb_box);
+      return { ...row, username: row.username || (stb ? `STB ${stb}` : `IPTV #${acc.id ?? ''}`) };
+    }
+    return mapCustomersListToBroadbandRow(base, idx, accIndex);
+  };
+
+  // Keep the detail screen in sync with the selected account (also refreshes after a recharge)
+  useEffect(() => {
+    if (!activeAccountSel || !activeCustomer) {
+      setActiveSubProfile(null);
+      return;
+    }
+    const accounts = activeAccountSel.kind === 'iptv' ? activeCustomer.iptv_accounts : activeCustomer.internet_accounts;
+    if (!Array.isArray(accounts) || !accounts[activeAccountSel.index]) return; // details still loading
+    setActiveSubProfile(buildAccountProfile(activeCustomer, activeAccountSel.kind, activeAccountSel.index));
+  }, [activeCustomer, activeAccountSel]);
+
+  const parseSubHash = () => {
+    if (typeof window === 'undefined') return {};
+    const hash = window.location.hash;
+    const sub = hash.match(/sub_id=([^&]+)/);
+    const acc = hash.match(/acc=(int|iptv)_(\d+)/);
+    return {
+      subId: sub ? decodeURIComponent(sub[1]) : null,
+      accKind: acc ? (acc[1] === 'iptv' ? 'iptv' : 'internet') : null,
+      accIndex: acc ? Number(acc[2]) : null,
+    };
+  };
+
+  // Apply the current URL hash to screen state (page reload + browser back/forward)
+  const applyHashToState = () => {
+    const { subId, accKind, accIndex } = parseSubHash();
+    if (!subId) {
+      setActiveCustomerId(null);
+      setActiveAccountSel(null);
+      return;
+    }
+    setActiveCustomerId((cur) => (String(cur) === String(subId) ? cur : subId));
+    setActiveAccountSel(accKind ? { kind: accKind, index: accIndex } : null);
+  };
 
   useEffect(() => {
-    const handleSubHashChange = () => {
-      if (typeof window !== 'undefined') {
-        const hash = window.location.hash;
-        if (!hash.includes('sub_id=')) {
-          setActiveSubProfile(null);
-        }
-      }
-    };
-    if (typeof window !== 'undefined') {
-      window.addEventListener('hashchange', handleSubHashChange);
-      return () => window.removeEventListener('hashchange', handleSubHashChange);
-    }
+    applyHashToState();
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const onHash = () => applyHashToState();
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
   // Sync APIs State
@@ -269,35 +513,130 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
   };
 
-  const [rechargingAccount, setRechargingAccount] = useState(false);
-
-  const handleRechargeAccount = async (cust) => {
-    if (!cust) return;
-    const internetId = cust.internet_id || cust.cust_id;
-    const packageId = cust.package_id || cust.plan_id;
-    const subPlanId = cust.subplan_id || cust.sub_plan_id;
-
-    setRechargingAccount(true);
+  // Runs a recharge for one account. kind: 'internet' | 'iptv'. type ('recharge' | 'advance')
+  // is only used for the messages — the backend handles both the same way.
+  // Returns true on success so callers can close their confirm dialog.
+  // IPTV: pass subPlanIds (1 DPO + add-ons) instead of planId/subPlanId.
+  const runRecharge = async ({ kind, id, planId, subPlanId, subPlanIds, label }, type = 'recharge') => {
+    const hasPlan = kind === 'iptv' ? Array.isArray(subPlanIds) && subPlanIds.length > 0 : !!planId;
+    if (!id || !hasPlan) {
+      toast.error(`Cannot recharge ${label}: plan details missing on this account.`);
+      return false;
+    }
     try {
       if (user?.token) setApiConfig(undefined, user.token);
-      const res = await OneBssApi.rechargeInternetAccount(internetId, packageId, subPlanId);
+      const res = kind === 'iptv'
+        ? await OneBssApi.rechargeIptvAccount(id, subPlanIds)
+        : await OneBssApi.rechargeInternetAccount(id, planId, subPlanId);
       const data = res.data || {};
-
-      if (data.success === false) {
-        toast.error(`Recharge Failed: ${data.message || 'Subscriber account not found'}`);
-      } else {
-        toast.success(data.message || `Recharge successful for ${cust.name || cust.full_name}! Operator wallet debited.`);
-        const nextMonthDate = new Date();
-        nextMonthDate.setDate(nextMonthDate.getDate() + 30);
-        const formattedDate = nextMonthDate.toISOString().replace('T', ' ').substring(0, 19);
-        setActiveSubProfile((prev) => (prev ? { ...prev, status_text: 'Active', status: 'active', expiration: formattedDate, expiryDate: formattedDate } : prev));
+      if (!res.ok || data.success === false) {
+        let reason = data.message || `HTTP ${res.status}`;
+        if (res.status === 402 && data.amount_required !== undefined) {
+          reason += ` (needs ₹${data.amount_required}, wallet has ₹${data.wallet_balance ?? 0})`;
+        }
+        if (data.refunded) reason += ' — wallet refunded';
+        toast.error(`Recharge failed for ${label}: ${reason}`);
+        return false;
       }
+      const kindLabel = (data.renewal_type || type) === 'advance' ? 'Advance recharge' : 'Recharge';
+      const expiryNote = data.new_expiry_date ? ` New expiry: ${formatApiDate(data.new_expiry_date)}.` : '';
+      const amountNote = kind === 'iptv' && data.amount !== undefined ? ` ${data.packages?.length || ''} pack(s), ₹${Number(data.amount).toFixed(2)} debited.` : '';
+      toast.success(`${kindLabel} successful for ${label}.${amountNote}${expiryNote}`);
+      // Pull the renewed account's latest state from RADIUS, then refresh the screen
+      loadCustomerDataFromApi();
+      if (activeCustomerId !== null) {
+        if (kind === 'internet') {
+          syncInternetAccounts(activeCustomerId, [id]);
+        } else {
+          // pull the STB's new state from Pioneer, then reload the lookup
+          (async () => {
+            await handleIptvCustomerDetailSync({ id: `iptv_${id}`, mobile: activeCustomer?.mobile, name: activeCustomer?.full_name }, true);
+            fetchCustomerDetails(activeCustomerId, true);
+          })();
+        }
+      }
+      return true;
     } catch (e) {
-      toast.error(`Plan recharge failed for ${cust.name || cust.full_name}.`);
-    } finally {
-      setRechargingAccount(false);
+      toast.error(`Recharge failed for ${label}.`);
+      return false;
     }
   };
+
+  // ---- Internet account actions (recharge modal, verify, password, MAC, sessions, documents) ----
+  const [rechargeReq, setRechargeReq] = useState(null); // { account, advance }
+  const [verifyReq, setVerifyReq] = useState(null); // raw internet account
+  const [passwordReq, setPasswordReq] = useState(null); // raw internet account
+  const [macReq, setMacReq] = useState(null); // raw internet account
+  const [sessionReq, setSessionReq] = useState(null); // raw internet account
+  const [documentsOpen, setDocumentsOpen] = useState(false);
+  const canSeeDocuments = isSuperAdmin(user);
+
+  const openInternetRecharge = (account, advance) => {
+    if (!isAccountVerified(account)) {
+      toast.warning('Verify the customer before recharging.');
+      setVerifyReq(account);
+      return;
+    }
+    setRechargeReq({ account, advance });
+  };
+
+  const confirmInternetRecharge = (packageId, subPlanId) => {
+    const acc = rechargeReq?.account;
+    if (!acc) return Promise.resolve(false);
+    return runRecharge(
+      { kind: 'internet', id: acc.internet_id, planId: packageId, subPlanId, label: acc.username || `Internet #${acc.internet_id}` },
+      rechargeReq.advance ? 'advance' : 'recharge'
+    );
+  };
+
+  const handleVerified = async () => {
+    const acc = verifyReq;
+    if (!acc) return;
+    setVerifiedOverrides((prev) => ({ ...prev, [String(acc.internet_id)]: true }));
+    // pull the new status into the local DB, then refresh the lookup
+    if (activeCustomerId !== null) syncInternetAccounts(activeCustomerId, [acc.internet_id]);
+  };
+
+  // ---- IPTV recharge (DPO + Broadcaster / A-la-carte package set) ----
+  const [iptvRechargeReq, setIptvRechargeReq] = useState(null); // raw iptv account
+  const confirmIptvRecharge = (subPlanIds) => {
+    const acc = iptvRechargeReq;
+    if (!acc) return Promise.resolve(false);
+    return runRecharge({
+      kind: 'iptv',
+      id: acc.id,
+      subPlanIds,
+      label: acc.pioneer_stb_id ? `STB ${acc.pioneer_stb_id}` : `IPTV #${acc.id}`,
+    });
+  };
+
+  const currentInternetAccount =
+    activeAccountSel?.kind === 'internet' ? activeCustomer?.internet_accounts?.[activeAccountSel.index] || null : null;
+
+  const accountActionModals = (
+    <>
+      <InternetRechargeModal
+        visible={!!rechargeReq}
+        account={rechargeReq?.account}
+        advance={!!rechargeReq?.advance}
+        onClose={() => setRechargeReq(null)}
+        onConfirm={confirmInternetRecharge}
+      />
+      <VerifyCustomerModal
+        visible={!!verifyReq}
+        internetId={verifyReq?.internet_id}
+        username={verifyReq?.username}
+        customerName={activeCustomer?.full_name}
+        onClose={() => setVerifyReq(null)}
+        onVerified={handleVerified}
+      />
+      <PasswordModal visible={!!passwordReq} internetId={passwordReq?.internet_id} username={passwordReq?.username} onClose={() => setPasswordReq(null)} />
+      <MacBindingsModal visible={!!macReq} internetId={macReq?.internet_id} username={macReq?.username} onClose={() => setMacReq(null)} />
+      <SessionHistoryModal visible={!!sessionReq} internetId={sessionReq?.internet_id} username={sessionReq?.username} onClose={() => setSessionReq(null)} />
+      {canSeeDocuments ? <DocumentsModal visible={documentsOpen} customer={activeCustomer} onClose={() => setDocumentsOpen(false)} /> : null}
+      <IptvRechargeModal visible={!!iptvRechargeReq} account={iptvRechargeReq} onClose={() => setIptvRechargeReq(null)} onConfirm={confirmIptvRecharge} />
+    </>
+  );
 
   const handleIptvCustomerDetailSync = async (cust, silent = false) => {
     if (!cust) return;
@@ -409,36 +748,53 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const handleToggleMode = (newMode) => {
     setViewMode(newMode);
     setActiveFilter('all');
-    setActiveSubProfile(null);
+    setActiveAccountSel(null);
+    setActiveCustomerId(null);
     if (onSwitchMode) {
       onSwitchMode(newMode === 'iptv' ? 'iptv_customers' : 'customers');
     }
   };
 
-  // Open Full-Screen Subscriber Control View (No Popup!) & Auto-Close Sidebar
+  const modeTab = isIptvMode ? 'iptv_customers' : 'customers';
+
+  // Row click in the list -> open the customer's account cards overview & auto-close sidebar
   const handleOpenSubscriberScreen = (cust) => {
-    setActiveSubProfile(cust);
-    if (typeof window !== 'undefined' && cust) {
-      const modeTab = isIptvMode ? 'iptv_customers' : 'customers';
-      const cId = cust.cust_id || cust.id;
+    if (!cust) return;
+    const cId = cust.cust_id ?? cust.id;
+    setActiveCustomerId(cId);
+    setActiveAccountSel(null);
+    if (typeof window !== 'undefined') {
       window.location.hash = `${modeTab}?sub_id=${cId}`;
     }
     if (onAutoCloseSidebar) {
       onAutoCloseSidebar();
     }
-    // Auto-trigger POST /iptv_customer_sync.php as soon as customer detail is opened (silent mode)
-    if (cust) {
-      handleIptvCustomerDetailSync(cust, true);
-      if (cust.internet_id) {
-        handleAccountDetailSync(cust.internet_id, true);
-      }
+    // Silent background sync of the customer's accounts when opened
+    handleIptvCustomerDetailSync(cust, true);
+  };
+
+  // "Details" on an account card -> existing full detail screen for that account
+  const handleOpenAccountDetails = (kind, accIndex) => {
+    if (!activeCustomer) return;
+    setActiveAccountSel({ kind, index: accIndex });
+    if (typeof window !== 'undefined') {
+      window.location.hash = `${modeTab}?sub_id=${activeCustomer.cust_id}&acc=${kind === 'iptv' ? 'iptv' : 'int'}_${accIndex}`;
     }
   };
 
+  // Detail screen back -> account cards
   const handleCloseSubscriberScreen = () => {
-    setActiveSubProfile(null);
+    setActiveAccountSel(null);
+    if (typeof window !== 'undefined' && activeCustomerId !== null) {
+      window.location.hash = `${modeTab}?sub_id=${activeCustomerId}`;
+    }
+  };
+
+  // Account cards back -> subscriber list
+  const handleCloseCustomerOverview = () => {
+    setActiveAccountSel(null);
+    setActiveCustomerId(null);
     if (typeof window !== 'undefined') {
-      const modeTab = isIptvMode ? 'iptv_customers' : 'customers';
       window.location.hash = modeTab;
     }
   };
@@ -551,6 +907,49 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     );
   }
 
+  if (activeCustomer && !activeSubProfile) {
+    return (
+      <>
+      <CustomerAccountsOverview
+        customer={activeCustomer}
+        loading={loadingDetailsFor === String(activeCustomerId)}
+        syncing={syncingFor === String(activeCustomerId)}
+        onRefresh={() => syncAllAccountsOf(activeCustomerId)}
+        onInternetRecharge={openInternetRecharge}
+        onIptvRecharge={(acc) => setIptvRechargeReq(acc)}
+        onVerify={(acc) => setVerifyReq(acc)}
+        onBack={handleCloseCustomerOverview}
+        onOpenDetails={handleOpenAccountDetails}
+      />
+      {accountActionModals}
+      </>
+    );
+  }
+
+  // IPTV accounts get their own detail layout (Basic Info + STB Info)
+  if (activeCustomer && activeAccountSel?.kind === 'iptv') {
+    const iptvAcc = activeCustomer.iptv_accounts?.[activeAccountSel.index];
+    if (iptvAcc) {
+      return (
+        <>
+        <IptvAccountDetails
+          customer={activeCustomer}
+          account={iptvAcc}
+          accountIndex={activeAccountSel.index}
+          operatorName={String(iptvAcc.partner_id) === String(user?.partner_id) ? user?.partner_name : ''}
+          onBack={handleCloseSubscriberScreen}
+          onOpenRecharge={() => setIptvRechargeReq(iptvAcc)}
+          onSync={async () => {
+            await handleIptvCustomerDetailSync({ id: `iptv_${iptvAcc.id}`, mobile: activeCustomer.mobile, name: activeCustomer.full_name });
+            await fetchCustomerDetails(activeCustomerId, true);
+          }}
+        />
+        {accountActionModals}
+        </>
+      );
+    }
+  }
+
   if (activeSubProfile) {
     const isOnline = activeSubProfile.online === 'ONLINE' || activeSubProfile.isOnline;
     const isAccountActive = (activeSubProfile.status || activeSubProfile.status_text || '').toLowerCase() === 'active';
@@ -576,16 +975,14 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         {/* BACK TO SUBSCRIBERS LIST BUTTON */}
         <TouchableOpacity style={[styles.backBtn, { marginBottom: 16 }]} onPress={handleCloseSubscriberScreen}>
           <Feather name="arrow-left" size={16} color={COLORS.textMain} />
-          <Text style={styles.backBtnText}>Back to Subscribers List</Text>
+          <Text style={styles.backBtnText}>{activeCustomer ? 'Back to Accounts' : 'Back to Subscribers List'}</Text>
         </TouchableOpacity>
 
         {/* TOP SUBSCRIBER IDENTITY HEADER CARD */}
         <View style={{ backgroundColor: '#ffffff', borderRadius: 14, padding: 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)', marginBottom: 16, flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', gap: 16 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
             {/* PROFILE AVATAR THUMBNAIL */}
-            <View style={{ width: 64, height: 64, borderRadius: 12, backgroundColor: '#f1f5f9', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)' }}>
-              <Feather name="user" size={32} color="#64748b" />
-            </View>
+            <CustomerPhoto uri={activeCustomer?.profile_image} size={64} radius={12} dark={false} />
 
             <View>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -598,10 +995,14 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 }}>
                   <Feather name="copy" size={14} color="#64748b" />
                 </TouchableOpacity>
-                <Text style={{ fontSize: 13, color: '#4b5563', marginLeft: 12 }}>Account ID: {activeSubProfile.cust_id || activeSubProfile.id || '52348'}</Text>
+                <Text style={{ fontSize: 13, color: '#4b5563', marginLeft: 12 }}>
+                  {activeSubProfile.account_type === 'iptv'
+                    ? `IPTV ID: ${activeSubProfile.iptv_id ?? '—'}`
+                    : `Account ID: ${activeSubProfile.acc_id ?? activeSubProfile.cust_id ?? '—'}`}
+                </Text>
               </View>
               <Text style={{ fontSize: 13, color: '#4b5563', marginTop: 4 }}>Mobile: {activeSubProfile.mobile || '—'}</Text>
-              <Text style={{ fontSize: 13, color: '#4b5563', marginTop: 2 }}>Expiry Date: {activeSubProfile.expiration || activeSubProfile.expiryDate || '—'}</Text>
+              <Text style={{ fontSize: 13, color: '#4b5563', marginTop: 2 }}>Expiry Date: {formatApiDate(activeSubProfile.expiration || activeSubProfile.expiryDate)}</Text>
             </View>
           </View>
 
@@ -624,24 +1025,30 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
         {/* QUICK ACTION TOOLBAR ROW */}
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-          <TouchableOpacity
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f97316', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}
-            onPress={() => handleRechargeAccount(activeSubProfile)}
-            disabled={rechargingAccount}
-          >
-            {rechargingAccount ? (
-              <ActivityIndicator size="small" color="#ffffff" />
-            ) : (
-              <>
-                <Feather name="refresh-cw" size={14} color="#ffffff" />
-                <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>Advance Renewal</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          {currentInternetAccount && !isAccountVerified(currentInternetAccount) ? (
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#2563eb', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}
+              onPress={() => setVerifyReq(currentInternetAccount)}
+            >
+              <Feather name="user-check" size={14} color="#ffffff" />
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>Verify Customer</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={[{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f97316', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }, !currentInternetAccount && { opacity: 0.5 }]}
+              onPress={() => currentInternetAccount && openInternetRecharge(currentInternetAccount, defaultRechargeType({ expiration: currentInternetAccount.expiration }) === 'advance')}
+              disabled={!currentInternetAccount}
+            >
+              <Feather name={isAccountActive ? 'fast-forward' : 'refresh-cw'} size={14} color="#ffffff" />
+              <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>
+                {currentInternetAccount && defaultRechargeType({ expiration: currentInternetAccount.expiration }) === 'advance' ? 'Advance Renewal' : 'Recharge'}
+              </Text>
+            </TouchableOpacity>
+          )}
 
           <TouchableOpacity
             style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
-            onPress={() => handleOpenResetPassword(activeSubProfile)}
+            onPress={() => currentInternetAccount && setPasswordReq(currentInternetAccount)}
           >
             <Feather name="key" size={14} color="#000000" />
             <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Password</Text>
@@ -649,9 +1056,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
           <TouchableOpacity
             style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
-            onPress={() => {
-              toast.success('MAC binding cleared for subscriber.');
-            }}
+            onPress={() => currentInternetAccount && setMacReq(currentInternetAccount)}
           >
             <Feather name="globe" size={14} color="#000000" />
             <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Remove MAC</Text>
@@ -659,31 +1064,29 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
           <TouchableOpacity
             style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
-            onPress={() => {
-              toast.info('Session History: Active RADIUS sessions loaded.');
-            }}
+            onPress={() => currentInternetAccount && setSessionReq(currentInternetAccount)}
           >
             <Feather name="list" size={14} color="#000000" />
             <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Session History</Text>
           </TouchableOpacity>
 
-          <TouchableOpacity
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
-            onPress={() => {
-              toast.info('Documents: Aadhaar e-KYC Verification Records.');
-            }}
-          >
-            <Feather name="file-text" size={14} color="#000000" />
-            <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Documents</Text>
-          </TouchableOpacity>
+          {canSeeDocuments ? (
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
+              onPress={() => setDocumentsOpen(true)}
+            >
+              <Feather name="file-text" size={14} color="#000000" />
+              <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Documents</Text>
+            </TouchableOpacity>
+          ) : null}
 
-          <TouchableOpacity
+          {/* <TouchableOpacity
             style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
             onPress={() => handleOpenEdit(activeSubProfile)}
           >
             <Feather name="edit-3" size={14} color="#000000" />
             <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Edit Profile</Text>
-          </TouchableOpacity>
+          </TouchableOpacity> */}
         </View>
 
         {/* 3-COLUMN DETAIL CARDS GRID */}
@@ -708,36 +1111,38 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 12, color: '#64748b' }}>Email</Text>
-                <Text style={{ fontSize: 13, fontWeight: '500', color: '#000000' }}>{activeSubProfile.email || `${activeSubProfile.username || 'user'}@gmail.com`}</Text>
+                <Text style={{ fontSize: 13, fontWeight: '500', color: '#000000' }}>{activeSubProfile.email || '—'}</Text>
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 12, color: '#64748b' }}>Mobile</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                   <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>{activeSubProfile.mobile || '—'}</Text>
-                  <Feather name="check-circle" size={13} color="#10b981" />
+                  {activeSubProfile.mobile_verified ? <Feather name="check-circle" size={13} color="#10b981" /> : null}
                 </View>
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 12, color: '#64748b' }}>Customer Verification</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Verified</Text>
-                  <Feather name="check-circle" size={13} color="#10b981" />
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: isAccountVerified(currentInternetAccount || activeSubProfile) ? '#000000' : '#b45309' }}>
+                    {isAccountVerified(currentInternetAccount || activeSubProfile) ? 'Verified' : 'Not verified'}
+                  </Text>
+                  {isAccountVerified(currentInternetAccount || activeSubProfile) ? <Feather name="check-circle" size={13} color="#10b981" /> : null}
                 </View>
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 12, color: '#64748b' }}>Aadhar Verification</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Verified</Text>
-                  <Feather name="check-circle" size={13} color="#10b981" />
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: activeSubProfile.aadhar_verified ? '#000000' : '#b45309' }}>{activeSubProfile.aadhar_verified ? 'Verified' : 'Not verified'}</Text>
+                  {activeSubProfile.aadhar_verified ? <Feather name="check-circle" size={13} color="#10b981" /> : null}
                 </View>
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 12, color: '#64748b' }}>Aadhar Verification Date</Text>
-                <Text style={{ fontSize: 12, fontWeight: '500', color: '#000000' }}>01 Aug, 2026 08:21 am</Text>
+                <Text style={{ fontSize: 12, fontWeight: '500', color: '#000000' }}>{formatApiDate(activeSubProfile.aadhar_verified_date)}</Text>
               </View>
             </View>
           </View>
@@ -762,12 +1167,12 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 12, color: '#64748b' }}>Expiry</Text>
-                <Text style={{ fontSize: 12, fontWeight: '600', color: '#000000' }}>{activeSubProfile.expiration || activeSubProfile.expiryDate || '01 Nov 2026, 08:21 am'}</Text>
+                <Text style={{ fontSize: 12, fontWeight: '600', color: '#000000' }}>{formatApiDate(activeSubProfile.expiration || activeSubProfile.expiryDate)}</Text>
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 12, color: '#64748b' }}>Balance</Text>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>₹ {activeSubProfile.dueAmount !== null && activeSubProfile.dueAmount !== undefined ? activeSubProfile.dueAmount : '40.10'} (Balance)</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>₹ {activeSubProfile.dueAmount !== null && activeSubProfile.dueAmount !== undefined ? activeSubProfile.dueAmount : '0.00'} (Balance)</Text>
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -782,7 +1187,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 12, color: '#64748b' }}>Paid</Text>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>₹ {activeSubProfile.totalPaid !== null && activeSubProfile.totalPaid !== undefined ? activeSubProfile.totalPaid : '40.10'}</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>₹ {activeSubProfile.totalPaid !== null && activeSubProfile.totalPaid !== undefined ? activeSubProfile.totalPaid : '0.00'}</Text>
               </View>
             </View>
           </View>
@@ -802,12 +1207,12 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 12, color: '#64748b' }}>Activation Date</Text>
-                <Text style={{ fontSize: 12, fontWeight: '500', color: '#000000' }}>01 Aug, 2026 08:21 am</Text>
+                <Text style={{ fontSize: 12, fontWeight: '500', color: '#000000' }}>{formatApiDate(activeSubProfile.activation_date)}</Text>
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 12, color: '#64748b' }}>Last Logout</Text>
-                <Text style={{ fontSize: 12, fontWeight: '500', color: '#000000' }}>18 Sep, 2026 08:51 pm</Text>
+                <Text style={{ fontSize: 12, fontWeight: '500', color: '#000000' }}>{formatApiDate(activeSubProfile.last_logoff)}</Text>
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -817,12 +1222,12 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 12, color: '#64748b' }}>Customer Type</Text>
-                <Text style={{ fontSize: 13, fontWeight: '500', color: '#000000' }}>individual</Text>
+                <Text style={{ fontSize: 13, fontWeight: '500', color: '#000000' }}>{activeSubProfile.customer_type || '—'}</Text>
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 12, color: '#64748b' }}>Simultaneous Use</Text>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>1</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>{activeSubProfile.simultaneous_use || '—'}</Text>
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -843,15 +1248,16 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           <View style={{ flexDirection: isMobile ? 'column' : 'row', gap: 24 }}>
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748b', letterSpacing: 0.5, marginBottom: 6 }}>BILLING ADDRESS</Text>
-              <Text style={{ fontSize: 13, color: '#000000', lineHeight: 20 }}>{activeSubProfile.address || '4-83, Telaprolu, Telaprolu, Krishna.'}</Text>
+              <Text style={{ fontSize: 13, color: '#000000', lineHeight: 20 }}>{activeSubProfile.billing_address || activeSubProfile.address || '—'}</Text>
             </View>
 
             <View style={{ flex: 1 }}>
               <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748b', letterSpacing: 0.5, marginBottom: 6 }}>INSTALLATION ADDRESS</Text>
-              <Text style={{ fontSize: 13, color: '#000000', lineHeight: 20 }}>{activeSubProfile.address || '4-83, Telaprolu, Telaprolu, Krishna.'}</Text>
+              <Text style={{ fontSize: 13, color: '#000000', lineHeight: 20 }}>{activeSubProfile.installation_address || activeSubProfile.address || '—'}</Text>
             </View>
           </View>
         </View>
+        {accountActionModals}
       </ScrollView>
     );
   }

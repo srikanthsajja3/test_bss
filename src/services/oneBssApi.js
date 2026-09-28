@@ -802,8 +802,11 @@ export const OneBssApi = {
   },
 
   // 27. Internet Subscriber Account Renewal / Plan Recharge (POST /internet_recharge.php)
+  // Same endpoint for Recharge (expired / new) and Advance Renewal (still active) — the
+  // backend treats both the same. Errors (402 low wallet, 409 in progress, 429 rate limit,
+  // 502 gateway failure + refund) are returned as-is so the UI can show them.
   rechargeInternetAccount: async (internetId, packageId, subPlanId) => {
-    const res = await request('/internet_recharge.php', {
+    return request('/internet_recharge.php', {
       method: 'POST',
       body: JSON.stringify({
         internet_id: Number(internetId) || internetId,
@@ -811,21 +814,58 @@ export const OneBssApi = {
         sub_plan_id: Number(subPlanId) || subPlanId,
       }),
     });
-    if (!res.ok || res.data?.success === false) {
-      return {
-        ok: true,
-        status: 200,
-        data: {
-          success: true,
-          message: 'Internet account plan recharge completed successfully.',
-          internet_id: internetId,
-          package_id: packageId,
-          sub_plan_id: subPlanId,
-        }
-      };
-    }
-    return res;
   },
+
+  // 27b. IPTV STB renewal with a package set (POST /iptv_recharge.php)
+  // subPlanIds: exactly one DPO + any Broadcaster / A-la-carte sub_plan_ids.
+  // The backend decides Recharge vs Advance Renewal from the STB's expiry and
+  // charges the operator's mapped prices. Failures are returned as-is.
+  rechargeIptvAccount: async (iptvId, subPlanIds) =>
+    request('/iptv_recharge.php', {
+      method: 'POST',
+      body: JSON.stringify({
+        iptv_id: Number(iptvId) || iptvId,
+        sub_plan_ids: (subPlanIds || []).map((v) => Number(v) || v),
+      }),
+    }),
+
+  // Packs this STB's operator can sell (grouped DPO / Broadcaster / A-la-carte, operator
+  // price) + the STB's current packs for pre-selection (GET /iptv_recharge_plans.php)
+  getIptvRechargePlans: async (iptvId) =>
+    request(`/iptv_recharge_plans.php?iptv_id=${encodeURIComponent(iptvId)}`, { method: 'GET' }),
+
+  // ---- Per-account internet actions (backend/internet_*.php) ----
+  // All return { success, status, message, results } — failures are NOT converted to success.
+  viewInternetPassword: async (internetId) =>
+    request(`/internet_view_password.php?internet_id=${encodeURIComponent(internetId)}`, { method: 'GET' }),
+
+  changeInternetPassword: async (internetId, password) =>
+    request('/internet_change_password.php', {
+      method: 'POST',
+      body: JSON.stringify({ internet_id: Number(internetId) || internetId, password }),
+    }),
+
+  getInternetMacBindings: async (internetId) =>
+    request(`/internet_get_mac_bindings.php?internet_id=${encodeURIComponent(internetId)}`, { method: 'GET' }),
+
+  removeInternetMacBinding: async (internetId, bindingId) =>
+    request('/internet_remove_mac_binding.php', {
+      method: 'POST',
+      body: JSON.stringify({ internet_id: Number(internetId) || internetId, binding_id: Number(bindingId) || bindingId }),
+    }),
+
+  // dates: 'YYYY-MM-DD'
+  getInternetSessionHistory: async (internetId, startDate, endDate) =>
+    request(
+      `/internet_session_history.php?internet_id=${encodeURIComponent(internetId)}&start_date=${encodeURIComponent(startDate)}&end_date=${encodeURIComponent(endDate)}`,
+      { method: 'GET' }
+    ),
+
+  verifyInternetCustomer: async (internetId) =>
+    request('/internet_change_verification.php', {
+      method: 'POST',
+      body: JSON.stringify({ internet_id: Number(internetId) || internetId }),
+    }),
 
   // 28. Get Recharge History Log (GET /recharge_history.php?page=1&limit=50)
   getRechargeHistory: async (page = 1, limit = 50) => {
