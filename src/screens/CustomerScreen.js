@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Modal, ActivityIndicator, useWindowDimensions, Linking } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Modal, ActivityIndicator, useWindowDimensions, Linking, Platform } from 'react-native';
 import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi, setApiConfig } from '../services/oneBssApi';
@@ -1558,7 +1558,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               const isAccNew = cust.status === 'new' || (cust.status_text || '').toLowerCase() === 'new';
               const balInfo = calculateBalanceDays(cust.expiration || cust.expiryDate);
               const isPassRevealed = !!showPasswordMap[cust.id];
-              const hasPassword = cust.password !== undefined && cust.password !== null && String(cust.password).trim() !== '';
+              const rawPass = cust.password;
+              const hasPassword = rawPass !== undefined && rawPass !== null && String(rawPass).trim() !== '' && String(rawPass).trim().toLowerCase() !== 'null';
 
               return (
                 <View key={cust.id ? `cust_${cust.id}_${idx}` : idx} style={styles.tr}>
@@ -1579,22 +1580,22 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
                   {/* Password Column with Eye Toggle */}
                   <View style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={[styles.tdText, { fontFamily: Platform?.OS === 'web' ? 'monospace' : undefined }]}>
-                      {isPassRevealed
-                        ? (hasPassword ? String(cust.password) : 'null')
-                        : (hasPassword ? '••••••••' : 'null')}
+                    <Text style={[styles.tdText, { fontFamily: Platform?.OS === 'web' && hasPassword ? 'monospace' : undefined }]}>
+                      {hasPassword ? (isPassRevealed ? String(cust.password) : '••••••••') : '—'}
                     </Text>
-                    <TouchableOpacity
-                      onPress={() => setShowPasswordMap((prev) => ({ ...prev, [cust.id]: !prev[cust.id] }))}
-                      style={{ padding: 2 }}
-                      title={isPassRevealed ? 'Hide Password' : 'Show Password'}
-                    >
-                      <Feather
-                        name={isPassRevealed ? 'eye-off' : 'eye'}
-                        size={13}
-                        color={isPassRevealed ? COLORS.primary : '#64748b'}
-                      />
-                    </TouchableOpacity>
+                    {hasPassword ? (
+                      <TouchableOpacity
+                        onPress={() => setShowPasswordMap((prev) => ({ ...prev, [cust.id]: !prev[cust.id] }))}
+                        style={{ padding: 2 }}
+                        title={isPassRevealed ? 'Hide Password' : 'Show Password'}
+                      >
+                        <Feather
+                          name={isPassRevealed ? 'eye-off' : 'eye'}
+                          size={13}
+                          color={isPassRevealed ? COLORS.primary : '#64748b'}
+                        />
+                      </TouchableOpacity>
+                    ) : null}
                   </View>
 
                   {/* Connectivity Badge */}
