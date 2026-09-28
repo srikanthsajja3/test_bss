@@ -87,23 +87,27 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       OneBssApi.getDashboardTelemetry(selectedPartner.partner_id)
         .then((res) => {
           const data = res.data?.data || res.data?.telemetry || res.data;
-          if (data && (data.internet || data.iptv)) {
+          if (data) {
+            const internetData = data.internet || (data.total !== undefined ? data : null);
+            const iptvData = data.iptv || null;
             setPartnerTelemetry({
-              internet: data.internet || { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 },
-              iptv: data.iptv || { total: 0, active: 0, expired: 0 },
+              ...data,
+              internet: internetData || { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 },
+              iptv: iptvData || { total: 0, active: 0, expired: 0 },
+              total: internetData?.total ?? data.total,
+              active: internetData?.active ?? data.active,
+              online: internetData?.online ?? data.online,
+              expired: internetData?.expired ?? data.expired,
+              suspend: internetData?.suspend ?? data.suspend ?? data.suspended,
+              disabled: internetData?.disabled ?? data.disabled,
+              new: internetData?.new ?? data.new,
             });
           } else {
-            setPartnerTelemetry({
-              internet: { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 },
-              iptv: { total: 0, active: 0, expired: 0 },
-            });
+            setPartnerTelemetry(null);
           }
         })
         .catch(() => {
-          setPartnerTelemetry({
-            internet: { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 },
-            iptv: { total: 0, active: 0, expired: 0 },
-          });
+          setPartnerTelemetry(null);
         })
         .finally(() => setLoadingPartnerTelemetry(false));
     } else {
@@ -1901,7 +1905,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   </View>
                   <Feather name="arrow-up-right" size={13} color={COLORS.primary} />
                 </View>
-                <Text style={styles.statValueMetric}>{partnerTelemetry?.total ?? 0}</Text>
+                <Text style={styles.statValueMetric}>
+                  {partnerTelemetry?.internet?.total ?? partnerTelemetry?.total ?? selectedPartner?.total_internet_accounts ?? selectedPartner?.total_users ?? 0}
+                </Text>
               </View>
 
               {/* ACTIVE USERS */}
@@ -1913,7 +1919,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   </View>
                   <Feather name="arrow-up-right" size={13} color={COLORS.accentEmerald} />
                 </View>
-                <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>{partnerTelemetry?.active ?? 0}</Text>
+                <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>
+                  {partnerTelemetry?.internet?.active ?? partnerTelemetry?.active ?? selectedPartner?.active_internet_accounts ?? selectedPartner?.active_users ?? 0}
+                </Text>
               </View>
 
               {/* ONLINE USERS */}
@@ -1925,7 +1933,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   </View>
                   <Feather name="arrow-up-right" size={13} color="#3b82f6" />
                 </View>
-                <Text style={[styles.statValueMetric, { color: '#3b82f6' }]}>{partnerTelemetry?.online ?? 0}</Text>
+                <Text style={[styles.statValueMetric, { color: '#3b82f6' }]}>
+                  {partnerTelemetry?.internet?.online ?? partnerTelemetry?.online ?? selectedPartner?.online_internet_accounts ?? selectedPartner?.online_users ?? 0}
+                </Text>
               </View>
 
               {/* EXPIRED USERS */}
@@ -1937,7 +1947,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   </View>
                   <Feather name="arrow-up-right" size={13} color={COLORS.accentRose} />
                 </View>
-                <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>{partnerTelemetry?.expired ?? 0}</Text>
+                <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>
+                  {partnerTelemetry?.internet?.expired ?? partnerTelemetry?.expired ?? selectedPartner?.expired_internet_accounts ?? 0}
+                </Text>
               </View>
 
               {/* SUSPENDED USERS */}
@@ -1949,7 +1961,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   </View>
                   <Feather name="arrow-up-right" size={13} color={COLORS.accentAmber} />
                 </View>
-                <Text style={[styles.statValueMetric, { color: COLORS.accentAmber }]}>{partnerTelemetry?.suspend ?? partnerTelemetry?.suspended ?? 0}</Text>
+                <Text style={[styles.statValueMetric, { color: COLORS.accentAmber }]}>
+                  {partnerTelemetry?.internet?.suspend ?? partnerTelemetry?.internet?.suspended ?? partnerTelemetry?.suspend ?? partnerTelemetry?.suspended ?? 0}
+                </Text>
               </View>
 
               {/* DISABLED USERS */}
@@ -1961,7 +1975,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   </View>
                   <Feather name="arrow-up-right" size={13} color="#64748b" />
                 </View>
-                <Text style={[styles.statValueMetric, { color: '#64748b' }]}>{partnerTelemetry?.disabled ?? 0}</Text>
+                <Text style={[styles.statValueMetric, { color: '#64748b' }]}>
+                  {partnerTelemetry?.internet?.disabled ?? partnerTelemetry?.disabled ?? 0}
+                </Text>
               </View>
 
               {/* NEW USERS */}
@@ -1973,7 +1989,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   </View>
                   <Feather name="arrow-up-right" size={13} color="#8b5cf6" />
                 </View>
-                <Text style={[styles.statValueMetric, { color: '#8b5cf6' }]}>{partnerTelemetry?.new ?? 0}</Text>
+                <Text style={[styles.statValueMetric, { color: '#8b5cf6' }]}>
+                  {partnerTelemetry?.internet?.new ?? partnerTelemetry?.new ?? 0}
+                </Text>
               </View>
             </View>
 

@@ -54,7 +54,7 @@ const calculateBalanceDays = (expiryDateStr) => {
       return { text: 'Expires Today', days: 0, status: 'warning' };
     } else {
       const absDays = Math.abs(diffDays);
-      return { text: `${absDays} ${absDays === 1 ? 'Day' : 'Days'} Expired`, days: diffDays, status: 'expired' };
+      return { text: `Expired ${absDays} ${absDays === 1 ? 'day' : 'days'} ago`, days: diffDays, status: 'expired' };
     }
   } catch (e) {
     return { text: '—', days: null, status: 'unknown' };
@@ -1526,7 +1526,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 }
               }}
             >
-              <Text style={[styles.th, { flex: 0 }]}>Expiration & Balance</Text>
+              <Text style={[styles.th, { flex: 0 }]}>Expiration</Text>
               <Feather
                 name={sortField === 'expiration' ? (sortDirection === 'asc' ? 'arrow-up' : 'arrow-down') : 'arrow-down'}
                 size={12}
