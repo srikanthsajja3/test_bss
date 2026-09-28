@@ -228,6 +228,24 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [searchQuery, setSearchQuery] = useState('');
   const [recordsLimit, setRecordsLimit] = useState(100);
   const [showPasswordMap, setShowPasswordMap] = useState({});
+  const [selectedRowIds, setSelectedRowIds] = useState(new Set());
+
+  const toggleSelectAllRows = () => {
+    if (selectedRowIds.size === paginatedCustomers.length && paginatedCustomers.length > 0) {
+      setSelectedRowIds(new Set());
+    } else {
+      setSelectedRowIds(new Set(paginatedCustomers.map((c) => c.id)));
+    }
+  };
+
+  const toggleSelectRow = (id) => {
+    setSelectedRowIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
   const [resetPasswordModalItem, setResetPasswordModalItem] = useState(null);
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -237,7 +255,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [sortField, setSortField] = useState(null);
   const [sortDirection, setSortDirection] = useState('asc');
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(100);
   const [operators, setOperators] = useState([]);
   const [selectedOperatorId, setSelectedOperatorId] = useState('');
 
@@ -1531,7 +1549,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               {/* Items Per Page Selector */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Text style={{ fontSize: 12, color: COLORS.textMuted || '#64748b' }}>Per page:</Text>
-                {[10, 25, 50, 100].map((size) => (
+                {[100, 250, 500, 1000].map((size) => (
                   <TouchableOpacity
                     key={size}
                     style={[{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: COLORS.borderLight || '#e2e8f0' }, pageSize === size && { backgroundColor: COLORS.primary || '#3b82f6', borderColor: COLORS.primary || '#3b82f6' }]}
@@ -1566,68 +1584,95 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </View>
             </View>
           </View>
-          {/* Table Header */}
-          <View style={styles.tableHeader}>
-            <Text style={[styles.th, { flex: 1.4 }]}>Username {viewMode === 'iptv' ? '/ STB' : ''}</Text>
-            <Text style={[styles.th, { flex: 1.2 }]}>Password</Text>
-            <Text style={[styles.th, { flex: 1.1 }]}>Connectivity</Text>
-            <Text style={[styles.th, { flex: 1.3 }]}>Mobile</Text>
-            <Text style={[styles.th, { flex: 1.8 }]}>Full Name</Text>
-            <Text style={[styles.th, { flex: 1.5 }]}>Partner Name</Text>
-            <Text style={[styles.th, { flex: 1.8 }]}>Package Name</Text>
-            <Text style={[styles.th, { flex: 1.4 }]}>Subplan Name</Text>
-            <TouchableOpacity
-              style={[{ flex: 2.2, flexDirection: 'row', alignItems: 'center', gap: 4 }, styles.th]}
-              onPress={() => {
-                if (sortField === 'expiration') {
-                  setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
-                } else {
-                  setSortField('expiration');
-                  setSortDirection('asc');
-                }
-              }}
-            >
-              <Text style={[styles.th, { flex: 0 }]}>Expiration Date</Text>
-              <Feather
-                name={sortField === 'expiration' ? (sortDirection === 'asc' ? 'arrow-up' : 'arrow-down') : 'arrow-down'}
-                size={12}
-                color={sortField === 'expiration' ? COLORS.primary : COLORS.textMuted}
-              />
-            </TouchableOpacity>
-          </View>
-
-          {/* Table Rows */}
-          {paginatedCustomers.length === 0 ? (
-            <View style={{ padding: 30, alignItems: 'center', justifyContent: 'center' }}>
-              <Feather name="info" size={24} color={COLORS.textMuted} />
-              <Text style={{ marginTop: 8, fontSize: 13, color: COLORS.textMuted }}>No subscriber records matched your filter criteria.</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: 1350, width: '100%' }}>
+          <View style={{ width: '100%' }}>
+            {/* Table Header */}
+            <View style={styles.tableHeader}>
+              <TouchableOpacity
+                style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
+                onPress={toggleSelectAllRows}
+                title="Select / Deselect All"
+              >
+                <Feather
+                  name={selectedRowIds.size === paginatedCustomers.length && paginatedCustomers.length > 0 ? "check-square" : "square"}
+                  size={16}
+                  color={selectedRowIds.size === paginatedCustomers.length && paginatedCustomers.length > 0 ? COLORS.primary : COLORS.textMuted}
+                />
+              </TouchableOpacity>
+              <Text style={[styles.th, { flex: 1.5 }]}>Username {viewMode === 'iptv' ? '/ STB' : ''}</Text>
+              <Text style={[styles.th, { flex: 1.3 }]}>Password</Text>
+              <Text style={[styles.th, { flex: 1.2 }]}>Connectivity</Text>
+              <Text style={[styles.th, { flex: 1.4 }]}>Mobile</Text>
+              <Text style={[styles.th, { flex: 1.8 }]}>Full Name</Text>
+              <Text style={[styles.th, { flex: 1.6 }]}>Partner Name</Text>
+              <Text style={[styles.th, { flex: 1.8 }]}>Package Name</Text>
+              <Text style={[styles.th, { flex: 1.4 }]}>Subplan Name</Text>
+              <TouchableOpacity
+                style={[{ flex: 2.2, flexDirection: 'row', alignItems: 'center', gap: 4 }, styles.th]}
+                onPress={() => {
+                  if (sortField === 'expiration') {
+                    setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+                  } else {
+                    setSortField('expiration');
+                    setSortDirection('asc');
+                  }
+                }}
+              >
+                <Text style={[styles.th, { flex: 0 }]}>Expiration Date</Text>
+                <Feather
+                  name={sortField === 'expiration' ? (sortDirection === 'asc' ? 'arrow-up' : 'arrow-down') : 'arrow-down'}
+                  size={12}
+                  color={sortField === 'expiration' ? COLORS.primary : COLORS.textMuted}
+                />
+              </TouchableOpacity>
+              <Text style={[styles.th, { flex: 1.2 }]}>Navigation</Text>
             </View>
-          ) : (
-            paginatedCustomers.map((cust, idx) => {
-              const isAccActive = cust.status === 'active' || (cust.status_text || '').toLowerCase() === 'active';
-              const isAccExpired = cust.status === 'expired' || (cust.status_text || '').toLowerCase() === 'expired';
-              const isAccNew = cust.status === 'new' || (cust.status_text || '').toLowerCase() === 'new';
-              const balInfo = calculateBalanceDays(cust.expiration || cust.expiryDate);
-              const isPassRevealed = !!showPasswordMap[cust.id];
-              const rawPass = cust.password;
-              const hasPassword = rawPass !== undefined && rawPass !== null && String(rawPass).trim() !== '' && String(rawPass).trim().toLowerCase() !== 'null';
 
-              return (
-                <View key={cust.id ? `cust_${cust.id}_${idx}` : idx} style={styles.tr}>
-                  {/* Username / STB */}
-                  <View style={{ flex: 1.4 }}>
-                    <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                      <Text
-                        style={[
-                          styles.tdClickableUsername,
-                          { color: isAccNew ? '#d97706' : (isAccActive ? '#16a34a' : (isAccExpired ? '#dc2626' : COLORS.primary)) }
-                        ]}
-                      >
-                        {cust.username}
-                      </Text>
+            {/* Table Rows */}
+            {paginatedCustomers.length === 0 ? (
+              <View style={{ padding: 30, alignItems: 'center', justifyContent: 'center' }}>
+                <Feather name="info" size={24} color={COLORS.textMuted} />
+                <Text style={{ marginTop: 8, fontSize: 13, color: COLORS.textMuted }}>No subscriber records matched your filter criteria.</Text>
+              </View>
+            ) : (
+              paginatedCustomers.map((cust, idx) => {
+                const isAccActive = cust.status === 'active' || (cust.status_text || '').toLowerCase() === 'active';
+                const isAccExpired = cust.status === 'expired' || (cust.status_text || '').toLowerCase() === 'expired';
+                const isAccNew = cust.status === 'new' || (cust.status_text || '').toLowerCase() === 'new';
+                const balInfo = calculateBalanceDays(cust.expiration || cust.expiryDate);
+                const isPassRevealed = !!showPasswordMap[cust.id];
+                const rawPass = cust.password;
+                const hasPassword = rawPass !== undefined && rawPass !== null && String(rawPass).trim() !== '' && String(rawPass).trim().toLowerCase() !== 'null';
+                const isRowSelected = selectedRowIds.has(cust.id);
+
+                return (
+                  <View key={cust.id ? `cust_${cust.id}_${idx}` : idx} style={[styles.tr, isRowSelected && { backgroundColor: 'rgba(59, 130, 246, 0.04)' }]}>
+                    {/* Select Checkbox */}
+                    <TouchableOpacity
+                      style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
+                      onPress={() => toggleSelectRow(cust.id)}
+                    >
+                      <Feather
+                        name={isRowSelected ? "check-square" : "square"}
+                        size={16}
+                        color={isRowSelected ? COLORS.primary : COLORS.textMuted}
+                      />
                     </TouchableOpacity>
-                    {viewMode === 'iptv' && cust.stb_id ? <Text style={styles.tdSub}>STB: {cust.stb_id}</Text> : null}
-                  </View>
+
+                    {/* Username / STB */}
+                    <View style={{ flex: 1.5 }}>
+                      <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
+                        <Text
+                          style={[
+                            styles.tdClickableUsername,
+                            { color: isAccNew ? '#d97706' : (isAccActive ? '#16a34a' : (isAccExpired ? '#dc2626' : COLORS.primary)) }
+                          ]}
+                        >
+                          {cust.username}
+                        </Text>
+                      </TouchableOpacity>
+                      {viewMode === 'iptv' && cust.stb_id ? <Text style={styles.tdSub}>STB: {cust.stb_id}</Text> : null}
+                    </View>
 
                   {/* Password Column with Eye Toggle */}
                   <View style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
@@ -1737,12 +1782,38 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       );
                     })()}
                   </View>
+
+                  {/* Navigation / Map Button */}
+                  <View style={{ flex: 1.1 }}>
+                    <TouchableOpacity
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 5,
+                        paddingHorizontal: 8,
+                        paddingVertical: 4,
+                        borderRadius: 6,
+                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                        borderWidth: 1,
+                        borderColor: 'rgba(59, 130, 246, 0.25)',
+                        alignSelf: 'flex-start',
+                      }}
+                      onPress={() => {
+                        toast.info(`Map navigation for ${cust.username || 'subscriber'} will be added here.`);
+                      }}
+                    >
+                      <Feather name="map-pin" size={13} color="#2563eb" />
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#2563eb' }}>Map</Text>
+                    </TouchableOpacity>
+                  </View>
                 </View>
               );
             })
           )}
         </View>
-      </View>
+      </ScrollView>
+    </View>
+  </View>
 
       {/* EDIT SUBSCRIBER DETAILS MODAL */}
       <Modal visible={!!editingCustomer} transparent animationType="fade">
@@ -1985,9 +2056,9 @@ const styles = StyleSheet.create({
   tableHeader: { flexDirection: 'row', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.glassBorder },
   th: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase' },
   tr: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.05)' },
-  tdBold: { fontSize: 13, fontWeight: '600', color: COLORS.textMain },
-  tdSub: { fontSize: 11, color: COLORS.textMuted },
-  tdText: { fontSize: 12, color: COLORS.textMain },
+  tdBold: { fontSize: 13, fontWeight: '700', color: COLORS.textMain },
+  tdSub: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted },
+  tdText: { fontSize: 12, fontWeight: '700', color: COLORS.textMain },
   tdClickableName: { fontSize: 13, fontWeight: '700', color: COLORS.primary, textDecorationLine: 'underline', cursor: 'pointer' },
   tdClickableUsername: { fontSize: 13, fontWeight: '700', color: COLORS.primary, textDecorationLine: 'underline', cursor: 'pointer' },
   tdClickableMobile: { fontSize: 11, color: COLORS.accentCyan, fontWeight: '600' },
