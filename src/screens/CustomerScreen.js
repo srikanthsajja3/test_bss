@@ -265,7 +265,23 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
       // Fetch live customer records directly from /customers_list.php (up to 5000)
       const custRes = await OneBssApi.getCustomersList(1, 5000);
-      const rawCustomers = custRes.data && Array.isArray(custRes.data) ? custRes.data : (custRes.data?.data || []);
+      let rawCustomers = [];
+
+      if (Array.isArray(custRes?.data)) {
+        rawCustomers = custRes.data;
+      } else if (custRes?.data && Array.isArray(custRes.data.data)) {
+        rawCustomers = custRes.data.data;
+      } else if (custRes?.data && Array.isArray(custRes.data.customers)) {
+        rawCustomers = custRes.data.customers;
+      } else if (custRes?.data && Array.isArray(custRes.data.subscribers)) {
+        rawCustomers = custRes.data.subscribers;
+      } else if (custRes?.data && Array.isArray(custRes.data.items)) {
+        rawCustomers = custRes.data.items;
+      } else if (custRes?.data && Array.isArray(custRes.data.list)) {
+        rawCustomers = custRes.data.list;
+      } else if (Array.isArray(custRes)) {
+        rawCustomers = custRes;
+      }
 
       const list = Array.isArray(rawCustomers) ? rawCustomers : [];
       setRawCustomers(list);
