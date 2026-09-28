@@ -2197,6 +2197,23 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
           </View>
 
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', flex: 1, justifyContent: 'flex-end' }}>
+            {/* ADD OPERATOR BUTTON */}
+            <TouchableOpacity
+              style={{
+                flexDirection: 'row',
+                alignItems: 'center',
+                gap: 6,
+                paddingHorizontal: 14,
+                paddingVertical: 9,
+                borderRadius: 8,
+                backgroundColor: COLORS.primary || '#3b82f6',
+              }}
+              onPress={() => handleOpenCreate('operator')}
+            >
+              <Feather name="user-plus" size={14} color="#ffffff" />
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#ffffff' }}>Add Operator</Text>
+            </TouchableOpacity>
+
             {/* MANUAL REFRESH TELEMETRY BUTTON (ITEM 16) */}
             <TouchableOpacity
               style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.3)' }}
