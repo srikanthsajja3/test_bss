@@ -1573,12 +1573,12 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                         paddingHorizontal: 8,
                         paddingVertical: 3,
                         borderRadius: 12,
-                        backgroundColor: cust.isOnline ? '#dbeafe' : '#f1f5f9',
+                        backgroundColor: cust.isOnline ? '#dbeafe' : '#ffe4e6',
                         alignSelf: 'flex-start',
                       }}
                     >
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: cust.isOnline ? '#2563eb' : '#94a3b8' }} />
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: cust.isOnline ? '#1d4ed8' : '#64748b' }}>
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: cust.isOnline ? '#2563eb' : '#dc2626' }} />
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: cust.isOnline ? '#1d4ed8' : '#dc2626' }}>
                         {cust.isOnline ? 'ONLINE' : 'OFFLINE'}
                       </Text>
                     </View>
