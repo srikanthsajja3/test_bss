@@ -87,29 +87,22 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       OneBssApi.getDashboardTelemetry(selectedPartner.partner_id)
         .then((res) => {
           const data = res.data?.data || res.data?.telemetry || res.data;
-          if (data && data.internet) {
-            setPartnerTelemetry(data.internet);
+          if (data && (data.internet || data.iptv)) {
+            setPartnerTelemetry({
+              internet: data.internet || { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 },
+              iptv: data.iptv || { total: 0, active: 0, expired: 0 },
+            });
           } else {
             setPartnerTelemetry({
-              total: 113,
-              active: 101,
-              online: 80,
-              expired: 11,
-              suspend: 0,
-              disabled: 0,
-              new: 1,
+              internet: { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 },
+              iptv: { total: 0, active: 0, expired: 0 },
             });
           }
         })
         .catch(() => {
           setPartnerTelemetry({
-            total: 113,
-            active: 101,
-            online: 80,
-            expired: 11,
-            suspend: 0,
-            disabled: 0,
-            new: 1,
+            internet: { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 },
+            iptv: { total: 0, active: 0, expired: 0 },
           });
         })
         .finally(() => setLoadingPartnerTelemetry(false));
@@ -920,6 +913,55 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       </View>
     </Modal>
   );
+
+  const renderConfirmStatusModal = () => {
+    if (!confirmStatusPartner) return null;
+    const isCurrentlyEnabled = confirmStatusPartner.status === 'enabled';
+    const actionText = isCurrentlyEnabled ? 'DISABLE' : 'ENABLE';
+
+    return (
+      <Modal visible={!!confirmStatusPartner} transparent animationType="fade" onRequestClose={() => setConfirmStatusPartner(null)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <View style={{ backgroundColor: '#ffffff', borderRadius: 16, padding: 24, maxWidth: 440, width: '100%', borderWidth: 1, borderColor: COLORS.glassBorder }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+              <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: isCurrentlyEnabled ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.12)', alignItems: 'center', justifyContent: 'center' }}>
+                <Feather name={isCurrentlyEnabled ? "alert-triangle" : "check-circle"} size={22} color={isCurrentlyEnabled ? "#ef4444" : "#10b981"} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={{ fontSize: 18, fontWeight: '700', color: COLORS.textMain }}>Confirm Partner Status Change</Text>
+                <Text style={{ fontSize: 12, color: COLORS.textMuted }}>Security confirmation required</Text>
+              </View>
+            </View>
+
+            <Text style={{ fontSize: 14, color: COLORS.textMain, lineHeight: 22, marginBottom: 20 }}>
+              Are you sure you want to <Text style={{ fontWeight: '700', color: isCurrentlyEnabled ? '#ef4444' : '#10b981' }}>{actionText}</Text> partner{' '}
+              <Text style={{ fontWeight: '700' }}>{confirmStatusPartner.partner_name}</Text> (#{confirmStatusPartner.partner_id})?
+            </Text>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
+              <TouchableOpacity
+                style={styles.btnSecondary}
+                onPress={() => setConfirmStatusPartner(null)}
+              >
+                <Text style={styles.btnSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.btnPrimary, { backgroundColor: isCurrentlyEnabled ? '#ef4444' : '#10b981' }]}
+                onPress={async () => {
+                  const targetId = confirmStatusPartner.partner_id;
+                  setConfirmStatusPartner(null);
+                  await togglePartnerStatus(targetId);
+                }}
+              >
+                <Text style={styles.btnPrimaryText}>Confirm {actionText}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
 
   const filteredInternetPlans = internetPlans.filter((plan) => {
     const q = searchInetPlan.toLowerCase();
@@ -1952,7 +1994,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                     <Feather name="arrow-up-right" size={13} color="#8b5cf6" />
                   </View>
                   <Text style={[styles.statValueMetric, { color: '#8b5cf6' }]}>
-                    {selectedPartner?.iptv_total_users !== undefined ? selectedPartner.iptv_total_users : Math.floor((partnerTelemetry?.total || 100) * 0.45)}
+                    {partnerTelemetry?.iptv?.total ?? selectedPartner?.iptv_total_users ?? selectedPartner?.active_iptv_accounts ?? 0}
                   </Text>
                 </View>
 
@@ -1966,7 +2008,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                     <Feather name="arrow-up-right" size={13} color={COLORS.accentEmerald} />
                   </View>
                   <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>
-                    {selectedPartner?.active_iptv_accounts !== undefined ? selectedPartner.active_iptv_accounts : Math.floor((partnerTelemetry?.active || 80) * 0.4)}
+                    {partnerTelemetry?.iptv?.active ?? selectedPartner?.active_iptv_accounts ?? 0}
                   </Text>
                 </View>
 
@@ -1980,7 +2022,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                     <Feather name="arrow-up-right" size={13} color={COLORS.accentRose} />
                   </View>
                   <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>
-                    {selectedPartner?.expired_iptv_accounts !== undefined ? selectedPartner.expired_iptv_accounts : Math.floor((partnerTelemetry?.expired || 10) * 0.5)}
+                    {partnerTelemetry?.iptv?.expired ?? selectedPartner?.expired_iptv_accounts ?? 0}
                   </Text>
                 </View>
               </View>
@@ -2091,13 +2133,13 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
               <View style={styles.detailsGridItem}>
                 <Text style={styles.detailsGridLabel}>KYC PROVIDER MAPPING</Text>
                 <Text style={[styles.detailsGridVal, { color: COLORS.accentEmerald, fontWeight: '700' }]}>
-                  {selectedPartner.kyc_provider || 'Signzy (Active)'}
+                  {selectedPartner.kyc_provider || 'Not Configured'}
                 </Text>
               </View>
               <View style={styles.detailsGridItem}>
                 <Text style={styles.detailsGridLabel}>IPTV BRANCH ID</Text>
                 <Text style={[styles.detailsGridVal, { color: '#8b5cf6', fontWeight: '700' }]}>
-                  {selectedPartner.iptv_branch_id || 'BRANCH #101'}
+                  {selectedPartner.iptv_branch_id || '—'}
                 </Text>
               </View>
             </View>
@@ -2108,55 +2150,6 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       </View>
     );
   }
-
-  const renderConfirmStatusModal = () => {
-    if (!confirmStatusPartner) return null;
-    const isCurrentlyEnabled = confirmStatusPartner.status === 'enabled';
-    const actionText = isCurrentlyEnabled ? 'DISABLE' : 'ENABLE';
-
-    return (
-      <Modal visible={!!confirmStatusPartner} transparent animationType="fade">
-        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
-          <View style={{ backgroundColor: '#ffffff', borderRadius: 16, padding: 24, maxWidth: 440, width: '100%', borderWidth: 1, borderColor: COLORS.glassBorder }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 }}>
-              <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: isCurrentlyEnabled ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.12)', alignItems: 'center', justifyContent: 'center' }}>
-                <Feather name={isCurrentlyEnabled ? "alert-triangle" : "check-circle"} size={22} color={isCurrentlyEnabled ? "#ef4444" : "#10b981"} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={{ fontSize: 18, fontWeight: '700', color: COLORS.textMain }}>Confirm Partner Status Change</Text>
-                <Text style={{ fontSize: 12, color: COLORS.textMuted }}>Security confirmation required</Text>
-              </View>
-            </View>
-
-            <Text style={{ fontSize: 14, color: COLORS.textMain, lineHeight: 22, marginBottom: 20 }}>
-              Are you sure you want to <Text style={{ fontWeight: '700', color: isCurrentlyEnabled ? '#ef4444' : '#10b981' }}>{actionText}</Text> partner{' '}
-              <Text style={{ fontWeight: '700' }}>{confirmStatusPartner.partner_name}</Text> (#{confirmStatusPartner.partner_id})?
-            </Text>
-
-            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 12 }}>
-              <TouchableOpacity
-                style={styles.btnSecondary}
-                onPress={() => setConfirmStatusPartner(null)}
-              >
-                <Text style={styles.btnSecondaryText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.btnPrimary, { backgroundColor: isCurrentlyEnabled ? '#ef4444' : '#10b981' }]}
-                onPress={async () => {
-                  const targetId = confirmStatusPartner.partner_id;
-                  setConfirmStatusPartner(null);
-                  await togglePartnerStatus(targetId);
-                }}
-              >
-                <Text style={styles.btnPrimaryText}>Confirm {actionText}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-    );
-  };
 
   // 7. MAIN PARTNERS TABLE SCREEN
   return (
@@ -2237,7 +2230,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
               ) : (
                 filteredPartners.map((item) => {
                   const isEnabled = item.status === 'enabled';
-                  const iptvActive = item.active_iptv_accounts !== undefined && item.active_iptv_accounts !== null ? item.active_iptv_accounts : Math.floor((item.active_internet_accounts || 10) * 0.4);
+                  const iptvActive = item.active_iptv_accounts !== undefined && item.active_iptv_accounts !== null ? item.active_iptv_accounts : (item.iptv_active_count ?? 0);
                   return (
                     <View key={item.partner_id} style={styles.mobileCard}>
                       <View style={styles.mobileCardHeader}>
@@ -2278,7 +2271,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                         </View>
                         <View style={styles.contactRow}>
                           <Feather name="map-pin" size={12} color={COLORS.textMuted} />
-                          <Text style={styles.contactText}>{item.partner_region || 'Hyderabad'}</Text>
+                          <Text style={styles.contactText}>{item.partner_region || '—'}</Text>
                         </View>
 
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4, alignItems: 'center' }}>
@@ -2371,7 +2364,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
               ) : (
                 filteredPartners.map((item) => {
                   const isEnabled = item.status === 'enabled';
-                  const iptvActive = item.active_iptv_accounts !== undefined && item.active_iptv_accounts !== null ? item.active_iptv_accounts : Math.floor((item.active_internet_accounts || 10) * 0.4);
+                  const iptvActive = item.active_iptv_accounts !== undefined && item.active_iptv_accounts !== null ? item.active_iptv_accounts : (item.iptv_active_count ?? 0);
                   return (
                     <View key={item.partner_id} style={styles.tr}>
                       <View style={[{ flex: 0.8 }, styles.td]}>
@@ -2391,7 +2384,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                       <View style={[{ flex: 1.4 }, styles.td]}>
                         <View style={styles.contactRow}>
                           <Feather name="map-pin" size={12} color={COLORS.textMuted} />
-                          <Text style={styles.contactText}>{item.partner_region || 'Hyderabad'}</Text>
+                          <Text style={styles.contactText}>{item.partner_region || '—'}</Text>
                         </View>
                       </View>
 
