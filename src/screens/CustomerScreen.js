@@ -832,11 +832,13 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
     return {
       total: dataset.length,
-      active: dataset.filter((c) => c.status === 'active').length,
+      active: dataset.filter((c) => c.status === 'active' || (c.status_text || '').toLowerCase() === 'active').length,
+      newSub: dataset.filter((c) => c.status === 'new' || (c.status_text || '').toLowerCase() === 'new').length,
+      disabled: dataset.filter((c) => c.status === 'disabled' || (c.status_text || '').toLowerCase() === 'disabled').length,
       online: dataset.filter((c) => c.isOnline).length,
       offline: dataset.filter((c) => !c.isOnline).length,
-      expired: dataset.filter((c) => c.status === 'expired').length,
-      suspend: dataset.filter((c) => c.status === 'suspend').length,
+      expired: dataset.filter((c) => c.status === 'expired' || (c.status_text || '').toLowerCase() === 'expired').length,
+      suspend: dataset.filter((c) => c.status === 'suspend' || (c.status_text || '').toLowerCase() === 'suspend').length,
     };
   }, [currentDataset, selectedOperatorId]);
 
@@ -853,15 +855,19 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
 
     if (activeFilter === 'active' || activeFilter === 'iptv_active') {
-      list = list.filter((c) => c.status === 'active');
+      list = list.filter((c) => c.status === 'active' || (c.status_text || '').toLowerCase() === 'active');
+    } else if (activeFilter === 'new') {
+      list = list.filter((c) => c.status === 'new' || (c.status_text || '').toLowerCase() === 'new');
+    } else if (activeFilter === 'disabled') {
+      list = list.filter((c) => c.status === 'disabled' || (c.status_text || '').toLowerCase() === 'disabled');
     } else if (activeFilter === 'online') {
       list = list.filter((c) => c.isOnline);
     } else if (activeFilter === 'offline') {
       list = list.filter((c) => !c.isOnline);
     } else if (activeFilter === 'expired' || activeFilter === 'iptv_expired') {
-      list = list.filter((c) => c.status === 'expired');
+      list = list.filter((c) => c.status === 'expired' || (c.status_text || '').toLowerCase() === 'expired');
     } else if (activeFilter === 'suspend') {
-      list = list.filter((c) => c.status === 'suspend');
+      list = list.filter((c) => c.status === 'suspend' || (c.status_text || '').toLowerCase() === 'suspend');
     }
 
     if (searchQuery.trim()) {
@@ -1495,6 +1501,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               ? [
                   { id: 'all', label: `All Pioneer STBs (${counts.total})` },
                   { id: 'iptv_active', label: `Active STBs (${counts.active})` },
+                  { id: 'new', label: `New (${counts.newSub})` },
+                  { id: 'disabled', label: `Disabled (${counts.disabled})` },
                   { id: 'iptv_expired', label: `Expired STBs (${counts.expired})` },
                   { id: 'online', label: `Online Streaming (${counts.online})` },
                   { id: 'offline', label: `Offline STBs (${counts.offline})` },
@@ -1516,6 +1524,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               : [
                   { id: 'all', label: `All Subscribers (${counts.total})` },
                   { id: 'active', label: `Active (${counts.active})` },
+                  { id: 'new', label: `New (${counts.newSub})` },
+                  { id: 'disabled', label: `Disabled (${counts.disabled})` },
                   { id: 'online', label: `Online (${counts.online})` },
                   { id: 'offline', label: `Offline (${counts.offline})` },
                   { id: 'expired', label: `Expired (${counts.expired})` },
@@ -1639,6 +1649,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 const isAccActive = cust.status === 'active' || (cust.status_text || '').toLowerCase() === 'active';
                 const isAccExpired = cust.status === 'expired' || (cust.status_text || '').toLowerCase() === 'expired';
                 const isAccNew = cust.status === 'new' || (cust.status_text || '').toLowerCase() === 'new';
+                const isAccDisabled = cust.status === 'disabled' || (cust.status_text || '').toLowerCase() === 'disabled';
                 const balInfo = calculateBalanceDays(cust.expiration || cust.expiryDate);
                 const isPassRevealed = !!showPasswordMap[cust.id];
                 const rawPass = cust.password;
@@ -1665,7 +1676,15 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                         <Text
                           style={[
                             styles.tdClickableUsername,
-                            { color: isAccNew ? '#d97706' : (isAccActive ? '#16a34a' : (isAccExpired ? '#dc2626' : COLORS.primary)) }
+                            isAccDisabled
+                              ? { textDecorationLine: 'line-through', color: '#64748b' }
+                              : isAccNew
+                              ? { color: '#d97706' }
+                              : isAccActive
+                              ? { color: '#16a34a' }
+                              : isAccExpired
+                              ? { color: '#dc2626' }
+                              : { color: COLORS.primary }
                           ]}
                         >
                           {cust.username}
