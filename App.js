@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { StyleSheet, View, SafeAreaView, StatusBar, useWindowDimensions, Text, TouchableOpacity, Platform } from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import { COLORS } from './src/constants/theme';
 import { setApiConfig, onUnauthorized, isJwtExpired } from './src/services/oneBssApi';
 import { Sidebar } from './src/components/Sidebar';
@@ -212,6 +213,29 @@ export default function App() {
     return () => clearInterval(interval);
   }, [user]);
 
+  // Global Internet Connectivity Offline Detector (Item 22)
+  const [isOffline, setIsOffline] = useState(typeof navigator !== 'undefined' ? !navigator.onLine : false);
+
+  React.useEffect(() => {
+    const handleOffline = () => {
+      setIsOffline(true);
+      toast.error('Network Offline: Internet connection is not available.');
+    };
+    const handleOnline = () => {
+      setIsOffline(false);
+      toast.success('Network Restored: Internet connection is active.');
+    };
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('offline', handleOffline);
+      window.addEventListener('online', handleOnline);
+      return () => {
+        window.removeEventListener('offline', handleOffline);
+        window.removeEventListener('online', handleOnline);
+      };
+    }
+  }, []);
+
   // Sidebar Auto-Closing / Collapsible State (Defaults to collapsed, expands on hover)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [sidebarOpenMobile, setSidebarOpenMobile] = useState(false);
@@ -287,6 +311,15 @@ export default function App() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+
+      {isOffline && (
+        <View style={styles.globalOfflineBanner}>
+          <Feather name="wifi-off" size={15} color="#ffffff" />
+          <Text style={styles.globalOfflineText}>
+            Internet Connection Not Available. Operating in Offline Mode.
+          </Text>
+        </View>
+      )}
 
       <View style={styles.layout}>
         {/* Desktop Sidebar (Inline flex layout) */}
@@ -438,5 +471,22 @@ const styles = StyleSheet.create({
   contentArea: {
     flex: 1,
     width: '100%',
+  },
+  globalOfflineBanner: {
+    backgroundColor: '#ef4444',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    width: '100%',
+    zIndex: 99999,
+  },
+  globalOfflineText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'center',
   },
 });

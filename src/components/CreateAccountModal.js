@@ -44,6 +44,9 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
   const [iptvBaseUrl, setIptvBaseUrl] = useState('');
   const [iptvKey, setIptvKey] = useState('');
   const [iptvOperatorId, setIptvOperatorId] = useState('');
+  const [iptvBranchId, setIptvBranchId] = useState('');
+
+  const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -71,8 +74,10 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       setIptvBaseUrl('');
       setIptvKey('');
       setIptvOperatorId('');
+      setIptvBranchId('');
       setPartnerDropdownOpen(false);
       setBranchDropdownOpen(false);
+      setRoleDropdownOpen(false);
     }
   }, [visible, initialRole]);
 
@@ -304,6 +309,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
         iptv_base_url: iptvBaseUrl.trim(),
         iptv_key: iptvKey.trim(),
         iptv_operator_id: Number(iptvOperatorId) || 0,
+        iptv_branch_id: iptvBranchId.trim(),
       },
     };
 
@@ -387,15 +393,57 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       <ScrollView style={styles.fullScreenContent} contentContainerStyle={{ paddingHorizontal: isMobile ? 14 : 28, paddingVertical: 20 }}>
         {/* Role Type Selector */}
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionCardTitle}>ACCOUNT ROLE REGISTRATION TYPE</Text>
-          <View style={styles.roleToggleRow}>
+          <Text style={styles.sectionCardTitle}>ACCOUNT ROLE REGISTRATION TYPE (SELECT ROLE)</Text>
+          <View style={[styles.inputGroup, { marginTop: 8 }]}>
+            <TouchableOpacity
+              style={styles.dropdownSelectTrigger}
+              onPress={() => setRoleDropdownOpen(!roleDropdownOpen)}
+            >
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                <Feather name={role === 'admin' ? "shield" : "briefcase"} size={16} color={COLORS.primary} />
+                <Text style={styles.dropdownSelectValueText}>
+                  {role === 'operator' ? 'OPERATOR ACCOUNT (Default)' :
+                   role === 'admin' ? 'ADMIN REGIONAL ACCOUNT' :
+                   role === 'sub_operator' ? 'SUB-OPERATOR ACCOUNT' : 'REGIONAL MANAGER ACCOUNT'}
+                </Text>
+              </View>
+              <Feather name={roleDropdownOpen ? "chevron-up" : "chevron-down"} size={18} color={COLORS.textMuted} />
+            </TouchableOpacity>
+
+            {roleDropdownOpen && (
+              <View style={styles.dropdownMenuBox}>
+                {[
+                  { id: 'operator', label: 'OPERATOR ACCOUNT (Default)', icon: 'briefcase' },
+                  { id: 'admin', label: 'ADMIN REGIONAL ACCOUNT', icon: 'shield' },
+                  { id: 'sub_operator', label: 'SUB-OPERATOR ACCOUNT', icon: 'user' },
+                  { id: 'regional_manager', label: 'REGIONAL MANAGER ACCOUNT', icon: 'map-pin' },
+                ].map((r) => (
+                  <TouchableOpacity
+                    key={r.id}
+                    style={[styles.dropdownMenuItem, role === r.id && styles.dropdownMenuItemActive]}
+                    onPress={() => {
+                      setRole(r.id);
+                      setRoleDropdownOpen(false);
+                    }}
+                  >
+                    <Feather name={r.icon} size={15} color={role === r.id ? COLORS.primary : COLORS.textMuted} />
+                    <Text style={[styles.dropdownMenuItemText, role === r.id && styles.dropdownMenuItemTextActive]}>
+                      {r.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+          </View>
+
+          <View style={[styles.roleToggleRow, { marginTop: 10 }]}>
             <TouchableOpacity
               style={[styles.roleOption, role === 'operator' && styles.roleOptionOperatorActive]}
               onPress={() => setRole('operator')}
             >
               <Feather name="briefcase" size={16} color={role === 'operator' ? '#ffffff' : COLORS.textMuted} />
               <Text style={[styles.roleOptionText, role === 'operator' && styles.roleOptionTextActive]}>
-                OPERATOR ACCOUNT (Default)
+                OPERATOR
               </Text>
             </TouchableOpacity>
 
@@ -405,7 +453,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
             >
               <Feather name="shield" size={16} color={role === 'admin' ? '#ffffff' : COLORS.textMuted} />
               <Text style={[styles.roleOptionText, role === 'admin' && styles.roleOptionTextActive]}>
-                ADMIN REGIONAL ACCOUNT
+                ADMIN
               </Text>
             </TouchableOpacity>
           </View>
@@ -758,6 +806,17 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
                 value={iptvOperatorId}
                 onChangeText={setIptvOperatorId}
                 keyboardType="numeric"
+                placeholderTextColor={COLORS.textDim}
+              />
+            </View>
+
+            <View style={[styles.inputGroup, { flex: 1 }]}>
+              <Text style={styles.label}>IPTV BRANCH ID / MAPPING</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Optional IPTV Branch ID"
+                value={iptvBranchId}
+                onChangeText={setIptvBranchId}
                 placeholderTextColor={COLORS.textDim}
               />
             </View>

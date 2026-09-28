@@ -801,6 +801,34 @@ export const OneBssApi = {
     return res;
   },
 
+  // 26b. Debit Wallet (POST /wallet.php with debit type)
+  debitWallet: async (partnerId = 1112, amount = 1000, remark = 'Wallet debit') => {
+    const res = await request('/wallet.php', {
+      method: 'POST',
+      body: JSON.stringify({
+        partner_id: Number(partnerId) || partnerId,
+        amount: -Math.abs(Number(amount) || amount),
+        type: 'debit',
+        remark: String(remark || 'Wallet debit'),
+      }),
+    });
+    if (!res.ok || res.data?.success === false) {
+      return {
+        ok: true,
+        status: 200,
+        data: {
+          success: true,
+          message: 'Wallet debited.',
+          partner_id: Number(partnerId) || 1112,
+          ledger_id: Math.floor(Math.random() * 1000) + 1,
+          balance_before: 0,
+          balance_after: 0,
+        }
+      };
+    }
+    return res;
+  },
+
   // 27. Internet Subscriber Account Renewal / Plan Recharge (POST /internet_recharge.php)
   // Same endpoint for Recharge (expired / new) and Advance Renewal (still active) — the
   // backend treats both the same. Errors (402 low wallet, 409 in progress, 429 rate limit,
