@@ -91,6 +91,7 @@ const mapCustomersListToBroadbandRow = (item, index, accIndex = 0) => {
   const subplanName = resolveApiField(item.subplan_name, intAcc.subplan_name) || (intAcc.subplan_id ? `Sub plan #${intAcc.subplan_id}` : '-');
   const expiration = resolveApiField(item.expiration, intAcc.expiration);
   const partnerName = resolveApiField(item.partner_name, intAcc.partner_name, item.partner, item.partner_title, item.partner_id);
+  const partnerId = resolveApiField(item.partner_id, intAcc.partner_id, item.operator_id, item.partner);
   const passwordVal = item.password !== undefined ? item.password : (intAcc.password !== undefined ? intAcc.password : (item.pass !== undefined ? item.pass : intAcc.pass));
 
   return {
@@ -103,6 +104,8 @@ const mapCustomersListToBroadbandRow = (item, index, accIndex = 0) => {
     username: username,
     password: passwordVal,
     partner_name: partnerName,
+    partner_id: partnerId,
+    operator_id: partnerId,
     status_text: statusText,
     online: onlineStatus,
     package_name: packageName,
@@ -155,6 +158,7 @@ const mapCustomersListToIptvRow = (item, index, accIndex = 0) => {
   const subplanName = resolveApiField(item.subplan_name, iptvAcc.subplan_name, intAcc.subplan_name) || '1 Month';
   const expiration = resolveApiField(item.expiration, iptvAcc.expiration, iptvAcc.expriration, intAcc.expiration);
   const partnerName = resolveApiField(item.partner_name, iptvAcc.partner_name, intAcc.partner_name, item.partner, item.partner_title, item.partner_id);
+  const partnerId = resolveApiField(item.partner_id, iptvAcc.partner_id, intAcc.partner_id, item.operator_id, item.partner);
   const passwordVal = item.password !== undefined ? item.password : (iptvAcc.password !== undefined ? iptvAcc.password : (intAcc.password !== undefined ? intAcc.password : (item.pass !== undefined ? item.pass : iptvAcc.pass)));
   const custNum = item.cust_id || index + 1;
 
@@ -167,6 +171,8 @@ const mapCustomersListToIptvRow = (item, index, accIndex = 0) => {
     username: username,
     password: passwordVal,
     partner_name: partnerName,
+    partner_id: partnerId,
+    operator_id: partnerId,
     status_text: statusText,
     online: onlineStatus,
     package_name: packageName,
@@ -252,16 +258,13 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
   }, [user]);
 
-  const loadCustomerDataFromApi = async (overrideLimit) => {
+  const loadCustomerDataFromApi = async () => {
     setLoadingData(true);
     try {
       if (user?.token) setApiConfig(undefined, user.token);
 
-      const targetLimit = overrideLimit !== undefined ? overrideLimit : recordsLimit;
-      const limitVal = (targetLimit === 'all' || targetLimit === 'ALL') ? 5000 : Number(targetLimit);
-
-      // Fetch live customer records directly from /customers_list.php
-      const custRes = await OneBssApi.getCustomersList(1, limitVal);
+      // Fetch live customer records directly from /customers_list.php (up to 5000)
+      const custRes = await OneBssApi.getCustomersList(1, 5000);
       const rawCustomers = custRes.data && Array.isArray(custRes.data) ? custRes.data : (custRes.data?.data || []);
 
       const list = Array.isArray(rawCustomers) ? rawCustomers : [];
@@ -276,8 +279,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   };
 
   useEffect(() => {
-    loadCustomerDataFromApi(recordsLimit);
-  }, [user, recordsLimit]);
+    loadCustomerDataFromApi();
+  }, [user]);
 
   // Navigation inside this screen:
   //   list  ->  customer accounts overview (cards)  ->  full account detail screen
@@ -786,7 +789,12 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const counts = useMemo(() => {
     let dataset = currentDataset;
     if (selectedOperatorId) {
-      dataset = dataset.filter((c) => String(c.partner_id || c.operator_id) === String(selectedOperatorId));
+      const targetOp = String(selectedOperatorId).toLowerCase().trim();
+      dataset = dataset.filter((c) => {
+        const pId = String(c.partner_id || c.operator_id || '').toLowerCase().trim();
+        const pName = String(c.partner_name || '').toLowerCase().trim();
+        return pId === targetOp || pName === targetOp || (pName && pName.includes(targetOp));
+      });
     }
     return {
       total: dataset.length,
@@ -802,7 +810,12 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     let list = currentDataset;
 
     if (selectedOperatorId) {
-      list = list.filter((c) => String(c.partner_id || c.operator_id) === String(selectedOperatorId));
+      const targetOp = String(selectedOperatorId).toLowerCase().trim();
+      list = list.filter((c) => {
+        const pId = String(c.partner_id || c.operator_id || '').toLowerCase().trim();
+        const pName = String(c.partner_name || '').toLowerCase().trim();
+        return pId === targetOp || pName === targetOp || (pName && pName.includes(targetOp));
+      });
     }
 
     if (activeFilter === 'active' || activeFilter === 'iptv_active') {
@@ -1395,8 +1408,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       {/* UNIFIED SEARCH CONTROL CARD */}
       <View style={styles.unifiedControlCard}>
         {/* Search Bar, Operator Filter & Add Customer Button */}
-        <View style={[styles.topControlRow, { gap: 10, flexWrap: 'wrap' }]}>
-          <View style={[styles.searchBox, { flex: 1, maxWidth: '100%' }]}>
+        <View style={[styles.topControlRow, { gap: 10, flexWrap: 'wrap', alignItems: 'center' }]}>
+          <View style={[styles.searchBox, { width: isMobile ? '100%' : 320, maxWidth: '100%' }]}>
             <Feather name="search" size={15} color={COLORS.textDim} />
             <TextInput
               style={styles.searchInput}
@@ -1439,29 +1452,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               <Text style={styles.addCustomerHeaderBtnText}>Add Customer</Text>
             </TouchableOpacity>
           )}
-
-          {/* Page Limits Selector (100, 200, 500, ALL) */}
-          <View style={styles.limitRowContainer}>
-            <Text style={styles.limitLabelText}>Limit:</Text>
-            {[100, 200, 500, 'ALL'].map((limitOpt) => {
-              const limitKey = limitOpt === 'ALL' ? 'all' : limitOpt;
-              const isSelected = recordsLimit === limitKey || (recordsLimit === 'all' && limitOpt === 'ALL');
-              return (
-                <TouchableOpacity
-                  key={String(limitOpt)}
-                  style={[styles.limitChip, isSelected && styles.limitChipActive]}
-                  onPress={() => {
-                    const val = limitOpt === 'ALL' ? 'all' : limitOpt;
-                    setRecordsLimit(val);
-                  }}
-                >
-                  <Text style={[styles.limitChipText, isSelected && styles.limitChipTextActive]}>
-                    {limitOpt}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
         </View>
 
         {/* Bottom Filter Chips Line */}
@@ -1515,6 +1505,51 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       {/* SERVICE DATA DISPLAY TABLE */}
       <View style={styles.card}>
         <View style={{ width: '100%' }}>
+          {/* PAGINATION CONTROLS BAR (TOP) */}
+          <View style={{ flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight || '#e2e8f0', gap: 10, backgroundColor: COLORS.cardBg || '#ffffff' }}>
+            <Text style={{ fontSize: 12, color: COLORS.textMuted || '#64748b' }}>
+              Showing {filteredCustomers.length === 0 ? 0 : (currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filteredCustomers.length)} of {filteredCustomers.length} subscribers
+            </Text>
+
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              {/* Items Per Page Selector */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={{ fontSize: 12, color: COLORS.textMuted || '#64748b' }}>Per page:</Text>
+                {[10, 25, 50, 100].map((size) => (
+                  <TouchableOpacity
+                    key={size}
+                    style={[{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: COLORS.borderLight || '#e2e8f0' }, pageSize === size && { backgroundColor: COLORS.primary || '#3b82f6', borderColor: COLORS.primary || '#3b82f6' }]}
+                    onPress={() => { setPageSize(size); setCurrentPage(1); }}
+                  >
+                    <Text style={[{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted || '#64748b' }, pageSize === size && { color: '#ffffff' }]}>{size}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              {/* Previous & Next Buttons */}
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <TouchableOpacity
+                  style={[{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: COLORS.borderLight || '#e2e8f0', backgroundColor: COLORS.bgSecondary || '#f8fafc' }, currentPage === 1 && { opacity: 0.4 }]}
+                  onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMain || '#000000' }}>Previous</Text>
+                </TouchableOpacity>
+
+                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.textMain || '#000000', paddingHorizontal: 4 }}>
+                  Page {currentPage} of {totalPages}
+                </Text>
+
+                <TouchableOpacity
+                  style={[{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: COLORS.borderLight || '#e2e8f0', backgroundColor: COLORS.bgSecondary || '#f8fafc' }, currentPage >= totalPages && { opacity: 0.4 }]}
+                  onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage >= totalPages}
+                >
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMain || '#000000' }}>Next</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
           {/* Table Header */}
           <View style={styles.tableHeader}>
             <Text style={[styles.th, { flex: 1.4 }]}>Username {viewMode === 'iptv' ? '/ STB' : ''}</Text>
@@ -1690,52 +1725,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               );
             })
           )}
-        </View>
-
-        {/* PAGINATION CONTROLS BAR */}
-        <View style={{ flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderTopWidth: 1, borderTopColor: COLORS.borderLight || '#e2e8f0', gap: 10, backgroundColor: COLORS.cardBg || '#ffffff' }}>
-          <Text style={{ fontSize: 12, color: COLORS.textMuted || '#64748b' }}>
-            Showing {filteredCustomers.length === 0 ? 0 : (currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filteredCustomers.length)} of {filteredCustomers.length} subscribers
-          </Text>
-
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-            {/* Items Per Page Selector */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Text style={{ fontSize: 12, color: COLORS.textMuted || '#64748b' }}>Per page:</Text>
-              {[10, 25, 50, 100].map((size) => (
-                <TouchableOpacity
-                  key={size}
-                  style={[{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: COLORS.borderLight || '#e2e8f0' }, pageSize === size && { backgroundColor: COLORS.primary || '#3b82f6', borderColor: COLORS.primary || '#3b82f6' }]}
-                  onPress={() => { setPageSize(size); setCurrentPage(1); }}
-                >
-                  <Text style={[{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted || '#64748b' }, pageSize === size && { color: '#ffffff' }]}>{size}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            {/* Previous & Next Buttons */}
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <TouchableOpacity
-                style={[{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: COLORS.borderLight || '#e2e8f0', backgroundColor: COLORS.bgSecondary || '#f8fafc' }, currentPage === 1 && { opacity: 0.4 }]}
-                onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                disabled={currentPage === 1}
-              >
-                <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMain || '#000000' }}>Previous</Text>
-              </TouchableOpacity>
-
-              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.textMain || '#000000', paddingHorizontal: 4 }}>
-                Page {currentPage} of {totalPages}
-              </Text>
-
-              <TouchableOpacity
-                style={[{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: COLORS.borderLight || '#e2e8f0', backgroundColor: COLORS.bgSecondary || '#f8fafc' }, currentPage >= totalPages && { opacity: 0.4 }]}
-                onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                disabled={currentPage >= totalPages}
-              >
-                <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMain || '#000000' }}>Next</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
         </View>
       </View>
 
