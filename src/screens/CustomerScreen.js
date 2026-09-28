@@ -221,6 +221,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [activeFilter, setActiveFilter] = useState(initialFilter);
   const [searchQuery, setSearchQuery] = useState('');
   const [recordsLimit, setRecordsLimit] = useState(100);
+  const [showPasswordMap, setShowPasswordMap] = useState({});
   const [resetPasswordModalItem, setResetPasswordModalItem] = useState(null);
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [showNewPassword, setShowNewPassword] = useState(false);
@@ -1517,6 +1518,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           {/* Table Header */}
           <View style={styles.tableHeader}>
             <Text style={[styles.th, { flex: 1.4 }]}>Username {viewMode === 'iptv' ? '/ STB' : ''}</Text>
+            <Text style={[styles.th, { flex: 1.2 }]}>Password</Text>
             <Text style={[styles.th, { flex: 1.1 }]}>Connectivity</Text>
             <Text style={[styles.th, { flex: 1.3 }]}>Mobile</Text>
             <Text style={[styles.th, { flex: 1.8 }]}>Full Name</Text>
@@ -1555,10 +1557,12 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               const isAccExpired = cust.status === 'expired' || (cust.status_text || '').toLowerCase() === 'expired';
               const isAccNew = cust.status === 'new' || (cust.status_text || '').toLowerCase() === 'new';
               const balInfo = calculateBalanceDays(cust.expiration || cust.expiryDate);
+              const isPassRevealed = !!showPasswordMap[cust.id];
+              const hasPassword = cust.password !== undefined && cust.password !== null && String(cust.password).trim() !== '';
 
               return (
                 <View key={cust.id ? `cust_${cust.id}_${idx}` : idx} style={styles.tr}>
-                  {/* Username / Password / STB */}
+                  {/* Username / STB */}
                   <View style={{ flex: 1.4 }}>
                     <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
                       <Text
@@ -1570,10 +1574,27 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                         {cust.username}
                       </Text>
                     </TouchableOpacity>
-                    <Text style={[styles.tdSub, { fontSize: 10, color: '#64748b' }]}>
-                      Pass: {cust.password !== undefined && cust.password !== null && cust.password !== '' ? String(cust.password) : 'null'}
-                    </Text>
                     {viewMode === 'iptv' && cust.stb_id ? <Text style={styles.tdSub}>STB: {cust.stb_id}</Text> : null}
+                  </View>
+
+                  {/* Password Column with Eye Toggle */}
+                  <View style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.tdText, { fontFamily: Platform?.OS === 'web' ? 'monospace' : undefined }]}>
+                      {isPassRevealed
+                        ? (hasPassword ? String(cust.password) : 'null')
+                        : (hasPassword ? '••••••••' : 'null')}
+                    </Text>
+                    <TouchableOpacity
+                      onPress={() => setShowPasswordMap((prev) => ({ ...prev, [cust.id]: !prev[cust.id] }))}
+                      style={{ padding: 2 }}
+                      title={isPassRevealed ? 'Hide Password' : 'Show Password'}
+                    >
+                      <Feather
+                        name={isPassRevealed ? 'eye-off' : 'eye'}
+                        size={13}
+                        color={isPassRevealed ? COLORS.primary : '#64748b'}
+                      />
+                    </TouchableOpacity>
                   </View>
 
                   {/* Connectivity Badge */}
