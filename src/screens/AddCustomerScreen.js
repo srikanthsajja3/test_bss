@@ -634,7 +634,7 @@ class AddCustomerErrorBoundary extends React.Component {
 // Screen
 // ---------------------------------------------------------------------------
 
-const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new', existingUser, onSuccess, onCancel }) => {
+const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new', existingUser, isIptvMode = false, onSuccess, onCancel }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
   const operatorId = operatorIdProp || user?.partner_id || user?.operator_id;

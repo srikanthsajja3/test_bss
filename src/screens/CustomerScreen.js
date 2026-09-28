@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Modal, ActivityIndicator, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Modal, ActivityIndicator, useWindowDimensions, Linking } from 'react-native';
 import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi, setApiConfig } from '../services/oneBssApi';
@@ -11,6 +11,55 @@ import { PasswordModal, MacBindingsModal, SessionHistoryModal, VerifyCustomerMod
 import { CustomerPhoto, isSuperAdmin, isAccountVerified } from '../components/internet/shared';
 import { IptvRechargeModal } from '../components/iptv/IptvRechargeModal';
 import { CustomerAccountsOverview, defaultRechargeType, formatApiDate, normaliseInternetAccount, normaliseIptvAccount } from '../components/CustomerAccountsOverview';
+
+const calculateBalanceDays = (expiryDateStr) => {
+  if (!expiryDateStr || expiryDateStr === '—' || expiryDateStr === 'N/A') {
+    return { text: 'N/A', days: null, status: 'unknown' };
+  }
+
+  try {
+    let dateObj = null;
+    if (typeof expiryDateStr === 'string' && expiryDateStr.includes('-')) {
+      const parts = expiryDateStr.split('-');
+      if (parts[0].length === 4) {
+        dateObj = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+      } else if (parts[2].length === 4) {
+        dateObj = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+      }
+    } else if (typeof expiryDateStr === 'string' && expiryDateStr.includes('/')) {
+      const parts = expiryDateStr.split('/');
+      if (parts[2].length === 4) {
+        dateObj = new Date(Number(parts[2]), Number(parts[1]) - 1, Number(parts[0]));
+      }
+    }
+
+    if (!dateObj || isNaN(dateObj.getTime())) {
+      dateObj = new Date(expiryDateStr);
+    }
+
+    if (isNaN(dateObj.getTime())) {
+      return { text: String(expiryDateStr), days: null, status: 'unknown' };
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    dateObj.setHours(0, 0, 0, 0);
+
+    const diffTime = dateObj.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays > 0) {
+      return { text: `${diffDays} ${diffDays === 1 ? 'Day' : 'Days'} Left`, days: diffDays, status: 'active' };
+    } else if (diffDays === 0) {
+      return { text: 'Expires Today', days: 0, status: 'warning' };
+    } else {
+      const absDays = Math.abs(diffDays);
+      return { text: `${absDays} ${absDays === 1 ? 'Day' : 'Days'} Expired`, days: diffDays, status: 'expired' };
+    }
+  } catch (e) {
+    return { text: '—', days: null, status: 'unknown' };
+  }
+};
 
 const formatApiValue = (val) => {
   if (val === null || val === undefined || val === 'null') return '';
@@ -170,11 +219,29 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [resettingPassword, setResettingPassword] = useState(false);
   const [showAddCustomer, setShowAddCustomer] = useState(false);
 
+  const [sortField, setSortField] = useState(null);
+  const [sortDirection, setSortDirection] = useState('asc');
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [operators, setOperators] = useState([]);
+  const [selectedOperatorId, setSelectedOperatorId] = useState('');
+
   // Live datasets loaded from API
   const [iptvDataset, setIptvDataset] = useState([]);
   const [broadbandDataset, setBroadbandDataset] = useState([]);
   const [rawCustomers, setRawCustomers] = useState([]);
   const [loadingData, setLoadingData] = useState(true);
+
+  useEffect(() => {
+    if (isSuperAdmin(user) || (user?.account_role || user?.role || '').toLowerCase() === 'admin') {
+      OneBssApi.getPartners()
+        .then((res) => {
+          const list = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+          setOperators(list);
+        })
+        .catch(() => {});
+    }
+  }, [user]);
 
   const loadCustomerDataFromApi = async (overrideLimit) => {
     setLoadingData(true);
@@ -708,22 +775,33 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   }, [viewMode, iptvDataset, broadbandDataset]);
 
   const counts = useMemo(() => {
+    let dataset = currentDataset;
+    if (selectedOperatorId) {
+      dataset = dataset.filter((c) => String(c.partner_id || c.operator_id) === String(selectedOperatorId));
+    }
     return {
-      total: currentDataset.length,
-      active: currentDataset.filter((c) => c.status === 'active').length,
-      online: currentDataset.filter((c) => c.isOnline).length,
-      expired: currentDataset.filter((c) => c.status === 'expired').length,
-      suspend: currentDataset.filter((c) => c.status === 'suspend').length,
+      total: dataset.length,
+      active: dataset.filter((c) => c.status === 'active').length,
+      online: dataset.filter((c) => c.isOnline).length,
+      offline: dataset.filter((c) => !c.isOnline).length,
+      expired: dataset.filter((c) => c.status === 'expired').length,
+      suspend: dataset.filter((c) => c.status === 'suspend').length,
     };
-  }, [currentDataset]);
+  }, [currentDataset, selectedOperatorId]);
 
   const filteredCustomers = useMemo(() => {
     let list = currentDataset;
+
+    if (selectedOperatorId) {
+      list = list.filter((c) => String(c.partner_id || c.operator_id) === String(selectedOperatorId));
+    }
 
     if (activeFilter === 'active' || activeFilter === 'iptv_active') {
       list = list.filter((c) => c.status === 'active');
     } else if (activeFilter === 'online') {
       list = list.filter((c) => c.isOnline);
+    } else if (activeFilter === 'offline') {
+      list = list.filter((c) => !c.isOnline);
     } else if (activeFilter === 'expired' || activeFilter === 'iptv_expired') {
       list = list.filter((c) => c.status === 'expired');
     } else if (activeFilter === 'suspend') {
@@ -731,19 +809,43 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
 
     if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      list = list.filter(
-        (c) =>
-          (c.name && c.name.toLowerCase().includes(q)) ||
-          (c.mobile && String(c.mobile).includes(q)) ||
-          (c.username && c.username.toLowerCase().includes(q)) ||
-          (c.package_name && c.package_name.toLowerCase().includes(q)) ||
-          (c.stb_id && c.stb_id.toLowerCase().includes(q)) ||
-          (c.stb_mac && c.stb_mac.toLowerCase().includes(q))
-      );
+      const q = searchQuery.toLowerCase().trim();
+      const qDigits = q.replace(/\D/g, '');
+      list = list.filter((c) => {
+        const nameMatch = (c.name && c.name.toLowerCase().includes(q)) || (c.full_name && c.full_name.toLowerCase().includes(q));
+        const userMatch = c.username && c.username.toLowerCase().includes(q);
+        const idMatch = String(c.id || '').includes(q) || String(c.cust_id || '').includes(q) || String(c.internet_id || '').includes(q);
+        const pkgMatch = (c.package_name && c.package_name.toLowerCase().includes(q)) || (c.subplan_name && c.subplan_name.toLowerCase().includes(q));
+        const stbMatch = (c.stb_id && c.stb_id.toLowerCase().includes(q)) || (c.stb_mac && c.stb_mac.toLowerCase().includes(q));
+        const ipMatch = c.ip && c.ip.toLowerCase().includes(q);
+        const mobileMatch = c.mobile && (String(c.mobile).includes(q) || (qDigits && String(c.mobile).replace(/\D/g, '').includes(qDigits)));
+        return nameMatch || userMatch || idMatch || pkgMatch || stbMatch || ipMatch || mobileMatch;
+      });
     }
+
+    if (sortField === 'expiration') {
+      list = [...list].sort((a, b) => {
+        const dateA = a.expiration || a.expiryDate || '';
+        const dateB = b.expiration || b.expiryDate || '';
+        const tA = dateA ? new Date(dateA).getTime() || 0 : 0;
+        const tB = dateB ? new Date(dateB).getTime() || 0 : 0;
+        return sortDirection === 'asc' ? tA - tB : tB - tA;
+      });
+    }
+
     return list;
-  }, [currentDataset, activeFilter, searchQuery]);
+  }, [currentDataset, activeFilter, searchQuery, sortField, sortDirection, selectedOperatorId]);
+
+  const paginatedCustomers = useMemo(() => {
+    const start = (currentPage - 1) * pageSize;
+    return filteredCustomers.slice(start, start + pageSize);
+  }, [filteredCustomers, currentPage, pageSize]);
+
+  const totalPages = Math.ceil(filteredCustomers.length / pageSize) || 1;
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [activeFilter, searchQuery, viewMode, selectedOperatorId, recordsLimit, pageSize]);
 
   const handleToggleMode = (newMode) => {
     setViewMode(newMode);
@@ -898,6 +1000,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       <AddCustomerScreen
         user={user}
         operatorId={user?.partner_id || user?.operator_id}
+        isIptvMode={viewMode === 'iptv'}
         onCancel={() => setShowAddCustomer(false)}
         onSuccess={() => {
           setShowAddCustomer(false);
@@ -1282,7 +1385,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
       {/* UNIFIED SEARCH CONTROL CARD */}
       <View style={styles.unifiedControlCard}>
-        {/* Search Bar & Add Customer Button */}
+        {/* Search Bar, Operator Filter & Add Customer Button */}
         <View style={[styles.topControlRow, { gap: 10, flexWrap: 'wrap' }]}>
           <View style={[styles.searchBox, { flex: 1, maxWidth: '100%' }]}>
             <Feather name="search" size={15} color={COLORS.textDim} />
@@ -1294,6 +1397,33 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               placeholderTextColor={COLORS.textDim}
             />
           </View>
+
+          {(isSuperAdmin(user) || (user?.account_role || user?.role || '').toLowerCase() === 'admin') && operators.length > 0 && (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.cardBg || '#ffffff', borderWidth: 1, borderColor: COLORS.borderLight || '#cbd5e1', borderRadius: 8, paddingHorizontal: 10, height: 40 }}>
+              <Feather name="filter" size={14} color={COLORS.textDim} />
+              <select
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  color: COLORS.textMain || '#000000',
+                  fontSize: 13,
+                  outline: 'none',
+                  cursor: 'pointer',
+                  fontWeight: '600',
+                }}
+                value={selectedOperatorId}
+                onChange={(e) => setSelectedOperatorId(e.target.value)}
+              >
+                <option value="">All Operators ({operators.length})</option>
+                {operators.map((op) => (
+                  <option key={op.partner_id || op.id} value={op.partner_id || op.id}>
+                    #{op.partner_id || op.id} - {op.partner_name || op.company_name}
+                  </option>
+                ))}
+              </select>
+            </View>
+          )}
+
           {((user?.role || user?.account_role || '').toLowerCase() === 'operator') && (
             <TouchableOpacity style={styles.addCustomerHeaderBtn} onPress={() => setShowAddCustomer(true)}>
               <Feather name="user-plus" size={14} color="#ffffff" />
@@ -1334,6 +1464,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   { id: 'iptv_active', label: `Active STBs (${counts.active})` },
                   { id: 'iptv_expired', label: `Expired STBs (${counts.expired})` },
                   { id: 'online', label: `Online Streaming (${counts.online})` },
+                  { id: 'offline', label: `Offline STBs (${counts.offline})` },
                 ].map((tab) => {
                   const isActive =
                     activeFilter === tab.id ||
@@ -1353,6 +1484,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   { id: 'all', label: `All Subscribers (${counts.total})` },
                   { id: 'active', label: `Active (${counts.active})` },
                   { id: 'online', label: `Online (${counts.online})` },
+                  { id: 'offline', label: `Offline (${counts.offline})` },
                   { id: 'expired', label: `Expired (${counts.expired})` },
                   { id: 'suspend', label: `Suspended (${counts.suspend})` },
                 ].map((tab) => {
@@ -1373,356 +1505,201 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
       {/* SERVICE DATA DISPLAY TABLE */}
       <View style={styles.card}>
+        <View style={{ width: '100%' }}>
+          {/* Table Header */}
+          <View style={styles.tableHeader}>
+            <Text style={[styles.th, { flex: 1.4 }]}>Username {viewMode === 'iptv' ? '/ STB' : ''}</Text>
+            <Text style={[styles.th, { flex: 1.1 }]}>Status</Text>
+            <Text style={[styles.th, { flex: 1.1 }]}>Connectivity</Text>
+            <Text style={[styles.th, { flex: 1.3 }]}>Mobile</Text>
+            <Text style={[styles.th, { flex: 1.8 }]}>Full Name</Text>
+            <Text style={[styles.th, { flex: 1.8 }]}>Package Name</Text>
+            <Text style={[styles.th, { flex: 1.4 }]}>Subplan Name</Text>
+            <TouchableOpacity
+              style={[{ flex: 2.2, flexDirection: 'row', alignItems: 'center', gap: 4 }, styles.th]}
+              onPress={() => {
+                if (sortField === 'expiration') {
+                  setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
+                } else {
+                  setSortField('expiration');
+                  setSortDirection('asc');
+                }
+              }}
+            >
+              <Text style={[styles.th, { flex: 0 }]}>Expiration & Balance</Text>
+              <Feather
+                name={sortField === 'expiration' ? (sortDirection === 'asc' ? 'arrow-up' : 'arrow-down') : 'arrow-down'}
+                size={12}
+                color={sortField === 'expiration' ? COLORS.primary : COLORS.textMuted}
+              />
+            </TouchableOpacity>
+          </View>
 
-        {isMobile ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-            <View style={{ minWidth: 1100 }}>
-              {viewMode === 'iptv' ? (
-                <View style={styles.tableHeader}>
-                  <Text style={[styles.th, { flex: 1.5 }]}>Username / STB</Text>
-                  <Text style={[styles.th, { flex: 1.6 }]}>Status / Online</Text>
-                  <Text style={[styles.th, { flex: 1.5 }]}>Mobile</Text>
-                  <Text style={[styles.th, { flex: 2 }]}>Full Name</Text>
-                  <Text style={[styles.th, { flex: 2 }]}>Package Name</Text>
-                  <Text style={[styles.th, { flex: 1.8 }]}>Subplan Name</Text>
-                  <Text style={[styles.th, { flex: 2 }]}>Expiration</Text>
-                </View>
-              ) : (
-                <View style={styles.tableHeader}>
-                  <Text style={[styles.th, { flex: 1.5 }]}>Username</Text>
-                  <Text style={[styles.th, { flex: 1.6 }]}>Status / Online</Text>
-                  <Text style={[styles.th, { flex: 1.5 }]}>Mobile</Text>
-                  <Text style={[styles.th, { flex: 2 }]}>Full Name</Text>
-                  <Text style={[styles.th, { flex: 2 }]}>Package Name</Text>
-                  <Text style={[styles.th, { flex: 1.8 }]}>Subplan Name</Text>
-                  <Text style={[styles.th, { flex: 2 }]}>Expiration</Text>
-                </View>
-              )}
+          {/* Table Rows */}
+          {paginatedCustomers.length === 0 ? (
+            <View style={{ padding: 30, alignItems: 'center', justifyContent: 'center' }}>
+              <Feather name="info" size={24} color={COLORS.textMuted} />
+              <Text style={{ marginTop: 8, fontSize: 13, color: COLORS.textMuted }}>No subscriber records matched your filter criteria.</Text>
+            </View>
+          ) : (
+            paginatedCustomers.map((cust, idx) => {
+              const isAccActive = cust.status === 'active' || (cust.status_text || '').toLowerCase() === 'active';
+              const isAccExpired = cust.status === 'expired' || (cust.status_text || '').toLowerCase() === 'expired';
+              const balInfo = calculateBalanceDays(cust.expiration || cust.expiryDate);
 
-              {filteredCustomers.map((cust, idx) => (
+              return (
                 <View key={cust.id ? `cust_${cust.id}_${idx}` : idx} style={styles.tr}>
-                  {viewMode === 'iptv' ? (
-                    <>
-                      <View style={{ flex: 1.5 }}>
-                        <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                          <Text style={styles.tdClickableUsername}>{cust.username}</Text>
-                        </TouchableOpacity>
-                        {cust.stb_id ? <Text style={styles.tdSub}>STB: {cust.stb_id}</Text> : null}
-                      </View>
+                  {/* Username / STB */}
+                  <View style={{ flex: 1.4 }}>
+                    <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
+                      <Text style={styles.tdClickableUsername}>{cust.username}</Text>
+                    </TouchableOpacity>
+                    {viewMode === 'iptv' && cust.stb_id ? <Text style={styles.tdSub}>STB: {cust.stb_id}</Text> : null}
+                  </View>
 
-                      <View style={{ flex: 1.6 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          {cust.status_text ? (
-                            <View
-                              style={[
-                                styles.statusTag,
-                                cust.status_text === 'Active' || cust.status === 'active'
-                                  ? styles.tagActive
-                                  : cust.status === 'expired'
-                                  ? styles.tagExpired
-                                  : styles.tagWarn,
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.statusTagText,
-                                  cust.status_text === 'Active' || cust.status === 'active'
-                                    ? styles.tagTextActive
-                                    : cust.status === 'expired'
-                                    ? styles.tagTextExpired
-                                    : styles.tagTextWarn,
-                                ]}
-                              >
-                                {cust.status_text}
-                              </Text>
-                            </View>
-                          ) : null}
-                          {cust.online ? (
-                            <Text
-                              style={{
-                                fontSize: 10,
-                                fontWeight: '700',
-                                color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
-                              }}
-                            >
-                              {cust.online}
-                            </Text>
-                          ) : null}
+                  {/* Status Badge */}
+                  <View style={{ flex: 1.1 }}>
+                    <View
+                      style={{
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: 6,
+                        backgroundColor: isAccActive ? '#dcfce7' : (isAccExpired ? '#ffe4e6' : '#fef3c7'),
+                        borderWidth: 1,
+                        borderColor: isAccActive ? '#bbf7d0' : (isAccExpired ? '#fecdd3' : '#fde68a'),
+                        alignSelf: 'flex-start',
+                      }}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 10,
+                          fontWeight: '700',
+                          color: isAccActive ? '#15803d' : (isAccExpired ? '#be123c' : '#b45309'),
+                        }}
+                      >
+                        {(cust.status_text || cust.status || 'Active').toUpperCase()}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Connectivity Badge */}
+                  <View style={{ flex: 1.1 }}>
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 5,
+                        paddingHorizontal: 8,
+                        paddingVertical: 3,
+                        borderRadius: 12,
+                        backgroundColor: cust.isOnline ? '#dbeafe' : '#f1f5f9',
+                        alignSelf: 'flex-start',
+                      }}
+                    >
+                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: cust.isOnline ? '#2563eb' : '#94a3b8' }} />
+                      <Text style={{ fontSize: 10, fontWeight: '700', color: cust.isOnline ? '#1d4ed8' : '#64748b' }}>
+                        {cust.isOnline ? 'ONLINE' : 'OFFLINE'}
+                      </Text>
+                    </View>
+                  </View>
+
+                  {/* Mobile (Dialer Link) */}
+                  <View style={{ flex: 1.3 }}>
+                    <TouchableOpacity
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                      onPress={() => {
+                        if (cust.mobile) {
+                          const num = String(cust.mobile).replace(/[^\d+]/g, '');
+                          if (typeof window !== 'undefined') window.location.href = `tel:${num}`;
+                          else Linking.openURL(`tel:${num}`);
+                        }
+                      }}
+                    >
+                      <Feather name="phone-call" size={12} color="#06b6d4" />
+                      <Text style={[styles.tdText, { color: '#06b6d4', fontWeight: '600' }]}>{cust.mobile || '—'}</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Full Name */}
+                  <View style={{ flex: 1.8 }}>
+                    <Text style={styles.tdText}>{cust.full_name || cust.name || '—'}</Text>
+                  </View>
+
+                  {/* Package Name */}
+                  <View style={{ flex: 1.8 }}>
+                    <Text style={[styles.tdBold, viewMode === 'iptv' && { color: '#8b5cf6' }]}>{cust.package_name}</Text>
+                  </View>
+
+                  {/* Subplan Name */}
+                  <View style={{ flex: 1.4 }}>
+                    <Text style={styles.tdSub}>{cust.subplan_name}</Text>
+                  </View>
+
+                  {/* Expiration & Balance Days */}
+                  <View style={{ flex: 2.2 }}>
+                    <Text style={styles.tdText}>{cust.expiration || '—'}</Text>
+                    {(() => {
+                      if (balInfo.status === 'unknown') return null;
+                      const bg = balInfo.status === 'active' ? '#dcfce7' : (balInfo.status === 'warning' ? '#fef3c7' : '#ffe4e6');
+                      const color = balInfo.status === 'active' ? '#15803d' : (balInfo.status === 'warning' ? '#b45309' : '#be123c');
+                      return (
+                        <View style={{ backgroundColor: bg, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start', marginTop: 3 }}>
+                          <Text style={{ fontSize: 10, fontWeight: '700', color }}>{balInfo.text}</Text>
                         </View>
-                      </View>
-
-                      <View style={{ flex: 1.5 }}>
-                        <Text style={styles.tdText}>{cust.mobile}</Text>
-                      </View>
-
-                      <View style={{ flex: 2 }}>
-                        <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                          <Text style={styles.tdClickableName}>{cust.full_name || cust.name}</Text>
-                        </TouchableOpacity>
-                      </View>
-
-                      <View style={{ flex: 2 }}>
-                        <Text style={[styles.tdBold, { color: '#8b5cf6' }]}>{cust.package_name}</Text>
-                      </View>
-
-                      <View style={{ flex: 1.8 }}>
-                        <Text style={styles.tdSub}>{cust.subplan_name}</Text>
-                      </View>
-
-                      <View style={{ flex: 2 }}>
-                        <Text style={styles.tdText}>{cust.expiration}</Text>
-                      </View>
-                    </>
-                  ) : (
-                    <>
-                      <View style={{ flex: 1.5 }}>
-                        <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                          <Text style={styles.tdClickableUsername}>{cust.username}</Text>
-                        </TouchableOpacity>
-                      </View>
-
-                      <View style={{ flex: 1.6 }}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                          {cust.status_text ? (
-                            <View
-                              style={[
-                                styles.statusTag,
-                                cust.status_text === 'Active' || cust.status === 'active'
-                                  ? styles.tagActive
-                                  : cust.status === 'expired'
-                                  ? styles.tagExpired
-                                  : styles.tagWarn,
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.statusTagText,
-                                  cust.status_text === 'Active' || cust.status === 'active'
-                                    ? styles.tagTextActive
-                                    : cust.status === 'expired'
-                                    ? styles.tagTextExpired
-                                    : styles.tagTextWarn,
-                                ]}
-                              >
-                                {cust.status_text}
-                              </Text>
-                            </View>
-                          ) : null}
-                          {cust.online ? (
-                            <Text
-                              style={{
-                                fontSize: 10,
-                                fontWeight: '700',
-                                color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
-                              }}
-                            >
-                              {cust.online}
-                            </Text>
-                          ) : null}
-                        </View>
-                      </View>
-
-                      <View style={{ flex: 1.5 }}>
-                        <Text style={styles.tdText}>{cust.mobile}</Text>
-                      </View>
-
-                      <View style={{ flex: 2 }}>
-                        <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                          <Text style={styles.tdClickableName}>{cust.full_name || cust.name}</Text>
-                        </TouchableOpacity>
-                      </View>
-
-                      <View style={{ flex: 2 }}>
-                        <Text style={styles.tdBold}>{cust.package_name}</Text>
-                      </View>
-
-                      <View style={{ flex: 1.8 }}>
-                        <Text style={styles.tdSub}>{cust.subplan_name}</Text>
-                      </View>
-
-                      <View style={{ flex: 2 }}>
-                        <Text style={styles.tdText}>{cust.expiration}</Text>
-                      </View>
-                    </>
-                  )}
+                      );
+                    })()}
+                  </View>
                 </View>
+              );
+            })
+          )}
+        </View>
+
+        {/* PAGINATION CONTROLS BAR */}
+        <View style={{ flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: 'center', padding: 14, borderTopWidth: 1, borderTopColor: COLORS.borderLight || '#e2e8f0', gap: 10, backgroundColor: COLORS.cardBg || '#ffffff' }}>
+          <Text style={{ fontSize: 12, color: COLORS.textMuted || '#64748b' }}>
+            Showing {filteredCustomers.length === 0 ? 0 : (currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filteredCustomers.length)} of {filteredCustomers.length} subscribers
+          </Text>
+
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            {/* Items Per Page Selector */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <Text style={{ fontSize: 12, color: COLORS.textMuted || '#64748b' }}>Per page:</Text>
+              {[10, 25, 50, 100].map((size) => (
+                <TouchableOpacity
+                  key={size}
+                  style={[{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: COLORS.borderLight || '#e2e8f0' }, pageSize === size && { backgroundColor: COLORS.primary || '#3b82f6', borderColor: COLORS.primary || '#3b82f6' }]}
+                  onPress={() => { setPageSize(size); setCurrentPage(1); }}
+                >
+                  <Text style={[{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted || '#64748b' }, pageSize === size && { color: '#ffffff' }]}>{size}</Text>
+                </TouchableOpacity>
               ))}
             </View>
-          </ScrollView>
-        ) : (
-          <View style={{ width: '100%' }}>
-            {viewMode === 'iptv' ? (
-              <View style={styles.tableHeader}>
-                <Text style={[styles.th, { flex: 1.5 }]}>Username / STB</Text>
-                <Text style={[styles.th, { flex: 1.6 }]}>Status / Online</Text>
-                <Text style={[styles.th, { flex: 1.5 }]}>Mobile</Text>
-                <Text style={[styles.th, { flex: 2 }]}>Full Name</Text>
-                <Text style={[styles.th, { flex: 2 }]}>Package Name</Text>
-                <Text style={[styles.th, { flex: 1.8 }]}>Subplan Name</Text>
-                <Text style={[styles.th, { flex: 2 }]}>Expiration</Text>
-              </View>
-            ) : (
-              <View style={styles.tableHeader}>
-                <Text style={[styles.th, { flex: 1.5 }]}>Username</Text>
-                <Text style={[styles.th, { flex: 1.6 }]}>Status / Online</Text>
-                <Text style={[styles.th, { flex: 1.5 }]}>Mobile</Text>
-                <Text style={[styles.th, { flex: 2 }]}>Full Name</Text>
-                <Text style={[styles.th, { flex: 2 }]}>Package Name</Text>
-                <Text style={[styles.th, { flex: 1.8 }]}>Subplan Name</Text>
-                <Text style={[styles.th, { flex: 2 }]}>Expiration</Text>
-              </View>
-            )}
 
-            {filteredCustomers.map((cust, idx) => (
-              <View key={cust.id ? `cust_${cust.id}_${idx}` : idx} style={styles.tr}>
-                {viewMode === 'iptv' ? (
-                  <>
-                    <View style={{ flex: 1.5 }}>
-                      <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                        <Text style={styles.tdClickableUsername}>{cust.username}</Text>
-                      </TouchableOpacity>
-                      {cust.stb_id ? <Text style={styles.tdSub}>STB: {cust.stb_id}</Text> : null}
-                    </View>
+            {/* Previous & Next Buttons */}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <TouchableOpacity
+                style={[{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: COLORS.borderLight || '#e2e8f0', backgroundColor: COLORS.bgSecondary || '#f8fafc' }, currentPage === 1 && { opacity: 0.4 }]}
+                onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMain || '#000000' }}>Previous</Text>
+              </TouchableOpacity>
 
-                    <View style={{ flex: 1.6 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        {cust.status_text ? (
-                          <View
-                            style={[
-                              styles.statusTag,
-                              cust.status_text === 'Active' || cust.status === 'active'
-                                ? styles.tagActive
-                                : cust.status === 'expired'
-                                ? styles.tagExpired
-                                : styles.tagWarn,
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.statusTagText,
-                                cust.status_text === 'Active' || cust.status === 'active'
-                                  ? styles.tagTextActive
-                                  : cust.status === 'expired'
-                                  ? styles.tagTextExpired
-                                  : styles.tagWarn,
-                              ]}
-                            >
-                              {cust.status_text}
-                            </Text>
-                          </View>
-                        ) : null}
-                        {cust.online ? (
-                          <Text
-                            style={{
-                              fontSize: 10,
-                              fontWeight: '700',
-                              color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
-                            }}
-                          >
-                            {cust.online}
-                          </Text>
-                        ) : null}
-                      </View>
-                    </View>
+              <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.textMain || '#000000', paddingHorizontal: 4 }}>
+                Page {currentPage} of {totalPages}
+              </Text>
 
-                    <View style={{ flex: 1.5 }}>
-                      <Text style={styles.tdText}>{cust.mobile}</Text>
-                    </View>
-
-                    <View style={{ flex: 2 }}>
-                      <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                        <Text style={styles.tdClickableName}>{cust.full_name || cust.name}</Text>
-                      </TouchableOpacity>
-                    </View>
-
-                    <View style={{ flex: 2 }}>
-                      <Text style={[styles.tdBold, { color: '#8b5cf6' }]}>{cust.package_name}</Text>
-                    </View>
-
-                    <View style={{ flex: 1.8 }}>
-                      <Text style={styles.tdSub}>{cust.subplan_name}</Text>
-                    </View>
-
-                    <View style={{ flex: 2 }}>
-                      <Text style={styles.tdText}>{cust.expiration}</Text>
-                    </View>
-                  </>
-                ) : (
-                  <>
-                    <View style={{ flex: 1.5 }}>
-                      <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                        <Text style={styles.tdClickableUsername}>{cust.username}</Text>
-                      </TouchableOpacity>
-                    </View>
-
-                    <View style={{ flex: 1.6 }}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        {cust.status_text ? (
-                          <View
-                            style={[
-                              styles.statusTag,
-                              cust.status_text === 'Active' || cust.status === 'active'
-                                ? styles.tagActive
-                                : cust.status === 'expired'
-                                ? styles.tagExpired
-                                : styles.tagWarn,
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.statusTagText,
-                                cust.status_text === 'Active' || cust.status === 'active'
-                                  ? styles.tagTextActive
-                                  : cust.status === 'expired'
-                                  ? styles.tagTextExpired
-                                  : styles.tagWarn,
-                              ]}
-                            >
-                              {cust.status_text}
-                            </Text>
-                          </View>
-                        ) : null}
-                        {cust.online ? (
-                          <Text
-                            style={{
-                              fontSize: 10,
-                              fontWeight: '700',
-                              color: cust.online === 'ONLINE' || cust.isOnline ? COLORS.accentEmerald : COLORS.textMuted,
-                            }}
-                          >
-                            {cust.online}
-                          </Text>
-                        ) : null}
-                      </View>
-                    </View>
-
-                    <View style={{ flex: 1.5 }}>
-                      <Text style={styles.tdText}>{cust.mobile}</Text>
-                    </View>
-
-                    <View style={{ flex: 2 }}>
-                      <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                        <Text style={styles.tdClickableName}>{cust.full_name || cust.name}</Text>
-                      </TouchableOpacity>
-                    </View>
-
-                    <View style={{ flex: 2 }}>
-                      <Text style={styles.tdBold}>{cust.package_name}</Text>
-                    </View>
-
-                    <View style={{ flex: 1.8 }}>
-                      <Text style={styles.tdSub}>{cust.subplan_name}</Text>
-                    </View>
-
-                    <View style={{ flex: 2 }}>
-                      <Text style={styles.tdText}>{cust.expiration}</Text>
-                    </View>
-                  </>
-                )}
-              </View>
-            ))}
+              <TouchableOpacity
+                style={[{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: COLORS.borderLight || '#e2e8f0', backgroundColor: COLORS.bgSecondary || '#f8fafc' }, currentPage >= totalPages && { opacity: 0.4 }]}
+                onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMain || '#000000' }}>Next</Text>
+              </TouchableOpacity>
+            </View>
           </View>
-        )}
+        </View>
       </View>
 
       {/* EDIT SUBSCRIBER DETAILS MODAL */}
