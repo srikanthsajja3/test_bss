@@ -1362,10 +1362,10 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                   {walletTransactions.map((txn, index) => (
                     <View key={txn.ledger_id || index} style={{ flexDirection: 'row', padding: 12, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight, alignItems: 'center' }}>
                       <Text style={{ flex: 0.8, fontSize: 12, color: COLORS.textMain, fontFamily: 'monospace' }}>#{txn.ledger_id || index + 1}</Text>
-                      <Text style={{ flex: 1.2, fontSize: 13, fontWeight: '700', color: '#10b981' }}>₹{txn.txn_amount || '0.00'}</Text>
+                      <Text style={{ flex: 1.2, fontSize: 13, fontWeight: '700', color: txn.txn_type === 'credit' ? '#10b981' : '#ef4444' }}>₹{txn.txn_amount || '0.00'}</Text>
                       <View style={{ flex: 1.0 }}>
-                        <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start' }}>
-                          <Text style={{ fontSize: 10, fontWeight: '700', color: '#10b981' }}>{(txn.txn_type || 'credit').toUpperCase()}</Text>
+                        <View style={{ backgroundColor: txn.txn_type === 'credit' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start' }}>
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: txn.txn_type === 'credit' ? '#10b981' : '#ef4444' }}>{(txn.txn_type || '---').toUpperCase()}</Text>
                         </View>
                       </View>
                       <Text style={{ flex: 1.8, fontSize: 12, color: COLORS.textMuted }}>₹{txn.balance_before_txn || '0.00'} → ₹{txn.balance_after_txn || '0.00'}</Text>
