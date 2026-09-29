@@ -1926,7 +1926,6 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                     ₹{(selectedPartner.wallet_balance !== undefined ? selectedPartner.wallet_balance : 0).toLocaleString('en-IN')}
                   </Text>
                 </View>
-                <Feather name="plus-circle" size={14} color="#10b981" style={{ marginLeft: 6 }} />
               </TouchableOpacity>
             </View>
           </View>
@@ -1934,7 +1933,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
           {/* SECTION: SUBSCRIBER OVERVIEW (LIVE DASHBOARD API CARDS) */}
           <View style={{ marginBottom: 20 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-              <Text style={styles.sectionHeaderTitle}>Subscriber Overview (Live Dashboard API)</Text>
+              <Text style={styles.sectionHeaderTitle}>Internet Subscriber Overview</Text>
               {loadingPartnerTelemetry && (
                 <ActivityIndicator size="small" color={COLORS.primary} style={{ marginLeft: 8 }} />
               )}
@@ -2096,29 +2095,42 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
           <View style={{ marginBottom: 20 }}>
             <Text style={[styles.sectionHeaderTitle, { marginBottom: 10 }]}>Quick Actions</Text>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-              {/* WALLET BUTTON */}
+              {/* WALLET TOPUP BUTTON */}
               <TouchableOpacity
                 style={[styles.simpleActionBtn, { borderColor: 'rgba(16, 185, 129, 0.4)', backgroundColor: 'rgba(16, 185, 129, 0.08)' }]}
                 onPress={() => handleOpenWallet(selectedPartner)}
               >
                 <Text style={{ fontSize: 14, fontWeight: '700', color: '#10b981' }}>₹</Text>
                 <Text style={[styles.simpleActionBtnText, { color: '#10b981' }]}>
-                  Wallet: ₹{(selectedPartner.wallet_balance !== undefined ? selectedPartner.wallet_balance : 0).toLocaleString('en-IN')}
+                  Wallet
                 </Text>
                 <View style={styles.simpleBtnTopupBadge}>
-                  <Feather name="plus" size={11} color="#10b981" />
                   <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>Topup</Text>
                 </View>
               </TouchableOpacity>
 
-              {/* EDIT PROFILE BUTTON */}
+              {/* WALLET DEBIT BUTTON */}
               <TouchableOpacity
+                style={[styles.simpleActionBtn, { borderColor: 'rgba(185, 16, 16, 0.4)', backgroundColor: 'rgba(185, 16, 16, 0.08)' }]}
+                
+              >
+                <Text style={{ fontSize: 14, fontWeight: '700', color: '#b91010' }}>₹</Text>
+                <Text style={[styles.simpleActionBtnText, { color: '#b91010' }]}>
+                  Wallet
+                </Text>
+                <View style={styles.simpleBtnDebitBadge}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#b91010' }}>Debit</Text>
+                </View>
+              </TouchableOpacity>
+
+              {/* EDIT PROFILE BUTTON */}
+              {/* <TouchableOpacity
                 style={[styles.simpleActionBtn, { borderColor: 'rgba(59, 130, 246, 0.4)', backgroundColor: 'rgba(59, 130, 246, 0.08)' }]}
                 onPress={() => handleOpenEdit(selectedPartner)}
               >
                 <Feather name="edit-3" size={14} color="#3b82f6" />
                 <Text style={[styles.simpleActionBtnText, { color: '#3b82f6' }]}>Edit Profile</Text>
-              </TouchableOpacity>
+              </TouchableOpacity> */}
 
               {/* INTERNET PLANS BUTTON */}
               <TouchableOpacity
@@ -2136,6 +2148,15 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
               >
                 <Feather name="tv" size={14} color="#8b5cf6" />
                 <Text style={[styles.simpleActionBtnText, { color: '#8b5cf6' }]}>IPTV Plans</Text>
+              </TouchableOpacity>
+
+              {/* KYC PROVIDERS BUTTON */}  
+              <TouchableOpacity
+                style={[styles.simpleActionBtn, { borderColor: 'rgba(246, 92, 241, 0.4)', backgroundColor: 'rgba(246, 92, 241, 0.08)' }]}
+                onPress={() => handleOpenKycProviders(selectedPartner)}
+              >
+                <Feather name="user-check" size={14} color="#f65cf4" />
+                <Text style={[styles.simpleActionBtnText, { color: '#f65cf4' }]}>KYC Providers</Text>
               </TouchableOpacity>
 
               {/* RESET PASSWORD BUTTON */}
@@ -2430,7 +2451,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                 <Text style={[styles.th, { flex: 1.4 }]}>Region / Location</Text>
                 <Text style={[styles.th, { flex: 1.6 }]}>Contact Info</Text>
                 <Text style={[styles.th, { flex: 1.1 }]}>Wallet (₹)</Text>
-                <Text style={[styles.th, { flex: 2.0 }]}>Active / Online / IPTV</Text>
+                <Text style={[styles.th, { flex: 2.0 }]}>Active / Online</Text>
+                <Text style={[styles.th, { flex: 2.0 }]}>IPTV Active</Text>
                 <Text style={[styles.th, { flex: 0.9 }]}>Role</Text>
                 <Text style={[styles.th, { flex: 1.0 }]}>Status</Text>
                 <Text style={[styles.th, { flex: 1.8 }]}>Actions</Text>
@@ -2473,10 +2495,10 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                           <Feather name="phone" size={12} color={COLORS.textMuted} />
                           <Text style={styles.contactText}>{item.partner_mobile || 'N/A'}</Text>
                         </View>
-                        <View style={styles.contactRow}>
+                        {/* <View style={styles.contactRow}>
                           <Feather name="mail" size={12} color={COLORS.textMuted} />
                           <Text style={styles.contactText}>{item.partner_email || 'N/A'}</Text>
-                        </View>
+                        </View> */}
                       </View>
 
                       <View style={[{ flex: 1.1 }, styles.td]}>
@@ -2500,6 +2522,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                               {item.online_internet_accounts !== undefined && item.online_internet_accounts !== null ? item.online_internet_accounts : 0} Online
                             </Text>
                           </View>
+                        </View>
+                      </View>
+
+                      {/* TELEMETRY COUNTS & IPTV ACTIVE BADGE (ITEM 13) */}
+                      <View style={[{ flex: 2.0 }, styles.td]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                           <View style={{ backgroundColor: 'rgba(139, 92, 246, 0.12)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5 }}>
                             <Text style={{ fontSize: 11, fontWeight: '700', color: '#8b5cf6' }}>
                               {iptvActive} IPTV
@@ -2836,9 +2864,9 @@ const styles = StyleSheet.create({
   },
   heroCard: {
     backgroundColor: COLORS.cardBg,
-    borderRadius: 12,
     borderWidth: 1,
-    borderColor: COLORS.borderLight,
+    borderRadius: 12,
+    borderColor: "#afb1b5",
     padding: 20,
     marginVertical: 16,
   },
@@ -2869,9 +2897,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: 'rgba(16, 185, 129, 0.08)',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
+    borderColor: 'rgba(16, 185, 129, 0.76)',
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: 8,
@@ -2946,6 +2974,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 2,
     backgroundColor: 'rgba(16, 185, 129, 0.15)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginLeft: 4,
+  },
+  simpleBtnDebitBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    backgroundColor: 'rgba(185, 16, 16, 0.15)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,

@@ -5,7 +5,6 @@ import { COLORS } from '../../constants/theme';
 
 // ---------------------------------------------------------------------------
 // URLs from customer_lookup.php currently come back doubled, e.g.
-//   https://radius.vrplay.in/uploads//customer-documents/https://vrplay.in/x.jpghttps://vrplay.in/x.jpg
 // (base prefix + full URL + full URL again). Until that's fixed server-side,
 // take the LAST absolute URL in the string, which is the real file.
 // ---------------------------------------------------------------------------

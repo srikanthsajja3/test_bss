@@ -40,17 +40,18 @@ export default function App() {
           const tab = rawTab ? rawTab.split('?')[0] : '';
           if (['dashboard', 'partners', 'customers', 'iptv_customers'].includes(tab)) {
             const filter = rawFilter ? rawFilter.split('?')[0].split('&')[0] : 'all';
-            return { tab, filter };
+            const rangeMatch = hash.match(/[?&]range=([a-z0-9_]+)/);
+            return { tab, filter, range: rangeMatch ? rangeMatch[1] : '' };
           }
         }
         const savedTab = localStorage.getItem('onebss_active_tab');
         const savedFilter = localStorage.getItem('onebss_filter');
         if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers'].includes(savedTab)) {
-          return { tab: savedTab, filter: savedFilter || 'all' };
+          return { tab: savedTab, filter: savedFilter || 'all', range: '' };
         }
       }
     } catch (e) {}
-    return { tab: 'dashboard', filter: 'all' };
+    return { tab: 'dashboard', filter: 'all', range: '' };
   };
 
   // Parse initial user role persona from localStorage on page reload
@@ -84,6 +85,7 @@ export default function App() {
   const initialNav = getInitialNavigationState();
   const [activeTab, setActiveTabState] = useState(initialNav.tab);
   const [customerInitialFilter, setCustomerInitialFilter] = useState(initialNav.filter);
+  const [customerInitialRange, setCustomerInitialRange] = useState(initialNav.range || ''); // expiry / registration range
   const [user, setUserState] = useState(getInitialUserState());
   const [isLoginVisible, setIsLoginVisible] = useState(false);
   const [partnerCreateRole, setPartnerCreateRole] = useState(null);
@@ -141,13 +143,17 @@ export default function App() {
   };
 
   // Wrapper to update active tab and sync storage/hash
-  const setActiveTab = (tab, filter = 'all') => {
+  const setActiveTab = (tab, filter = 'all', range = '') => {
     setActiveTabState(tab);
     setCustomerInitialFilter(filter);
+    setCustomerInitialRange(range || '');
     setPartnerCreateRole(null);
     try {
       if (typeof window !== 'undefined') {
-        const hashVal = filter && filter !== 'all' ? `${tab}?filter=${filter}` : tab;
+        const parts = [];
+        if (filter && filter !== 'all') parts.push(`filter=${filter}`);
+        if (range) parts.push(`range=${range}`);
+        const hashVal = parts.length ? `${tab}?${parts.join('&')}` : tab;
         const currentHash = window.location.hash.replace(/^#/, '');
         if (currentHash !== hashVal) {
           window.location.hash = hashVal;
@@ -169,6 +175,7 @@ export default function App() {
       if (nav && nav.tab) {
         setActiveTabState(nav.tab);
         setCustomerInitialFilter(nav.filter);
+        setCustomerInitialRange(nav.range || '');
         try {
           if (typeof window !== 'undefined') {
             localStorage.setItem('onebss_active_tab', nav.tab);
@@ -224,12 +231,13 @@ export default function App() {
     }
   };
 
-  const handleNavigateToCustomers = (filterKey = 'all') => {
+  // range: optional expiry / registration range key (customers_by_date.php)
+  const handleNavigateToCustomers = (filterKey = 'all', range = '') => {
     if (filterKey.startsWith('iptv') || filterKey === 'iptv') {
       const cleanFilter = (filterKey === 'iptv' || filterKey === 'iptv_all') ? 'all' : filterKey.replace('iptv_', '');
-      setActiveTab('iptv_customers', cleanFilter);
+      setActiveTab('iptv_customers', cleanFilter, range);
     } else {
-      setActiveTab('customers', filterKey);
+      setActiveTab('customers', filterKey, range);
     }
   };
 
@@ -256,9 +264,9 @@ export default function App() {
       case 'partners':
         return <PartnerScreen initialCreateRole={partnerCreateRole} onOpenCreate={(r) => setPartnerCreateRole(r)} user={user} />;
       case 'customers':
-        return <CustomerScreen key="customers" user={user} isIptvMode={false} initialFilter={customerInitialFilter} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
+        return <CustomerScreen key="customers" user={user} isIptvMode={false} initialFilter={customerInitialFilter} initialRange={customerInitialRange} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
       case 'iptv_customers':
-        return <CustomerScreen key="iptv_customers" user={user} isIptvMode={true} initialFilter={customerInitialFilter} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
+        return <CustomerScreen key="iptv_customers" user={user} isIptvMode={true} initialFilter={customerInitialFilter} initialRange={customerInitialRange} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
       default:
         return <DashboardScreen user={user} onNavigateToCustomers={handleNavigateToCustomers} />;
     }

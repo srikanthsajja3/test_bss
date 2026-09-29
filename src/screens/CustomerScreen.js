@@ -254,6 +254,20 @@ const countListRows = (rows, isIptv) => {
   return c;
 };
 
+// Expiry / registration ranges (customers_by_date.php) — opened from the dashboard buttons
+export const DATE_RANGES = [
+  { key: 'expiring_next_7_days', label: 'Expires in next 7 days', kind: 'expiry' },
+  { key: 'expired_last_7_days', label: 'Expired in last 7 days', kind: 'expiry' },
+  { key: 'expires_today', label: 'Expires today', kind: 'expiry' },
+  { key: 'expires_tomorrow', label: 'Expires tomorrow', kind: 'expiry' },
+  { key: 'expired_yesterday', label: 'Expired yesterday', kind: 'expiry' },
+  { key: 'registered_today', label: 'Registered today', kind: 'registered' },
+  { key: 'registered_yesterday', label: 'Registered yesterday', kind: 'registered' },
+  { key: 'registered_this_month', label: 'Registered this month', kind: 'registered' },
+  { key: 'registered_last_month', label: 'Registered last month', kind: 'registered' },
+];
+const findDateRange = (key) => DATE_RANGES.find((r) => r.key === key) || null;
+
 const STATUS_BADGE = {
   active: { label: 'Active', bg: '#dcfce7', fg: '#15803d', dot: '#16a34a' },
   expired: { label: 'Expired', bg: '#ffe4e6', fg: '#be123c', dot: '#e11d48' },
@@ -300,12 +314,18 @@ const ACCOUNT_LEVEL_KEYS = [
   'internet_id', 'package_id', 'subplan_id', 'acc_id',
 ];
 
-export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all', onSwitchMode, onAutoCloseSidebar }) => {
+export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all', initialRange = '', onSwitchMode, onAutoCloseSidebar }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
   const [viewMode, setViewMode] = useState(isIptvMode ? 'iptv' : 'broadband');
   const [activeFilter, setActiveFilter] = useState(() => normalizeListFilter(initialFilter, isIptvMode));
+  const [activeRange, setActiveRange] = useState(() => (findDateRange(initialRange) ? initialRange : ''));
+  const activeRangeInfo = findDateRange(activeRange);
+  const showRegisteredCol = activeRangeInfo?.kind === 'registered'; // extra "Registered On" column
+  useEffect(() => {
+    setActiveRange(findDateRange(initialRange) ? initialRange : '');
+  }, [initialRange]);
   const [searchQuery, setSearchQuery] = useState('');
   const [showPasswordMap, setShowPasswordMap] = useState({});
   const [selectedRowIds, setSelectedRowIds] = useState(new Set());
@@ -381,6 +401,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         partner_id: q.partnerId,
         sort: q.sort,
         dir: q.dir,
+        range: q.range,
       });
       if (seq !== listRequestSeq.current) return; // a newer request superseded this one
       const body = res?.data || {};
@@ -903,14 +924,31 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     setActiveFilter(normalizeListFilter(initialFilter, viewMode === 'iptv'));
   }, [initialFilter, viewMode]);
 
+  // URL hash for this list: keeps the status filter and the date range, plus any extra
+  // params (sub_id / acc), so opening a customer and coming back restores the same list.
+  const buildListHash = (extra = [], filter = activeFilter, range = activeRange) => {
+    const tab = viewMode === 'iptv' ? 'iptv_customers' : 'customers';
+    const parts = [];
+    if (filter && filter !== 'all') parts.push(`filter=${filter}`);
+    if (range) parts.push(`range=${range}`);
+    parts.push(...extra);
+    return parts.length ? `${tab}?${parts.join('&')}` : tab;
+  };
+
+  const handleClearRange = () => {
+    setActiveRange('');
+    try {
+      if (typeof window !== 'undefined') window.location.hash = buildListHash([], activeFilter, '');
+    } catch (e) {}
+  };
+
   const handleSelectFilter = (filterId) => {
     const next = normalizeListFilter(filterId, viewMode === 'iptv');
     setActiveFilter(next);
     try {
       if (typeof window !== 'undefined') {
         const tab = viewMode === 'iptv' ? 'iptv_customers' : 'customers';
-        const hashVal = next !== 'all' ? `${tab}?filter=${next}` : tab;
-        window.location.hash = hashVal;
+        window.location.hash = buildListHash([], next);
         localStorage.setItem('onebss_active_tab', tab);
         if (next !== 'all') {
           localStorage.setItem('onebss_filter', next);
@@ -925,7 +963,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   useEffect(() => {
     setCurrentPage(1);
     setSelectedRowIds(new Set());
-  }, [activeFilter, debouncedSearch, viewMode, selectedOperatorId, pageSize, sortField, sortDirection]);
+  }, [activeFilter, activeRange, debouncedSearch, viewMode, selectedOperatorId, pageSize, sortField, sortDirection]);
 
   // (Re)load the page from the server whenever any list parameter changes
   listQueryRef.current = {
@@ -937,6 +975,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     partnerId: selectedOperatorId,
     sort: sortField || undefined,
     dir: sortField ? sortDirection : undefined,
+    range: activeRange || undefined,
   };
   const listQueryKey = JSON.stringify(listQueryRef.current);
   useEffect(() => {
@@ -975,7 +1014,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     setActiveCustomerId(cId);
     setActiveAccountSel(null);
     if (typeof window !== 'undefined') {
-      window.location.hash = `${modeTab}?sub_id=${cId}`;
+      window.location.hash = buildListHash([`sub_id=${cId}`]);
     }
     if (onAutoCloseSidebar) {
       onAutoCloseSidebar();
@@ -989,7 +1028,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     if (!activeCustomer) return;
     setActiveAccountSel({ kind, index: accIndex });
     if (typeof window !== 'undefined') {
-      window.location.hash = `${modeTab}?sub_id=${activeCustomer.cust_id}&acc=${kind === 'iptv' ? 'iptv' : 'int'}_${accIndex}`;
+      window.location.hash = buildListHash([`sub_id=${activeCustomer.cust_id}`, `acc=${kind === 'iptv' ? 'iptv' : 'int'}_${accIndex}`]);
     }
   };
 
@@ -997,7 +1036,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const handleCloseSubscriberScreen = () => {
     setActiveAccountSel(null);
     if (typeof window !== 'undefined' && activeCustomerId !== null) {
-      window.location.hash = `${modeTab}?sub_id=${activeCustomerId}`;
+      window.location.hash = buildListHash([`sub_id=${activeCustomerId}`]);
     }
   };
 
@@ -1006,7 +1045,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     setActiveAccountSel(null);
     setActiveCustomerId(null);
     if (typeof window !== 'undefined') {
-      window.location.hash = modeTab;
+      window.location.hash = buildListHash();
     }
   };
 
@@ -1537,6 +1576,21 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           )}
         </View>
 
+        {/* Active expiry / registration range (from the dashboard buttons) */}
+        {activeRangeInfo ? (
+          <View style={styles.rangeBanner}>
+            <Feather name={activeRangeInfo.kind === 'expiry' ? 'clock' : 'user-plus'} size={14} color={activeRangeInfo.kind === 'expiry' ? '#b45309' : '#0369a1'} />
+            <Text style={styles.rangeBannerText}>
+              {viewMode === 'iptv' ? 'IPTV' : 'Internet'} · {activeRangeInfo.label}
+              {!loadingData ? ` — ${counts.total ?? listTotal} ${viewMode === 'iptv' ? 'STB(s)' : 'account(s)'}` : ''}
+            </Text>
+            <TouchableOpacity onPress={handleClearRange} style={styles.rangeBannerClear} title="Show all accounts">
+              <Feather name="x" size={13} color="#475569" />
+              <Text style={{ fontSize: 11, fontWeight: '700', color: '#475569' }}>Clear</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+
         {/* Bottom Filter Chips Line — counts come from the server and cover every account */}
         <View style={styles.bottomChipRowContainer}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
@@ -1648,6 +1702,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               {viewMode === 'iptv' ? (
                 <>
                   <Text style={[styles.th, { flex: 1.7 }]}>STB / Box No.</Text>
+                  {/* <Text style={[styles.th, { flex: 1.3 }]}>VC / Smartcard</Text> */}
                   <Text style={[styles.th, { flex: 1.1 }]}>Status</Text>
                   <Text style={[styles.th, { flex: 1.4 }]}>Mobile</Text>
                   <Text style={[styles.th, { flex: 1.7 }]}>Full Name</Text>
@@ -1677,13 +1732,14 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   }
                 }}
               >
-                <Text style={[styles.th, { flex: 0.4 }]}>Expiry Date</Text>
+                <Text style={[styles.th, { flex: 0 }]}>Expiration Date</Text>
                 <Feather
                   name={sortField === 'expiration' ? (sortDirection === 'asc' ? 'arrow-up' : 'arrow-down') : 'arrow-down'}
                   size={12}
                   color={sortField === 'expiration' ? COLORS.primary : COLORS.textMuted}
                 />
               </TouchableOpacity>
+              {showRegisteredCol ? <Text style={[styles.th, { flex: 1.3 }]}>Registered On</Text> : null}
               <Text style={[styles.th, { flex: viewMode === 'iptv' ? 1 : 1.1, textAlign: viewMode === 'iptv' ? 'center' : 'left' }]}>
                 {viewMode === 'iptv' ? 'Action' : 'Navigation'}
               </Text>
@@ -1749,8 +1805,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                         }
                       }}
                     >
-                      <Feather name="phone-call" size={12} color="#0625d4" />
-                      <Text style={[styles.tdText, { color: '#0625d4', fontWeight: '600' }]}>{cust.mobile || '—'}</Text>
+                      <Feather name="phone-call" size={12} color="#0651d4" />
+                      <Text style={[styles.tdText, { color: '#0651d4', fontWeight: '600' }]}>{cust.mobile || '—'}</Text>
                     </TouchableOpacity>
                     {cust.mobile ? (
                       <TouchableOpacity
@@ -1781,6 +1837,14 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   </View>
                 );
 
+                const registeredCell = showRegisteredCol ? (
+                  <View style={{ flex: 1.3 }}>
+                    <Text style={[styles.tdText, { color: '#0369a1', fontWeight: '600' }]}>
+                      {cust.registered_on ? formatApiDate(cust.registered_on, false) : '—'}
+                    </Text>
+                  </View>
+                ) : null;
+
                 if (viewMode === 'iptv') {
                   const stb = cust.stb_box || cust.pioneer_stb_id || `IPTV #${cust.iptv_id}`;
                   return (
@@ -1796,6 +1860,11 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                           <Text style={styles.tdSub}>Pioneer ID: {cust.pioneer_stb_id}</Text>
                         ) : null}
                       </View>
+
+                      {/* VC / Smartcard */}
+                      {/* <View style={{ flex: 1.3 }}>
+                        <Text style={[styles.tdText, { fontFamily: 'monospace' }]}>{cust.smartcard || '—'}</Text>
+                      </View> */}
 
                       {/* Status */}
                       <View style={{ flex: 1.1 }}>{statusPill}</View>
@@ -1822,6 +1891,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       </View>
 
                       {expiryCell(2)}
+                      {registeredCell}
 
                       {/* Action */}
                       <View style={{ flex: 1, alignItems: 'center' }}>
@@ -1851,7 +1921,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   <View key={cust.id || `int_row_${idx}`} style={[styles.tr, isRowSelected && { backgroundColor: 'rgba(59, 130, 246, 0.04)' }]}>
                     {selectCell}
 
-                    {/* Username */}
+                    {/* Username + status */}
                     <View style={{ flex: 1.5, gap: 3 }}>
                       <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
                         <Text
@@ -1930,6 +2000,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                     </View>
 
                     {expiryCell(2.2)}
+                    {registeredCell}
 
                     {/* Navigation / Map Button */}
                     <View style={{ flex: 1.1 }}>
@@ -2083,6 +2154,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 };
 
 const styles = StyleSheet.create({
+  rangeBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', flexWrap: 'wrap', marginTop: 10, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, backgroundColor: '#f0f9ff', borderWidth: 1, borderColor: '#bae6fd' },
+  rangeBannerText: { fontSize: 12, fontWeight: '700', color: '#0c4a6e' },
+  rangeBannerClear: { flexDirection: 'row', alignItems: 'center', gap: 3, marginLeft: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#cbd5e1' },
   limitRowContainer: {
     flexDirection: 'row',
     alignItems: 'center',

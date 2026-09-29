@@ -18,9 +18,27 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
   const [syncingInet, setSyncingInet] = useState(false);
   const [syncingIptv, setSyncingIptv] = useState(false);
   const [syncMsg, setSyncMsg] = useState('');
+  const [dateSummary, setDateSummary] = useState(null); // customers_by_date.php?summary=1
+  const [dateSummaryError, setDateSummaryError] = useState('');
+
+  const loadDateSummary = async () => {
+    try {
+      if (user?.token) setApiConfig(undefined, user.token);
+      const res = await OneBssApi.getCustomersByDateSummary();
+      if (res.ok && res.data?.success !== false) {
+        setDateSummary(res.data);
+        setDateSummaryError('');
+      } else {
+        setDateSummaryError(res.data?.message || 'Could not load expiry / registration counts.');
+      }
+    } catch (e) {
+      setDateSummaryError('Could not load expiry / registration counts.');
+    }
+  };
 
   const refreshData = async () => {
     setLoading(true);
+    loadDateSummary();
     try {
       const res = await OneBssApi.getDashboardTelemetry(currentPartnerId);
       const data = res.data?.data || res.data?.telemetry || res.data;
@@ -316,11 +334,72 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
           </TouchableOpacity>
         </View>
       </View>
+      {/* EXPIRY & REGISTRATION (customers_by_date.php) */}
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+        <Text style={styles.sectionHeaderTitle}>Expiry & Registration</Text>
+        {dateSummary?.generated_at ? (
+          <Text style={{ fontSize: 11, color: COLORS.textMuted }}>As of {dateSummary.generated_at} IST</Text>
+        ) : null}
+      </View>
+      {dateSummaryError ? (
+        <Text style={{ fontSize: 12, color: COLORS.accentRose, marginBottom: 12 }}>{dateSummaryError}</Text>
+      ) : null}
+      <View style={[styles.dateGroupsRow, isMobile && { flexDirection: 'column' }]}>
+        {[
+          { type: 'internet', title: 'Internet', icon: <Feather name="wifi" size={18} color={COLORS.primary} /> },
+          { type: 'iptv', title: 'IPTV', icon: <MaterialIcons name="live-tv" size={18} color="#8b5cf6" /> },
+        ].map((grp) => (
+          <View key={grp.type} style={[styles.card, GLASS_CARD_INTERACTIVE, styles.dateGroupCard]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+              {grp.icon}
+              <Text style={styles.cardTitle}>{grp.title}</Text>
+            </View>
+            {[
+              { kind: 'expiry', title: 'EXPIRY', keys: ['expiring_next_7_days', 'expires_today', 'expires_tomorrow', 'expired_yesterday', 'expired_last_7_days'] },
+              { kind: 'registered', title: 'REGISTRATION', keys: ['registered_today', 'registered_yesterday', 'registered_this_month', 'registered_last_month'] },
+            ].map((row) => (
+              <View key={row.kind} style={{ marginBottom: 10 }}>
+                <Text style={styles.dateRowTitle}>{row.title}</Text>
+                <View style={styles.dateBtnWrap}>
+                  {row.keys.map((key) => {
+                    const item = dateSummary?.[grp.type]?.[key];
+                    const count = item?.count;
+                    const isExpiry = row.kind === 'expiry';
+                    const tone = isExpiry
+                      ? (key.startsWith('expired') ? { fg: '#be123c', bg: '#fff1f2', border: '#fecdd3' } : { fg: '#b45309', bg: '#fffbeb', border: '#fde68a' })
+                      : { fg: '#0369a1', bg: '#f0f9ff', border: '#bae6fd' };
+                    return (
+                      <TouchableOpacity
+                        key={key}
+                        style={[styles.dateBtn, { backgroundColor: tone.bg, borderColor: tone.border }, !count && { opacity: 0.6 }]}
+                        onPress={() => onNavigateToCustomers && onNavigateToCustomers(grp.type === 'iptv' ? 'iptv_all' : 'all', key)}
+                      >
+                        <Text style={[styles.dateBtnLabel, { color: tone.fg }]}>{item?.label || key.replace(/_/g, ' ')}</Text>
+                        <View style={[styles.dateBtnCount, { borderColor: tone.border }]}>
+                          <Text style={[styles.dateBtnCountText, { color: tone.fg }]}>{dateSummary ? (count ?? 0) : '…'}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            ))}
+          </View>
+        ))}
+      </View>
     </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
+  dateGroupsRow: { flexDirection: 'row', gap: 16, alignItems: 'stretch' },
+  dateGroupCard: { flex: 1, marginBottom: 16 },
+  dateRowTitle: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 0.5, marginBottom: 6 },
+  dateBtnWrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  dateBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: 12, paddingRight: 6, paddingVertical: 6, borderRadius: 8, borderWidth: 1 },
+  dateBtnLabel: { fontSize: 12, fontWeight: '600' },
+  dateBtnCount: { minWidth: 26, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 10, backgroundColor: '#ffffff', borderWidth: 1, alignItems: 'center' },
+  dateBtnCountText: { fontSize: 12, fontWeight: '700' },
   container: { flex: 1, width: '100%', backgroundColor: COLORS.bgPrimary },
   content: { width: '100%', paddingHorizontal: '3%', paddingVertical: 20 },
   headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 },

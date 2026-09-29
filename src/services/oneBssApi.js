@@ -711,7 +711,15 @@ export const OneBssApi = {
     Object.entries(extra || {}).forEach(([k, v]) => {
       if (v !== undefined && v !== null && v !== '' && !(k === 'status' && v === 'all')) params.set(k, String(v));
     });
-    return request(`/customers_list.php?${params.toString()}`, { method: 'GET' });
+    // an expiry / registration range is served by customers_by_date.php (same row shape)
+    const endpoint = extra && extra.range ? '/customers_by_date.php' : '/customers_list.php';
+    return request(`${endpoint}?${params.toString()}`, { method: 'GET' });
+  },
+
+  // Counts for the 10 expiry / registration ranges, for Internet and IPTV (dashboard buttons)
+  getCustomersByDateSummary: async (partnerId) => {
+    const q = partnerId ? `&partner_id=${encodeURIComponent(partnerId)}` : '';
+    return request(`/customers_by_date.php?summary=1${q}`, { method: 'GET' });
   },
 
   resetPassword: async (username, newPassword, custId) => {
