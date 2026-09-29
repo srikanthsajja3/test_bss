@@ -134,6 +134,15 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
         if (!hash.includes('iptv=')) {
           setIptvPlansPartner(null);
         }
+        if (!hash.includes('action=create') && !hash.includes('create=')) {
+          setIsCreateOpen(false);
+        } else {
+          const matchRole = hash.match(/role=([^&]+)/);
+          if (matchRole && matchRole[1]) {
+            setCreateRole(matchRole[1]);
+          }
+          setIsCreateOpen(true);
+        }
       }
     };
     if (typeof window !== 'undefined') {
@@ -161,10 +170,46 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     if (initialCreateRole) {
       setCreateRole(initialCreateRole);
       setIsCreateOpen(true);
-    } else {
-      setIsCreateOpen(false);
     }
   }, [initialCreateRole]);
+
+  const handleOpenCreate = (role = 'operator') => {
+    setCreateRole(role);
+    setIsCreateOpen(true);
+    if (onOpenCreate) onOpenCreate(role);
+    if (typeof window !== 'undefined') {
+      window.location.hash = `partners?action=create&role=${role}`;
+    }
+  };
+
+  const handleCloseCreate = () => {
+    setIsCreateOpen(false);
+    if (onOpenCreate) onOpenCreate(null);
+    if (typeof window !== 'undefined') {
+      window.location.hash = selectedPartner ? `partners?partner_id=${selectedPartner.partner_id || selectedPartner.id}` : 'partners';
+    }
+  };
+
+  const handleCloseEdit = () => {
+    setEditingPartner(null);
+    if (typeof window !== 'undefined') {
+      window.location.hash = selectedPartner ? `partners?partner_id=${selectedPartner.partner_id || selectedPartner.id}` : 'partners';
+    }
+  };
+
+  const handleCloseWallet = () => {
+    setWalletPartner(null);
+    if (typeof window !== 'undefined') {
+      window.location.hash = selectedPartner ? `partners?partner_id=${selectedPartner.partner_id || selectedPartner.id}` : 'partners';
+    }
+  };
+
+  const handleCloseInternetPlans = () => {
+    setInternetPlansPartner(null);
+    if (typeof window !== 'undefined') {
+      window.location.hash = selectedPartner ? `partners?partner_id=${selectedPartner.partner_id || selectedPartner.id}` : 'partners';
+    }
+  };
 
   const fetchPartners = async () => {
     setLoading(true);
@@ -198,6 +243,16 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   }, [search, selectedRole]);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash;
+      if (hash.includes('action=create') || hash.includes('create=')) {
+        const matchRole = hash.match(/role=([^&]+)/);
+        if (matchRole && matchRole[1]) {
+          setCreateRole(matchRole[1]);
+        }
+        setIsCreateOpen(true);
+      }
+    }
     if (partners && partners.length > 0 && typeof window !== 'undefined') {
       const hash = window.location.hash;
       const getPartnerFromHash = (key) => {
@@ -263,12 +318,6 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     }
     await OneBssApi.updatePartner(partnerId, { status: newStatus });
     toast.info(`Partner #${partnerId} status updated to ${newStatus.toUpperCase()}`);
-  };
-
-  const handleOpenCreate = (role = 'admin') => {
-    setCreateRole(role);
-    setIsCreateOpen(true);
-    if (onOpenCreate) onOpenCreate(role);
   };
 
   const handleAccountCreated = (newPartner, msg) => {
@@ -992,14 +1041,10 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     return (
       <CreateAccountModal
         visible={true}
-        onClose={() => {
-          setIsCreateOpen(false);
-          if (onOpenCreate) onOpenCreate(null);
-        }}
+        onClose={handleCloseCreate}
         initialRole={createRole}
         onAccountCreated={(p) => {
-          setIsCreateOpen(false);
-          if (onOpenCreate) onOpenCreate(null);
+          handleCloseCreate();
           handleAccountCreated(p);
         }}
       />
@@ -1012,7 +1057,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       <View style={{ flex: 1, backgroundColor: COLORS.bgPrimary }}>
         <ScrollView contentContainerStyle={{ padding: isMobile ? 14 : 24, maxWidth: 900, alignSelf: 'center', width: '100%' }}>
           <View style={styles.detailsHeaderRow}>
-            <TouchableOpacity style={styles.backBtn} onPress={() => setEditingPartner(null)}>
+            <TouchableOpacity style={styles.backBtn} onPress={handleCloseEdit}>
               <Feather name="arrow-left" size={18} color={COLORS.textMain} />
               <Text style={styles.backBtnText}>Back</Text>
             </TouchableOpacity>
@@ -1146,7 +1191,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
             </View>
 
             <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
-              <TouchableOpacity style={styles.btnSecondary} onPress={() => setEditingPartner(null)}>
+              <TouchableOpacity style={styles.btnSecondary} onPress={handleCloseEdit}>
                 <Text style={styles.btnSecondaryText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.btnPrimary, { backgroundColor: '#3b82f6' }]} onPress={handleSaveEdit}>
@@ -1166,7 +1211,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       <View style={{ flex: 1, backgroundColor: COLORS.bgPrimary }}>
         <ScrollView contentContainerStyle={{ padding: isMobile ? 14 : 24, maxWidth: 1100, alignSelf: 'center', width: '100%' }}>
           <View style={styles.detailsHeaderRow}>
-            <TouchableOpacity style={styles.backBtn} onPress={() => setWalletPartner(null)}>
+            <TouchableOpacity style={styles.backBtn} onPress={handleCloseWallet}>
               <Feather name="arrow-left" size={18} color={COLORS.textMain} />
               <Text style={styles.backBtnText}>Back</Text>
             </TouchableOpacity>
@@ -1343,9 +1388,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       <View style={{ flex: 1, backgroundColor: COLORS.bgPrimary }}>
         <ScrollView contentContainerStyle={{ padding: isMobile ? 14 : 24, width: '100%' }}>
           <View style={styles.detailsHeaderRow}>
-            <TouchableOpacity style={styles.backBtn} onPress={() => setInternetPlansPartner(null)}>
+            <TouchableOpacity style={styles.backBtn} onPress={handleCloseInternetPlans}>
               <Feather name="arrow-left" size={18} color={COLORS.textMain} />
-              <Text style={styles.backBtnText}>Back to Partners List</Text>
+              <Text style={styles.backBtnText}>Back</Text>
             </TouchableOpacity>
           </View>
 
