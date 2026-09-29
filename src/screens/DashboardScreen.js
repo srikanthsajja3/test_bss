@@ -242,7 +242,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         </TouchableOpacity>
 
         {/* SUSPENDED USERS */}
-        <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('suspend')}>
+        <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('suspended')}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Feather name="alert-triangle" size={14} color={COLORS.accentAmber} />
@@ -254,7 +254,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         </TouchableOpacity>
 
         {/* DISABLED USERS */}
-        <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('suspend')}>
+        <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('disabled')}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Feather name="slash" size={14} color="#64748b" />
@@ -266,7 +266,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         </TouchableOpacity>
 
         {/* NEW USERS */}
-        <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('all')}>
+        <TouchableOpacity style={[styles.statCardMetric, styles.statCardMetricClickable]} onPress={() => handleCardClick('new')}>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
               <Feather name="user-plus" size={14} color="#8b5cf6" />

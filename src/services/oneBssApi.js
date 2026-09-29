@@ -699,11 +699,19 @@ export const OneBssApi = {
     }
   },
 
-  getCustomersList: async (page = 1, limit = 100, type = '', search = '') => {
-    let query = `page=${page}&limit=${limit}`;
-    if (type) query += `&type=${encodeURIComponent(type)}`;
-    if (search) query += `&search=${encodeURIComponent(search)}`;
-    return request(`/customers_list.php?${query}`, { method: 'GET' });
+  // customers_list.php — one row per account. Filtering, search, sorting and paging are all
+  // done server-side; the response also carries `counts` for every status bucket.
+  //   extra: { status, partner_id, sort, dir }
+  getCustomersList: async (page = 1, limit = 100, type = '', search = '', extra = {}) => {
+    const params = new URLSearchParams();
+    params.set('page', String(page));
+    params.set('limit', String(limit));
+    if (type) params.set('type', type);
+    if (search && String(search).trim()) params.set('search', String(search).trim());
+    Object.entries(extra || {}).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '' && !(k === 'status' && v === 'all')) params.set(k, String(v));
+    });
+    return request(`/customers_list.php?${params.toString()}`, { method: 'GET' });
   },
 
   resetPassword: async (username, newPassword, custId) => {
@@ -916,34 +924,15 @@ export const OneBssApi = {
       }
     } catch (e) {}
 
-    // Fallback: compute telemetry from /customers_list.php if dashboard endpoint returns empty
+    // Fallback: take the status counts straight from /customers_list.php (limit=1 — only
+    // the `counts` block is needed), so the dashboard matches the customers page exactly.
     try {
-      const custRes = await request('/customers_list.php?limit=500', { method: 'GET' });
-      const raw = custRes.data && Array.isArray(custRes.data) ? custRes.data : (custRes.data?.data || []);
-      
-      let active = 0, online = 0, expired = 0, suspend = 0, disabled = 0, newSub = 0;
-      let iptvActive = 0, iptvExpired = 0;
-
-      if (Array.isArray(raw) && raw.length > 0) {
-        raw.forEach(item => {
-          const st = String(item.status_text || item.status || '').toLowerCase();
-          const onlineVal = String(item.online || '').toUpperCase();
-          const isOnline = onlineVal === 'ONLINE' || onlineVal === '1' || item.online === true;
-          
-          if (isOnline) online++;
-          if (st === 'active' || st === 'enabled') active++;
-          else if (st === 'expired' || st === 'expiry') expired++;
-          else if (st === 'suspend' || st === 'suspended') suspend++;
-          else if (st === 'disabled') disabled++;
-          else newSub++;
-
-          if (item.stb_mac_id || item.iptv_package_id) {
-            if (st === 'active' || isOnline) iptvActive++;
-            else iptvExpired++;
-          }
-        });
-      }
-
+      const [inetRes, iptvRes] = await Promise.all([
+        request('/customers_list.php?type=internet&limit=1', { method: 'GET' }),
+        request('/customers_list.php?type=iptv&limit=1', { method: 'GET' }),
+      ]);
+      const ic = inetRes.data?.counts || {};
+      const tc = iptvRes.data?.counts || {};
       return {
         ok: true,
         status: 200,
@@ -951,21 +940,21 @@ export const OneBssApi = {
           success: true,
           data: {
             internet: {
-              total: raw.length,
-              active,
-              online,
-              expired,
-              disabled,
-              suspend,
-              new: newSub,
+              total: ic.total || 0,
+              active: ic.active || 0,
+              online: ic.online || 0,
+              expired: ic.expired || 0,
+              disabled: ic.disabled || 0,
+              suspend: ic.suspended || 0,
+              new: ic.new || 0,
             },
             iptv: {
-              total: iptvActive + iptvExpired,
-              active: iptvActive,
-              expired: iptvExpired,
-            }
-          }
-        }
+              total: tc.total || 0,
+              active: tc.active || 0,
+              expired: tc.expired || 0,
+            },
+          },
+        },
       };
     } catch (e) {
       return {

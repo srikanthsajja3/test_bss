@@ -212,6 +212,87 @@ const mapCustomersListToIptvRow = (item, index, accIndex = 0) => {
   };
 };
 
+// ---- Subscriber list (customers_list.php: one flat row per account) ----
+
+// Filter keys arrive from the dashboard / URL in several spellings
+// ('suspend', 'Suspended', 'iptv_active', 'iptv_all', ...). Map them onto the
+// status buckets customers_list.php understands.
+const LIST_FILTERS_INTERNET = ['all', 'new', 'active', 'online', 'offline', 'expired', 'suspended', 'disabled'];
+const LIST_FILTERS_IPTV = ['all', 'active', 'expired', 'suspended', 'disabled', 'new'];
+const normalizeListFilter = (key, isIptv = false) => {
+  let k = String(key || 'all').trim().toLowerCase().replace(/^iptv_?/, '');
+  if (k === '' || k === 'iptv') k = 'all';
+  if (k === 'suspend') k = 'suspended';
+  if (k === 'newsub') k = 'new';
+  const allowed = isIptv ? LIST_FILTERS_IPTV : LIST_FILTERS_INTERNET;
+  return allowed.includes(k) ? k : 'all';
+};
+
+// Same buckets as customers_list.php (used only if an older backend sends no status_key)
+const listStatusKey = (value) => {
+  const st = String(value ?? '').trim().toLowerCase();
+  if (st === '' || st.startsWith('new')) return 'new';
+  if (st.startsWith('activ')) return 'active';
+  if (st.startsWith('expir')) return 'expired';
+  if (st.startsWith('suspen')) return 'suspended';
+  if (st.startsWith('disab') || st.startsWith('deactiv') || st.startsWith('inactiv')) return 'disabled';
+  return 'other';
+};
+
+// Fallback counts for an older backend that doesn't return `counts` (covers this page only)
+const countListRows = (rows, isIptv) => {
+  const c = { total: rows.length, active: 0, expired: 0, suspended: 0, disabled: 0, new: 0 };
+  if (!isIptv) { c.online = 0; c.offline = 0; }
+  rows.forEach((r) => {
+    const key = r.status_key || listStatusKey(isIptv ? r.status : r.status_text);
+    if (c[key] !== undefined) c[key] += 1;
+    if (!isIptv) {
+      if (String(r.online || '').toUpperCase() === 'ONLINE') c.online += 1;
+      else c.offline += 1;
+    }
+  });
+  return c;
+};
+
+const STATUS_BADGE = {
+  active: { label: 'Active', bg: '#dcfce7', fg: '#15803d', dot: '#16a34a' },
+  expired: { label: 'Expired', bg: '#ffe4e6', fg: '#be123c', dot: '#e11d48' },
+  suspended: { label: 'Suspended', bg: '#fef3c7', fg: '#b45309', dot: '#d97706' },
+  disabled: { label: 'Disabled', bg: '#f1f5f9', fg: '#475569', dot: '#64748b' },
+  new: { label: 'New', bg: '#ede9fe', fg: '#6d28d9', dot: '#8b5cf6' },
+  other: { label: '—', bg: '#f1f5f9', fg: '#475569', dot: '#94a3b8' },
+};
+
+const isBlankValue = (v) => v === undefined || v === null || String(v).trim() === '' || String(v).trim().toLowerCase() === 'null';
+
+const mapInternetListRow = (r) => {
+  const statusKey = r.status_key || listStatusKey(r.status_text);
+  return {
+    ...r,
+    id: `int_${r.internet_id ?? r.username}`,
+    name: r.full_name || '',
+    status: statusKey,
+    status_key: statusKey,
+    isOnline: r.is_online !== undefined ? !!r.is_online : String(r.online || '').toUpperCase() === 'ONLINE',
+    package_name: r.package_name || (r.package_id ? `Package #${r.package_id}` : ''),
+    subplan_name: r.subplan_name || (r.subplan_id ? `Sub plan #${r.subplan_id}` : ''),
+    account_type: 'internet',
+  };
+};
+
+const mapIptvListRow = (r) => {
+  const statusKey = r.status_key || listStatusKey(r.status);
+  return {
+    ...r,
+    id: `iptv_${r.iptv_id}`,
+    name: r.full_name || '',
+    status_text: r.status,
+    status: statusKey,
+    status_key: statusKey,
+    account_type: 'iptv',
+  };
+};
+
 // Top-level fields on a customers_list row that really belong to one account
 const ACCOUNT_LEVEL_KEYS = [
   'username', 'status_text', 'status', 'online', 'package_name', 'subplan_name', 'plan', 'expiration',
@@ -224,9 +305,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const isMobile = width < 768;
 
   const [viewMode, setViewMode] = useState(isIptvMode ? 'iptv' : 'broadband');
-  const [activeFilter, setActiveFilter] = useState(initialFilter);
+  const [activeFilter, setActiveFilter] = useState(() => normalizeListFilter(initialFilter, isIptvMode));
   const [searchQuery, setSearchQuery] = useState('');
-  const [recordsLimit, setRecordsLimit] = useState(100);
   const [showPasswordMap, setShowPasswordMap] = useState({});
   const [selectedRowIds, setSelectedRowIds] = useState(new Set());
 
@@ -259,11 +339,20 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [operators, setOperators] = useState([]);
   const [selectedOperatorId, setSelectedOperatorId] = useState('');
 
-  // Live datasets loaded from API
-  const [iptvDataset, setIptvDataset] = useState([]);
-  const [broadbandDataset, setBroadbandDataset] = useState([]);
-  const [rawCustomers, setRawCustomers] = useState([]);
+  // ---- Subscriber list: one page of customers_list.php rows ----
+  // Status filter, search, operator filter, sorting and paging all run on the server, so the
+  // counts and results cover every account (not just the rows loaded into the browser).
+  const [rawCustomers, setRawCustomers] = useState([]); // current page, flat account rows
+  const [listTotal, setListTotal] = useState(0); // rows matching every filter
+  const [listCounts, setListCounts] = useState({}); // per-status counts (status filter ignored)
   const [loadingData, setLoadingData] = useState(true);
+  const [listError, setListError] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
 
   useEffect(() => {
     if (isSuperAdmin(user) || (user?.account_role || user?.role || '').toLowerCase() === 'admin') {
@@ -276,45 +365,44 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
   }, [user]);
 
+  // Latest query params, read by loadCustomerDataFromApi so callers elsewhere (recharge,
+  // add customer) always reload the page the user is looking at.
+  const listQueryRef = React.useRef({});
+  const listRequestSeq = React.useRef(0);
+
   const loadCustomerDataFromApi = async () => {
+    const q = listQueryRef.current;
+    const seq = ++listRequestSeq.current;
     setLoadingData(true);
     try {
       if (user?.token) setApiConfig(undefined, user.token);
-
-      // Fetch live customer records directly from /customers_list.php (up to 5000)
-      const custRes = await OneBssApi.getCustomersList(1, 5000);
-      let rawCustomers = [];
-
-      if (Array.isArray(custRes?.data)) {
-        rawCustomers = custRes.data;
-      } else if (custRes?.data && Array.isArray(custRes.data.data)) {
-        rawCustomers = custRes.data.data;
-      } else if (custRes?.data && Array.isArray(custRes.data.customers)) {
-        rawCustomers = custRes.data.customers;
-      } else if (custRes?.data && Array.isArray(custRes.data.subscribers)) {
-        rawCustomers = custRes.data.subscribers;
-      } else if (custRes?.data && Array.isArray(custRes.data.items)) {
-        rawCustomers = custRes.data.items;
-      } else if (custRes?.data && Array.isArray(custRes.data.list)) {
-        rawCustomers = custRes.data.list;
-      } else if (Array.isArray(custRes)) {
-        rawCustomers = custRes;
+      const res = await OneBssApi.getCustomersList(q.page || 1, q.pageSize || 100, q.type || 'internet', q.search || '', {
+        status: q.status,
+        partner_id: q.partnerId,
+        sort: q.sort,
+        dir: q.dir,
+      });
+      if (seq !== listRequestSeq.current) return; // a newer request superseded this one
+      const body = res?.data || {};
+      if (!res?.ok || body.success === false) {
+        setListError(body.message || `Could not load subscribers (HTTP ${res?.status ?? '?'})`);
+        setRawCustomers([]);
+        setListTotal(0);
+        return;
       }
-
-      const list = Array.isArray(rawCustomers) ? rawCustomers : [];
+      const list = Array.isArray(body.data) ? body.data : (Array.isArray(body) ? body : []);
+      setListError('');
       setRawCustomers(list);
-      setBroadbandDataset(list.map(mapCustomersListToBroadbandRow));
-      setIptvDataset(list.map(mapCustomersListToIptvRow));
+      setListTotal(Number(body.total ?? list.length) || 0);
+      setListCounts(body.counts && typeof body.counts === 'object' ? body.counts : countListRows(list, q.type === 'iptv'));
     } catch (e) {
+      if (seq !== listRequestSeq.current) return;
       console.log('Error loading API customer records:', e);
+      setListError('Could not load subscribers.');
     } finally {
-      setLoadingData(false);
+      if (seq === listRequestSeq.current) setLoadingData(false);
     }
   };
-
-  useEffect(() => {
-    loadCustomerDataFromApi();
-  }, [user]);
 
   // Navigation inside this screen:
   //   list  ->  customer accounts overview (cards)  ->  full account detail screen
@@ -433,7 +521,13 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   // List row merged with the full lookup record (lookup wins)
   const activeCustomer = useMemo(() => {
     if (activeCustomerId === null) return null;
-    const listItem = rawCustomers.find((c) => String(c.cust_id) === String(activeCustomerId)) || {};
+    // List rows are per ACCOUNT (internet or IPTV), so only the customer-level fields are
+    // taken from them — account fields come from customer_lookup's nested accounts.
+    const row = rawCustomers.find((c) => String(c.cust_id) === String(activeCustomerId)) || {};
+    const listItem = {};
+    ['full_name', 'mobile', 'email', 'partner_id', 'partner_name'].forEach((k) => {
+      if (!isBlankValue(row[k])) listItem[k] = row[k];
+    });
     const details = customerDetails[String(activeCustomerId)] || {};
     const merged = { cust_id: activeCustomerId, ...listItem, ...details };
     // customer_lookup has only package/sub-plan IDs; customers_list has one row per internet
@@ -626,10 +720,24 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
   };
 
+  // Pull the renewed account's latest state from the provider, then refresh the screen
+  const refreshAfterRecharge = (kind, id) => {
+    loadCustomerDataFromApi();
+    if (activeCustomerId === null) return;
+    if (kind === 'internet') {
+      syncInternetAccounts(activeCustomerId, [id]);
+    } else {
+      (async () => {
+        await handleIptvCustomerDetailSync({ id: `iptv_${id}`, mobile: activeCustomer?.mobile, name: activeCustomer?.full_name }, true);
+        fetchCustomerDetails(activeCustomerId, true);
+      })();
+    }
+  };
+
+  // IPTV: pass subPlanIds (1 DPO + add-ons) instead of planId/subPlanId.
   // Runs a recharge for one account. kind: 'internet' | 'iptv'. type ('recharge' | 'advance')
   // is only used for the messages — the backend handles both the same way.
   // Returns true on success so callers can close their confirm dialog.
-  // IPTV: pass subPlanIds (1 DPO + add-ons) instead of planId/subPlanId.
   const runRecharge = async ({ kind, id, planId, subPlanId, subPlanIds, label }, type = 'recharge') => {
     const hasPlan = kind === 'iptv' ? Array.isArray(subPlanIds) && subPlanIds.length > 0 : !!planId;
     if (!id || !hasPlan) {
@@ -642,12 +750,20 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         ? await OneBssApi.rechargeIptvAccount(id, subPlanIds)
         : await OneBssApi.rechargeInternetAccount(id, planId, subPlanId);
       const data = res.data || {};
+      // 202 { pending: true }: the provider got the request but didn't confirm — the amount
+      // is held. Close the dialog, warn, and sync so the real state shows up.
+      if (data.pending) {
+        toast.warning(`${label}: ${data.message || 'Renewal not confirmed yet — the amount is held.'}`, { autoClose: 12000 });
+        refreshAfterRecharge(kind, id);
+        return true;
+      }
       if (!res.ok || data.success === false) {
         let reason = data.message || `HTTP ${res.status}`;
         if (res.status === 402 && data.amount_required !== undefined) {
           reason += ` (needs ₹${data.amount_required}, wallet has ₹${data.wallet_balance ?? 0})`;
         }
-        if (data.refunded) reason += ' — wallet refunded';
+        if (data.rolled_back || data.charged === false) reason += ' — nothing was charged';
+        else if (data.refunded) reason += ' — wallet refunded';
         toast.error(`Recharge failed for ${label}: ${reason}`);
         return false;
       }
@@ -655,19 +771,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       const expiryNote = data.new_expiry_date ? ` New expiry: ${formatApiDate(data.new_expiry_date)}.` : '';
       const amountNote = kind === 'iptv' && data.amount !== undefined ? ` ${data.packages?.length || ''} pack(s), ₹${Number(data.amount).toFixed(2)} debited.` : '';
       toast.success(`${kindLabel} successful for ${label}.${amountNote}${expiryNote}`);
-      // Pull the renewed account's latest state from RADIUS, then refresh the screen
-      loadCustomerDataFromApi();
-      if (activeCustomerId !== null) {
-        if (kind === 'internet') {
-          syncInternetAccounts(activeCustomerId, [id]);
-        } else {
-          // pull the STB's new state from Pioneer, then reload the lookup
-          (async () => {
-            await handleIptvCustomerDetailSync({ id: `iptv_${id}`, mobile: activeCustomer?.mobile, name: activeCustomer?.full_name }, true);
-            fetchCustomerDetails(activeCustomerId, true);
-          })();
-        }
-      }
+      refreshAfterRecharge(kind, id);
       return true;
     } catch (e) {
       toast.error(`Recharge failed for ${label}.`);
@@ -796,19 +900,20 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   }, [isIptvMode]);
 
   useEffect(() => {
-    setActiveFilter(initialFilter || 'all');
-  }, [initialFilter]);
+    setActiveFilter(normalizeListFilter(initialFilter, viewMode === 'iptv'));
+  }, [initialFilter, viewMode]);
 
   const handleSelectFilter = (filterId) => {
-    setActiveFilter(filterId || 'all');
+    const next = normalizeListFilter(filterId, viewMode === 'iptv');
+    setActiveFilter(next);
     try {
       if (typeof window !== 'undefined') {
         const tab = viewMode === 'iptv' ? 'iptv_customers' : 'customers';
-        const hashVal = filterId && filterId !== 'all' ? `${tab}?filter=${filterId}` : tab;
+        const hashVal = next !== 'all' ? `${tab}?filter=${next}` : tab;
         window.location.hash = hashVal;
         localStorage.setItem('onebss_active_tab', tab);
-        if (filterId && filterId !== 'all') {
-          localStorage.setItem('onebss_filter', filterId);
+        if (next !== 'all') {
+          localStorage.setItem('onebss_filter', next);
         } else {
           localStorage.removeItem('onebss_filter');
         }
@@ -816,98 +921,36 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     } catch (e) {}
   };
 
-  const currentDataset = useMemo(() => {
-    return viewMode === 'iptv' ? iptvDataset : broadbandDataset;
-  }, [viewMode, iptvDataset, broadbandDataset]);
-
-  const counts = useMemo(() => {
-    let dataset = currentDataset;
-    if (selectedOperatorId) {
-      const targetOp = String(selectedOperatorId).toLowerCase().trim();
-      dataset = dataset.filter((c) => {
-        const pId = String(c.partner_id || c.operator_id || '').toLowerCase().trim();
-        const pName = String(c.partner_name || '').toLowerCase().trim();
-        return pId === targetOp || pName === targetOp || (pName && pName.includes(targetOp));
-      });
-    }
-    return {
-      total: dataset.length,
-      active: dataset.filter((c) => c.status === 'active' || (c.status_text || '').toLowerCase() === 'active').length,
-      newSub: dataset.filter((c) => c.status === 'new' || (c.status_text || '').toLowerCase() === 'new').length,
-      disabled: dataset.filter((c) => c.status === 'disabled' || (c.status_text || '').toLowerCase() === 'disabled').length,
-      online: dataset.filter((c) => c.isOnline).length,
-      offline: dataset.filter((c) => !c.isOnline).length,
-      expired: dataset.filter((c) => c.status === 'expired' || (c.status_text || '').toLowerCase() === 'expired').length,
-      suspend: dataset.filter((c) => c.status === 'suspend' || (c.status_text || '').toLowerCase() === 'suspend').length,
-    };
-  }, [currentDataset, selectedOperatorId]);
-
-  const filteredCustomers = useMemo(() => {
-    let list = currentDataset;
-
-    if (selectedOperatorId) {
-      const targetOp = String(selectedOperatorId).toLowerCase().trim();
-      list = list.filter((c) => {
-        const pId = String(c.partner_id || c.operator_id || '').toLowerCase().trim();
-        const pName = String(c.partner_name || '').toLowerCase().trim();
-        return pId === targetOp || pName === targetOp || (pName && pName.includes(targetOp));
-      });
-    }
-
-    if (activeFilter === 'active' || activeFilter === 'iptv_active') {
-      list = list.filter((c) => c.status === 'active' || (c.status_text || '').toLowerCase() === 'active');
-    } else if (activeFilter === 'new') {
-      list = list.filter((c) => c.status === 'new' || (c.status_text || '').toLowerCase() === 'new');
-    } else if (activeFilter === 'disabled') {
-      list = list.filter((c) => c.status === 'disabled' || (c.status_text || '').toLowerCase() === 'disabled');
-    } else if (activeFilter === 'online') {
-      list = list.filter((c) => c.isOnline);
-    } else if (activeFilter === 'offline') {
-      list = list.filter((c) => !c.isOnline);
-    } else if (activeFilter === 'expired' || activeFilter === 'iptv_expired') {
-      list = list.filter((c) => c.status === 'expired' || (c.status_text || '').toLowerCase() === 'expired');
-    } else if (activeFilter === 'suspend') {
-      list = list.filter((c) => c.status === 'suspend' || (c.status_text || '').toLowerCase() === 'suspend');
-    }
-
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase().trim();
-      const qDigits = q.replace(/\D/g, '');
-      list = list.filter((c) => {
-        const nameMatch = (c.name && c.name.toLowerCase().includes(q)) || (c.full_name && c.full_name.toLowerCase().includes(q));
-        const userMatch = c.username && c.username.toLowerCase().includes(q);
-        const idMatch = String(c.id || '').includes(q) || String(c.cust_id || '').includes(q) || String(c.internet_id || '').includes(q);
-        const pkgMatch = (c.package_name && c.package_name.toLowerCase().includes(q)) || (c.subplan_name && c.subplan_name.toLowerCase().includes(q));
-        const stbMatch = (c.stb_id && c.stb_id.toLowerCase().includes(q)) || (c.stb_mac && c.stb_mac.toLowerCase().includes(q));
-        const ipMatch = c.ip && c.ip.toLowerCase().includes(q);
-        const mobileMatch = c.mobile && (String(c.mobile).includes(q) || (qDigits && String(c.mobile).replace(/\D/g, '').includes(qDigits)));
-        return nameMatch || userMatch || idMatch || pkgMatch || stbMatch || ipMatch || mobileMatch;
-      });
-    }
-
-    if (sortField === 'expiration') {
-      list = [...list].sort((a, b) => {
-        const dateA = a.expiration || a.expiryDate || '';
-        const dateB = b.expiration || b.expiryDate || '';
-        const tA = dateA ? new Date(dateA).getTime() || 0 : 0;
-        const tB = dateB ? new Date(dateB).getTime() || 0 : 0;
-        return sortDirection === 'asc' ? tA - tB : tB - tA;
-      });
-    }
-
-    return list;
-  }, [currentDataset, activeFilter, searchQuery, sortField, sortDirection, selectedOperatorId]);
-
-  const paginatedCustomers = useMemo(() => {
-    const start = (currentPage - 1) * pageSize;
-    return filteredCustomers.slice(start, start + pageSize);
-  }, [filteredCustomers, currentPage, pageSize]);
-
-  const totalPages = Math.ceil(filteredCustomers.length / pageSize) || 1;
-
+  // Back to page 1 whenever the result set changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeFilter, searchQuery, viewMode, selectedOperatorId, recordsLimit, pageSize]);
+    setSelectedRowIds(new Set());
+  }, [activeFilter, debouncedSearch, viewMode, selectedOperatorId, pageSize, sortField, sortDirection]);
+
+  // (Re)load the page from the server whenever any list parameter changes
+  listQueryRef.current = {
+    type: viewMode === 'iptv' ? 'iptv' : 'internet',
+    page: currentPage,
+    pageSize,
+    search: debouncedSearch,
+    status: activeFilter,
+    partnerId: selectedOperatorId,
+    sort: sortField || undefined,
+    dir: sortField ? sortDirection : undefined,
+  };
+  const listQueryKey = JSON.stringify(listQueryRef.current);
+  useEffect(() => {
+    if (!user) return;
+    loadCustomerDataFromApi();
+  }, [user, listQueryKey]);
+
+  const counts = listCounts;
+  const filteredCustomers = useMemo(
+    () => rawCustomers.map(viewMode === 'iptv' ? mapIptvListRow : mapInternetListRow),
+    [rawCustomers, viewMode]
+  );
+  const paginatedCustomers = filteredCustomers; // the server already returned just this page
+  const totalPages = Math.max(1, Math.ceil(listTotal / pageSize));
 
   const handleToggleMode = (newMode) => {
     setViewMode(newMode);
@@ -924,7 +967,11 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   // Row click in the list -> open the customer's account cards overview & auto-close sidebar
   const handleOpenSubscriberScreen = (cust) => {
     if (!cust) return;
-    const cId = cust.cust_id ?? cust.id;
+    const cId = cust.cust_id;
+    if (cId === null || cId === undefined || cId === '') {
+      toast.warning(`${cust.username || cust.stb_box || 'This account'} is not linked to a customer yet.`);
+      return;
+    }
     setActiveCustomerId(cId);
     setActiveAccountSel(null);
     if (typeof window !== 'undefined') {
@@ -1016,13 +1063,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           status: editForm.status,
         });
 
-        setIptvDataset((prev) =>
-          prev.map((item) =>
-            item.id === editingCustomer.id
-              ? { ...item, ...editForm }
-              : item
-          )
-        );
+        loadCustomerDataFromApi();
       } else {
         await OneBssApi.updateInternetCustomer({
           id: editingCustomer.id,
@@ -1032,13 +1073,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           status: editForm.status,
         });
 
-        setBroadbandDataset((prev) =>
-          prev.map((item) =>
-            item.id === editingCustomer.id
-              ? { ...item, ...editForm }
-              : item
-          )
-        );
+        loadCustomerDataFromApi();
       }
 
       if (activeSubProfile && activeSubProfile.id === editingCustomer.id) {
@@ -1449,15 +1484,23 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       <View style={styles.unifiedControlCard}>
         {/* Search Bar, Operator Filter & Add Customer Button */}
         <View style={[styles.topControlRow, { gap: 10, flexWrap: 'wrap', alignItems: 'center' }]}>
-          <View style={[styles.searchBox, { width: isMobile ? '100%' : 320, maxWidth: '100%' }]}>
+          <View style={[styles.searchBox, { width: isMobile ? '100%' : 380, maxWidth: '100%' }]}>
             <Feather name="search" size={15} color={COLORS.textDim} />
             <TextInput
               style={styles.searchInput}
-              placeholder="Search Username, Mobile, Full Name, Package, Expiration..."
+              placeholder={viewMode === 'iptv'
+                ? 'Search STB / VC number, Pioneer ID, name, mobile, operator...'
+                : 'Search username, mobile, name, email, account ID, operator...'}
               value={searchQuery}
               onChangeText={setSearchQuery}
+              onSubmitEditing={() => setDebouncedSearch(searchQuery.trim())}
               placeholderTextColor={COLORS.textDim}
             />
+            {searchQuery ? (
+              <TouchableOpacity onPress={() => { setSearchQuery(''); setDebouncedSearch(''); }} style={{ padding: 2 }} title="Clear search">
+                <Feather name="x" size={14} color={COLORS.textDim} />
+              </TouchableOpacity>
+            ) : null}
           </View>
 
           {(isSuperAdmin(user) || (user?.account_role || user?.role || '').toLowerCase() === 'admin') && operators.length > 0 && (
@@ -1494,54 +1537,42 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           )}
         </View>
 
-        {/* Bottom Filter Chips Line */}
+        {/* Bottom Filter Chips Line — counts come from the server and cover every account */}
         <View style={styles.bottomChipRowContainer}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
-            {viewMode === 'iptv'
+            {(viewMode === 'iptv'
               ? [
-                  { id: 'all', label: `All Pioneer STBs (${counts.total})` },
-                  { id: 'iptv_active', label: `Active STBs (${counts.active})` },
-                  { id: 'new', label: `New (${counts.newSub})` },
-                  { id: 'disabled', label: `Disabled (${counts.disabled})` },
-                  { id: 'iptv_expired', label: `Expired STBs (${counts.expired})` },
-                  { id: 'online', label: `Online Streaming (${counts.online})` },
-                  { id: 'offline', label: `Offline STBs (${counts.offline})` },
-                ].map((tab) => {
-                  const isActive =
-                    activeFilter === tab.id ||
-                    (activeFilter === 'all' && tab.id === 'all') ||
-                    (activeFilter === 'iptv_all' && tab.id === 'all');
-                  return (
-                    <TouchableOpacity
-                      key={tab.id}
-                      style={[styles.chip, isActive && styles.chipActiveIptv]}
-                      onPress={() => handleSelectFilter(tab.id)}
-                    >
-                      <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{tab.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })
+                  { id: 'all', label: 'All STBs', count: counts.total },
+                  { id: 'active', label: 'Active', count: counts.active },
+                  { id: 'expired', label: 'Expired', count: counts.expired },
+                  { id: 'suspended', label: 'Suspended', count: counts.suspended },
+                  { id: 'disabled', label: 'Disabled', count: counts.disabled },
+                  { id: 'new', label: 'New', count: counts.new },
+                ]
               : [
-                  { id: 'all', label: `All Subscribers (${counts.total})` },
-                  { id: 'active', label: `Active (${counts.active})` },
-                  { id: 'new', label: `New (${counts.newSub})` },
-                  { id: 'disabled', label: `Disabled (${counts.disabled})` },
-                  { id: 'online', label: `Online (${counts.online})` },
-                  { id: 'offline', label: `Offline (${counts.offline})` },
-                  { id: 'expired', label: `Expired (${counts.expired})` },
-                  { id: 'suspend', label: `Suspended (${counts.suspend})` },
-                ].map((tab) => {
-                  const isActive = activeFilter === tab.id;
-                  return (
-                    <TouchableOpacity
-                      key={tab.id}
-                      style={[styles.chip, isActive && styles.chipActive]}
-                      onPress={() => handleSelectFilter(tab.id)}
-                    >
-                      <Text style={[styles.chipText, isActive && styles.chipTextActive]}>{tab.label}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
+                  { id: 'all', label: 'All Subscribers', count: counts.total },
+                  { id: 'new', label: 'New', count: counts.new },
+                  { id: 'active', label: 'Active', count: counts.active },
+                  { id: 'online', label: 'Online', count: counts.online },
+                  { id: 'offline', label: 'Offline', count: counts.offline },
+                  { id: 'expired', label: 'Expired', count: counts.expired },
+                  { id: 'suspended', label: 'Suspended', count: counts.suspended },
+                  { id: 'disabled', label: 'Disabled', count: counts.disabled },
+                ]
+            ).map((tab) => {
+              const isActive = activeFilter === tab.id;
+              return (
+                <TouchableOpacity
+                  key={tab.id}
+                  style={[styles.chip, isActive && (viewMode === 'iptv' ? styles.chipActiveIptv : styles.chipActive)]}
+                  onPress={() => handleSelectFilter(tab.id)}
+                >
+                  <Text style={[styles.chipText, isActive && styles.chipTextActive]}>
+                    {tab.label} ({tab.count ?? 0})
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
         </View>
       </View>
@@ -1551,9 +1582,13 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         <View style={{ width: '100%' }}>
           {/* PAGINATION CONTROLS BAR (TOP) */}
           <View style={{ flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight || '#e2e8f0', gap: 10, backgroundColor: COLORS.cardBg || '#ffffff' }}>
-            <Text style={{ fontSize: 12, color: COLORS.textMuted || '#64748b' }}>
-              Showing {filteredCustomers.length === 0 ? 0 : (currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, filteredCustomers.length)} of {filteredCustomers.length} subscribers
-            </Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              {loadingData ? <ActivityIndicator size="small" color={COLORS.primary} /> : null}
+              <Text style={{ fontSize: 12, color: COLORS.textMuted || '#64748b' }}>
+                Showing {listTotal === 0 ? 0 : (currentPage - 1) * pageSize + 1} to {Math.min((currentPage - 1) * pageSize + paginatedCustomers.length, listTotal)} of {listTotal} {viewMode === 'iptv' ? 'set-top boxes' : 'subscribers'}
+                {debouncedSearch ? ` matching "${debouncedSearch}"` : ''}
+              </Text>
+            </View>
 
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
               {/* Items Per Page Selector */}
@@ -1594,7 +1629,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </View>
             </View>
           </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: 1350, width: '100%' }}>
+
+        <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: viewMode === 'iptv' ? 1250 : 1350, width: '100%' }}>
           <View style={{ width: '100%' }}>
             {/* Table Header */}
             <View style={styles.tableHeader}>
@@ -1609,16 +1645,29 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   color={selectedRowIds.size === paginatedCustomers.length && paginatedCustomers.length > 0 ? COLORS.primary : COLORS.textMuted}
                 />
               </TouchableOpacity>
-              <Text style={[styles.th, { flex: 1.5 }]}>Username {viewMode === 'iptv' ? '/ STB' : ''}</Text>
-              <Text style={[styles.th, { flex: 1.3 }]}>Password</Text>
-              <Text style={[styles.th, { flex: 1.2 }]}>Connectivity</Text>
-              <Text style={[styles.th, { flex: 1.4 }]}>Mobile</Text>
-              <Text style={[styles.th, { flex: 1.8 }]}>Full Name</Text>
-              <Text style={[styles.th, { flex: 1.6 }]}>Partner Name</Text>
-              <Text style={[styles.th, { flex: 1.8 }]}>Package Name</Text>
-              <Text style={[styles.th, { flex: 1.4 }]}>Subplan Name</Text>
+              {viewMode === 'iptv' ? (
+                <>
+                  <Text style={[styles.th, { flex: 1.7 }]}>STB / Box No.</Text>
+                  <Text style={[styles.th, { flex: 1.1 }]}>Status</Text>
+                  <Text style={[styles.th, { flex: 1.4 }]}>Mobile</Text>
+                  <Text style={[styles.th, { flex: 1.7 }]}>Full Name</Text>
+                  <Text style={[styles.th, { flex: 1.7 }]}>Operator / Branch</Text>
+                  <Text style={[styles.th, { flex: 1.8 }]}>Package</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={[styles.th, { flex: 1.5 }]}>Username</Text>
+                  <Text style={[styles.th, { flex: 1.2 }]}>Password</Text>
+                  <Text style={[styles.th, { flex: 1.1 }]}>Connectivity</Text>
+                  <Text style={[styles.th, { flex: 1.3 }]}>Mobile</Text>
+                  <Text style={[styles.th, { flex: 1.8 }]}>Full Name</Text>
+                  <Text style={[styles.th, { flex: 1.5 }]}>Partner Name</Text>
+                  <Text style={[styles.th, { flex: 1.8 }]}>Package Name</Text>
+                  <Text style={[styles.th, { flex: 1.4 }]}>Subplan Name</Text>
+                </>
+              )}
               <TouchableOpacity
-                style={[{ flex: 2.2, flexDirection: 'row', alignItems: 'center', gap: 4 }, styles.th]}
+                style={[{ flex: viewMode === 'iptv' ? 2 : 2.2, flexDirection: 'row', alignItems: 'center', gap: 4 }, styles.th]}
                 onPress={() => {
                   if (sortField === 'expiration') {
                     setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
@@ -1628,114 +1677,68 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   }
                 }}
               >
-                <Text style={[styles.th, { flex: 0 }]}>Expiration Date</Text>
+                <Text style={[styles.th, { flex: 0.4 }]}>Expiry Date</Text>
                 <Feather
                   name={sortField === 'expiration' ? (sortDirection === 'asc' ? 'arrow-up' : 'arrow-down') : 'arrow-down'}
                   size={12}
                   color={sortField === 'expiration' ? COLORS.primary : COLORS.textMuted}
                 />
               </TouchableOpacity>
-              <Text style={[styles.th, { flex: 1.2 }]}>Navigation</Text>
+              <Text style={[styles.th, { flex: viewMode === 'iptv' ? 1 : 1.1, textAlign: viewMode === 'iptv' ? 'center' : 'left' }]}>
+                {viewMode === 'iptv' ? 'Action' : 'Navigation'}
+              </Text>
             </View>
 
             {/* Table Rows */}
-            {paginatedCustomers.length === 0 ? (
+            {listError && !loadingData ? (
               <View style={{ padding: 30, alignItems: 'center', justifyContent: 'center' }}>
-                <Feather name="info" size={24} color={COLORS.textMuted} />
-                <Text style={{ marginTop: 8, fontSize: 13, color: COLORS.textMuted }}>No subscriber records matched your filter criteria.</Text>
+                <Feather name="alert-circle" size={24} color="#dc2626" />
+                <Text style={{ marginTop: 8, fontSize: 13, color: '#dc2626' }}>{listError}</Text>
+                <TouchableOpacity onPress={loadCustomerDataFromApi} style={{ marginTop: 10 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.primary }}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : paginatedCustomers.length === 0 ? (
+              <View style={{ padding: 30, alignItems: 'center', justifyContent: 'center' }}>
+                {loadingData ? (
+                  <ActivityIndicator size="small" color={COLORS.primary} />
+                ) : (
+                  <>
+                    <Feather name="info" size={24} color={COLORS.textMuted} />
+                    <Text style={{ marginTop: 8, fontSize: 13, color: COLORS.textMuted }}>No subscriber records matched your filter criteria.</Text>
+                  </>
+                )}
               </View>
             ) : (
               paginatedCustomers.map((cust, idx) => {
-                const isAccActive = cust.status === 'active' || (cust.status_text || '').toLowerCase() === 'active';
-                const isAccExpired = cust.status === 'expired' || (cust.status_text || '').toLowerCase() === 'expired';
-                const isAccNew = cust.status === 'new' || (cust.status_text || '').toLowerCase() === 'new';
-                const isAccDisabled = cust.status === 'disabled' || (cust.status_text || '').toLowerCase() === 'disabled';
+                const badge = STATUS_BADGE[cust.status_key] || STATUS_BADGE.other;
                 const balInfo = calculateBalanceDays(cust.expiration || cust.expiryDate);
-                const isPassRevealed = !!showPasswordMap[cust.id];
-                const rawPass = cust.password;
-                const hasPassword = rawPass !== undefined && rawPass !== null && String(rawPass).trim() !== '' && String(rawPass).trim().toLowerCase() !== 'null';
                 const isRowSelected = selectedRowIds.has(cust.id);
 
-                return (
-                  <View key={cust.id ? `cust_${cust.id}_${idx}` : idx} style={[styles.tr, isRowSelected && { backgroundColor: 'rgba(59, 130, 246, 0.04)' }]}>
-                    {/* Select Checkbox */}
-                    <TouchableOpacity
-                      style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
-                      onPress={() => toggleSelectRow(cust.id)}
-                    >
-                      <Feather
-                        name={isRowSelected ? "check-square" : "square"}
-                        size={16}
-                        color={isRowSelected ? COLORS.primary : COLORS.textMuted}
-                      />
-                    </TouchableOpacity>
+                const selectCell = (
+                  <TouchableOpacity
+                    style={{ width: 40, alignItems: 'center', justifyContent: 'center' }}
+                    onPress={() => toggleSelectRow(cust.id)}
+                  >
+                    <Feather
+                      name={isRowSelected ? "check-square" : "square"}
+                      size={16}
+                      color={isRowSelected ? COLORS.primary : COLORS.textMuted}
+                    />
+                  </TouchableOpacity>
+                );
 
-                    {/* Username / STB */}
-                    <View style={{ flex: 1.5 }}>
-                      <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                        <Text
-                          style={[
-                            styles.tdClickableUsername,
-                            isAccDisabled
-                              ? { textDecorationLine: 'line-through', color: '#64748b' }
-                              : isAccNew
-                              ? { color: '#d97706' }
-                              : isAccActive
-                              ? { color: '#16a34a' }
-                              : isAccExpired
-                              ? { color: '#dc2626' }
-                              : { color: COLORS.primary }
-                          ]}
-                        >
-                          {cust.username}
-                        </Text>
-                      </TouchableOpacity>
-                      {viewMode === 'iptv' && cust.stb_id ? <Text style={styles.tdSub}>STB: {cust.stb_id}</Text> : null}
-                    </View>
-
-                  {/* Password Column with Eye Toggle */}
-                  <View style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={[styles.tdText, { fontFamily: Platform?.OS === 'web' && hasPassword ? 'monospace' : undefined }]}>
-                      {hasPassword ? (isPassRevealed ? String(cust.password) : '••••••••') : '—'}
+                const statusPill = (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: badge.bg, alignSelf: 'flex-start' }}>
+                    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: badge.dot }} />
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: badge.fg }}>
+                      {(badge.label === '—' ? (cust.status_text || '—') : badge.label).toUpperCase()}
                     </Text>
-                    {hasPassword ? (
-                      <TouchableOpacity
-                        onPress={() => setShowPasswordMap((prev) => ({ ...prev, [cust.id]: !prev[cust.id] }))}
-                        style={{ padding: 2 }}
-                        title={isPassRevealed ? 'Hide Password' : 'Show Password'}
-                      >
-                        <Feather
-                          name={isPassRevealed ? 'eye-off' : 'eye'}
-                          size={13}
-                          color={isPassRevealed ? COLORS.primary : '#64748b'}
-                        />
-                      </TouchableOpacity>
-                    ) : null}
                   </View>
+                );
 
-                  {/* Connectivity Badge */}
-                  <View style={{ flex: 1.1 }}>
-                    <View
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 5,
-                        paddingHorizontal: 8,
-                        paddingVertical: 3,
-                        borderRadius: 12,
-                        backgroundColor: cust.isOnline ? '#dbeafe' : '#ffe4e6',
-                        alignSelf: 'flex-start',
-                      }}
-                    >
-                      <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: cust.isOnline ? '#2563eb' : '#dc2626' }} />
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: cust.isOnline ? '#1d4ed8' : '#dc2626' }}>
-                        {cust.isOnline ? 'ONLINE' : 'OFFLINE'}
-                      </Text>
-                    </View>
-                  </View>
-
-                  {/* Mobile (Dialer Link + Copy Button) */}
-                  <View style={{ flex: 1.3, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                const mobileCell = (flex) => (
+                  <View style={{ flex, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <TouchableOpacity
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
                       onPress={() => {
@@ -1746,10 +1749,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                         }
                       }}
                     >
-                      <Feather name="phone-call" size={12} color="#06b6d4" />
-                      <Text style={[styles.tdText, { color: '#06b6d4', fontWeight: '600' }]}>{cust.mobile || '—'}</Text>
+                      <Feather name="phone-call" size={12} color="#0625d4" />
+                      <Text style={[styles.tdText, { color: '#0625d4', fontWeight: '600' }]}>{cust.mobile || '—'}</Text>
                     </TouchableOpacity>
-
                     {cust.mobile ? (
                       <TouchableOpacity
                         onPress={() => {
@@ -1766,73 +1768,200 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       </TouchableOpacity>
                     ) : null}
                   </View>
+                );
 
-                  {/* Full Name */}
-                  <View style={{ flex: 1.8 }}>
-                    <Text style={styles.tdText}>{cust.full_name || cust.name || '—'}</Text>
+                const expiryCell = (flex) => (
+                  <View style={{ flex }}>
+                    <Text style={styles.tdText}>{cust.expiration ? formatApiDate(cust.expiration) : '—'}</Text>
+                    {balInfo.status !== 'unknown' ? (
+                      <View style={{ backgroundColor: balInfo.status === 'active' ? '#dcfce7' : (balInfo.status === 'warning' ? '#fef3c7' : '#ffe4e6'), paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start', marginTop: 3 }}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: balInfo.status === 'active' ? '#15803d' : (balInfo.status === 'warning' ? '#b45309' : '#be123c') }}>{balInfo.text}</Text>
+                      </View>
+                    ) : null}
                   </View>
+                );
 
-                  {/* Partner Name */}
-                  <View style={{ flex: 1.5 }}>
-                    <Text style={styles.tdText}>{cust.partner_name || '—'}</Text>
-                  </View>
+                if (viewMode === 'iptv') {
+                  const stb = cust.stb_box || cust.pioneer_stb_id || `IPTV #${cust.iptv_id}`;
+                  return (
+                    <View key={cust.id || `iptv_row_${idx}`} style={[styles.tr, isRowSelected && { backgroundColor: 'rgba(139, 92, 246, 0.05)' }]}>
+                      {selectCell}
 
-                  {/* Package Name */}
-                  <View style={{ flex: 1.8 }}>
-                    <Text style={[styles.tdBold, viewMode === 'iptv' && { color: '#8b5cf6' }]}>{cust.package_name}</Text>
-                  </View>
+                      {/* STB / Box */}
+                      <View style={{ flex: 1.7 }}>
+                        <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
+                          <Text style={[styles.tdClickableUsername, { color: '#7c3aed', fontFamily: 'monospace' }]}>{stb}</Text>
+                        </TouchableOpacity>
+                        {cust.pioneer_stb_id && cust.pioneer_stb_id !== stb ? (
+                          <Text style={styles.tdSub}>Pioneer ID: {cust.pioneer_stb_id}</Text>
+                        ) : null}
+                      </View>
 
-                  {/* Subplan Name */}
-                  <View style={{ flex: 1.4 }}>
-                    <Text style={styles.tdSub}>{cust.subplan_name}</Text>
-                  </View>
+                      {/* Status */}
+                      <View style={{ flex: 1.1 }}>{statusPill}</View>
 
-                  {/* Expiration & Balance Days */}
-                  <View style={{ flex: 2.2 }}>
-                    <Text style={styles.tdText}>{cust.expiration || '—'}</Text>
-                    {(() => {
-                      if (balInfo.status === 'unknown') return null;
-                      const bg = balInfo.status === 'active' ? '#dcfce7' : (balInfo.status === 'warning' ? '#fef3c7' : '#ffe4e6');
-                      const color = balInfo.status === 'active' ? '#15803d' : (balInfo.status === 'warning' ? '#b45309' : '#be123c');
-                      return (
-                        <View style={{ backgroundColor: bg, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start', marginTop: 3 }}>
-                          <Text style={{ fontSize: 10, fontWeight: '700', color }}>{balInfo.text}</Text>
-                        </View>
-                      );
-                    })()}
-                  </View>
+                      {mobileCell(1.4)}
 
-                  {/* Navigation / Map Button */}
-                  <View style={{ flex: 1.1 }}>
-                    <TouchableOpacity
-                      style={{
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        gap: 5,
-                        paddingHorizontal: 8,
-                        paddingVertical: 4,
-                        borderRadius: 6,
-                        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                        borderWidth: 1,
-                        borderColor: 'rgba(59, 130, 246, 0.25)',
-                        alignSelf: 'flex-start',
-                      }}
-                      onPress={() => {
-                        toast.info(`Map navigation for ${cust.username || 'subscriber'} will be added here.`);
-                      }}
-                    >
-                      <Feather name="map-pin" size={13} color="#2563eb" />
-                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#2563eb' }}>Map</Text>
-                    </TouchableOpacity>
+                      {/* Full Name */}
+                      <View style={{ flex: 1.7 }}>
+                        <Text style={styles.tdText}>{cust.full_name || '—'}</Text>
+                      </View>
+
+                      {/* Operator / Branch */}
+                      <View style={{ flex: 1.7 }}>
+                        <Text style={styles.tdText}>{cust.partner_name || '—'}</Text>
+                        {cust.branch_name ? <Text style={styles.tdSub}>{cust.branch_name}</Text> : null}
+                      </View>
+
+                      {/* Package + validity */}
+                      <View style={{ flex: 1.8 }}>
+                        <Text style={[styles.tdBold, { color: '#7c3aed' }]}>{cust.package_name || '—'}</Text>
+                        <Text style={styles.tdSub}>
+                          {[cust.subplan_name, cust.auto_renew ? 'Auto-renew' : null].filter(Boolean).join(' · ') || ' '}
+                        </Text>
+                      </View>
+
+                      {expiryCell(2)}
+
+                      {/* Action */}
+                      <View style={{ flex: 1, alignItems: 'center' }}>
+                        <TouchableOpacity
+                          onPress={() => handleOpenSubscriberScreen(cust)}
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.3)' }}
+                        >
+                          <Feather name="eye" size={12} color="#7c3aed" />
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#7c3aed' }}>Open</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                }
+
+                const isPassRevealed = !!showPasswordMap[cust.id];
+                const hasPassword = !isBlankValue(cust.password);
+                const usernameColor = {
+                  active: '#16a34a',
+                  expired: '#dc2626',
+                  suspended: '#d97706',
+                  disabled: '#64748b',
+                  new: '#7c3aed',
+                }[cust.status_key] || COLORS.primary;
+
+                return (
+                  <View key={cust.id || `int_row_${idx}`} style={[styles.tr, isRowSelected && { backgroundColor: 'rgba(59, 130, 246, 0.04)' }]}>
+                    {selectCell}
+
+                    {/* Username */}
+                    <View style={{ flex: 1.5, gap: 3 }}>
+                      <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
+                        <Text
+                          style={[
+                            styles.tdClickableUsername,
+                            { color: usernameColor },
+                            cust.status_key === 'disabled' && { textDecorationLine: 'line-through' },
+                          ]}
+                        >
+                          {cust.username || '—'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {/* Password Column with Eye Toggle (a missing password shows a centred dash) */}
+                    <View style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: hasPassword ? 'flex-start' : 'center' }}>
+                      <Text style={[styles.tdText, { fontFamily: Platform?.OS === 'web' && hasPassword ? 'monospace' : undefined, textAlign: hasPassword ? 'left' : 'center' }]}>
+                        {hasPassword ? (isPassRevealed ? String(cust.password) : '••••••••') : '—'}
+                      </Text>
+                      {hasPassword ? (
+                        <TouchableOpacity
+                          onPress={() => setShowPasswordMap((prev) => ({ ...prev, [cust.id]: !prev[cust.id] }))}
+                          style={{ padding: 2 }}
+                          title={isPassRevealed ? 'Hide Password' : 'Show Password'}
+                        >
+                          <Feather
+                            name={isPassRevealed ? 'eye-off' : 'eye'}
+                            size={13}
+                            color={isPassRevealed ? COLORS.primary : '#64748b'}
+                          />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+
+                    {/* Connectivity Badge — online is green */}
+                    <View style={{ flex: 1.1 }}>
+                      <View
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 5,
+                          paddingHorizontal: 8,
+                          paddingVertical: 3,
+                          borderRadius: 12,
+                          backgroundColor: cust.isOnline ? '#dcfce7' : '#ffe4e6',
+                          alignSelf: 'flex-start',
+                        }}
+                      >
+                        <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: cust.isOnline ? '#16a34a' : '#dc2626' }} />
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: cust.isOnline ? '#15803d' : '#dc2626' }}>
+                          {cust.isOnline ? 'ONLINE' : 'OFFLINE'}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {mobileCell(1.3)}
+
+                    {/* Full Name */}
+                    <View style={{ flex: 1.8 }}>
+                      <Text style={styles.tdText}>{cust.full_name || cust.name || '—'}</Text>
+                    </View>
+
+                    {/* Partner Name */}
+                    <View style={{ flex: 1.5 }}>
+                      <Text style={styles.tdText}>{cust.partner_name || '—'}</Text>
+                    </View>
+
+                    {/* Package Name */}
+                    <View style={{ flex: 1.8 }}>
+                      <Text style={styles.tdBold}>{cust.package_name || '—'}</Text>
+                    </View>
+
+                    {/* Subplan Name */}
+                    <View style={{ flex: 1.4 }}>
+                      <Text style={styles.tdSub}>{cust.subplan_name || '—'}</Text>
+                    </View>
+
+                    {expiryCell(2.2)}
+
+                    {/* Navigation / Map Button */}
+                    <View style={{ flex: 1.1 }}>
+                      <TouchableOpacity
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 5,
+                          paddingHorizontal: 8,
+                          paddingVertical: 4,
+                          borderRadius: 6,
+                          backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                          borderWidth: 1,
+                          borderColor: 'rgba(59, 130, 246, 0.25)',
+                          alignSelf: 'flex-start',
+                        }}
+                        onPress={() => {
+                          toast.info(`Map navigation for ${cust.username || 'subscriber'} will be added here.`);
+                        }}
+                      >
+                        <Feather name="map-pin" size={13} color="#2563eb" />
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#2563eb' }}>Map</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
-                </View>
-              );
-            })
-          )}
-        </View>
-      </ScrollView>
+                );
+              })
+            )}
+          </View>
+        </ScrollView>
+      </View>
     </View>
-  </View>
 
       {/* EDIT SUBSCRIBER DETAILS MODAL */}
       <Modal visible={!!editingCustomer} transparent animationType="fade">
