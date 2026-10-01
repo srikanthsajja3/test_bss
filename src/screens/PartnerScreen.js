@@ -119,7 +119,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     const handleSubHashChange = () => {
       if (typeof window !== 'undefined') {
         const hash = window.location.hash;
-        if (!hash.includes('partner_id=')) {
+        const hasPartnerContext = hash.includes('partner_id=') || hash.includes('edit=') || hash.includes('wallet=') || hash.includes('internet=') || hash.includes('iptv=');
+        
+        if (!hasPartnerContext) {
           setSelectedPartner(null);
         }
         if (!hash.includes('edit=')) {
@@ -178,7 +180,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     setIsCreateOpen(true);
     if (onOpenCreate) onOpenCreate(role);
     if (typeof window !== 'undefined') {
-      window.location.hash = `partners?action=create&role=${role}`;
+      const currentPId = selectedPartner?.partner_id || selectedPartner?.id;
+      window.location.hash = currentPId ? `partners?partner_id=${currentPId}&action=create&role=${role}` : `partners?action=create&role=${role}`;
     }
   };
 
@@ -186,28 +189,32 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
     setIsCreateOpen(false);
     if (onOpenCreate) onOpenCreate(null);
     if (typeof window !== 'undefined') {
-      window.location.hash = selectedPartner ? `partners?partner_id=${selectedPartner.partner_id || selectedPartner.id}` : 'partners';
+      const pId = selectedPartner?.partner_id || selectedPartner?.id;
+      window.location.hash = pId ? `partners?partner_id=${pId}` : 'partners';
     }
   };
 
   const handleCloseEdit = () => {
     setEditingPartner(null);
     if (typeof window !== 'undefined') {
-      window.location.hash = selectedPartner ? `partners?partner_id=${selectedPartner.partner_id || selectedPartner.id}` : 'partners';
+      const pId = selectedPartner?.partner_id || selectedPartner?.id;
+      window.location.hash = pId ? `partners?partner_id=${pId}` : 'partners';
     }
   };
 
   const handleCloseWallet = () => {
     setWalletPartner(null);
     if (typeof window !== 'undefined') {
-      window.location.hash = selectedPartner ? `partners?partner_id=${selectedPartner.partner_id || selectedPartner.id}` : 'partners';
+      const pId = selectedPartner?.partner_id || selectedPartner?.id;
+      window.location.hash = pId ? `partners?partner_id=${pId}` : 'partners';
     }
   };
 
   const handleCloseInternetPlans = () => {
     setInternetPlansPartner(null);
     if (typeof window !== 'undefined') {
-      window.location.hash = selectedPartner ? `partners?partner_id=${selectedPartner.partner_id || selectedPartner.id}` : 'partners';
+      const pId = selectedPartner?.partner_id || selectedPartner?.id;
+      window.location.hash = pId ? `partners?partner_id=${pId}` : 'partners';
     }
   };
 
@@ -264,7 +271,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
         return null;
       };
 
-      const detailPartner = getPartnerFromHash('partner_id');
+      const detailPartner = getPartnerFromHash('partner_id') || getPartnerFromHash('edit') || getPartnerFromHash('wallet') || getPartnerFromHash('internet') || getPartnerFromHash('iptv');
       if (detailPartner && (!selectedPartner || String(selectedPartner.partner_id) !== String(detailPartner.partner_id))) {
         setSelectedPartner(detailPartner);
       }
@@ -329,9 +336,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   const handleOpenEdit = (partner) => {
     if (!partner) return;
     setEditingPartner(partner);
+    if (!selectedPartner || String(selectedPartner.partner_id) === String(partner.partner_id || partner.id)) {
+      setSelectedPartner(partner);
+    }
     if (typeof window !== 'undefined') {
       const pId = partner.partner_id || partner.id;
-      window.location.hash = `partners?edit=${pId}`;
+      window.location.hash = `partners?partner_id=${pId}&edit=${pId}`;
     }
     setEditForm({
       partner_name: partner.partner_name || '',
@@ -371,7 +381,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
         setSelectedPartner((prev) => ({ ...prev, ...payload }));
       }
       toast.success(`Partner #${editingPartner.partner_id} updated successfully!`);
-      setEditingPartner(null);
+      handleCloseEdit();
     } catch (e) {
       toast.error('Failed to update partner details.');
     }
@@ -381,9 +391,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   const handleOpenWallet = async (partner) => {
     if (!partner) return;
     setWalletPartner(partner);
+    if (!selectedPartner || String(selectedPartner.partner_id) === String(partner.partner_id || partner.id)) {
+      setSelectedPartner(partner);
+    }
     if (typeof window !== 'undefined') {
       const pId = partner.partner_id || partner.id;
-      window.location.hash = `partners?wallet=${pId}`;
+      window.location.hash = `partners?partner_id=${pId}&wallet=${pId}`;
     }
     setTopupAmount('');
     setWalletRemark('');
@@ -536,9 +549,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   const handleOpenInternetPlans = async (partner) => {
     if (!partner) return;
     setInternetPlansPartner(partner);
+    if (!selectedPartner || String(selectedPartner.partner_id) === String(partner.partner_id || partner.id)) {
+      setSelectedPartner(partner);
+    }
     if (typeof window !== 'undefined') {
       const pId = partner.partner_id || partner.id;
-      window.location.hash = `partners?internet=${pId}`;
+      window.location.hash = `partners?partner_id=${pId}&internet=${pId}`;
     }
     setSearchInetPlan('');
     setSelectedSubPlanIds([]);
@@ -696,9 +712,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   const handleOpenIptvPlans = async (partner) => {
     if (!partner) return;
     setIptvPlansPartner(partner);
+    if (!selectedPartner || String(selectedPartner.partner_id) === String(partner.partner_id || partner.id)) {
+      setSelectedPartner(partner);
+    }
     if (typeof window !== 'undefined') {
       const pId = partner.partner_id || partner.id;
-      window.location.hash = `partners?iptv=${pId}`;
+      window.location.hash = `partners?partner_id=${pId}&iptv=${pId}`;
     }
     setSearchIptvPlan('');
     setIptvTypeFilter('');
@@ -871,10 +890,13 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
       const res = await OneBssApi.impersonatePartner(partner.partner_id);
       const data = res.data || {};
       if (data.success && data.token) {
+        setApiConfig(undefined, data.token);
         if (typeof window !== 'undefined') {
           localStorage.setItem('onebss_token', data.token);
+          localStorage.setItem('onebss_impersonate_token', data.token);
           if (data.impersonating) {
-            localStorage.setItem('onebss_user', JSON.stringify(data.impersonating));
+            const impUser = { ...data.impersonating, token: data.token };
+            localStorage.setItem('onebss_user', JSON.stringify(impUser));
           }
           localStorage.setItem('onebss_active_tab', 'dashboard');
           localStorage.setItem('onebss_filter', 'all');
@@ -2418,6 +2440,17 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                         </TouchableOpacity>
 
                         <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                          <TouchableOpacity
+                            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.3)' }}
+                            onPress={() => {
+                              setEditingPartner(item);
+                              setEditForm({ ...item, iptv_branch_id: item.iptv_branch_id || '' });
+                            }}
+                          >
+                            <Feather name="git-branch" size={12} color="#8b5cf6" />
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: '#8b5cf6' }}>IPTV Branch</Text>
+                          </TouchableOpacity>
+
                           <TouchableOpacity
                             style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' }}
                             onPress={() => handleOpenPartnerResetPass(item)}

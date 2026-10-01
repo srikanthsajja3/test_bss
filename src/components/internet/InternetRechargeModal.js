@@ -150,19 +150,22 @@ export const InternetRechargeModal = ({ visible, onClose, account, advance, onCo
         <Note text="No internet plans are mapped to this operator yet. Ask your admin to map plans before recharging." />
       ) : (
         <>
-          {currentNotMapped ? (
+          {advance ? (
+            <Note tone="info" text="Package change is disabled during Advance Renewal. Renewal will apply to your current package." />
+          ) : currentNotMapped ? (
             <Note tone="info" text="The account's current plan is not mapped for this operator, so another plan has been pre-selected. Please confirm the package and sub plan." />
           ) : null}
 
           <Text style={styles.sectionLabel}>PACKAGE ({plans.length})</Text>
           <Dropdown
             value={planId}
-            disabled={submitting}
+            disabled={submitting || advance}
             options={plans.map((p) => ({
               value: p.plan_id,
               label: `${p.plan_name}${p.data ? ` · ${p.data}` : ''}${String(p.plan_id) === String(account.package_id) ? '  (current)' : ''}`,
             }))}
             onChange={(id) => {
+              if (advance) return;
               const p = plans.find((x) => x.plan_id === id);
               if (p) choosePlan(p);
             }}

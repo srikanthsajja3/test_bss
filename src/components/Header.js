@@ -41,12 +41,14 @@ export const Header = ({
 
   const handleReturnToSuperAdmin = () => {
     if (typeof window !== 'undefined') {
+      localStorage.removeItem('onebss_impersonate_token');
       const sessionStr = localStorage.getItem('onebss_super_admin_session');
       if (sessionStr) {
         try {
           const session = JSON.parse(sessionStr);
           if (session.token) {
             localStorage.setItem('onebss_token', session.token);
+            setApiConfig(undefined, session.token);
           }
           if (session.user) {
             localStorage.setItem('onebss_user', JSON.stringify(session.user));

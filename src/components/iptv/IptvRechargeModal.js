@@ -289,6 +289,11 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
         <Text style={styles.muted}>Select a DPO package to start.</Text>
       ) : (
         <>
+          {/* FTA PACK INCLUDED NOTICE (ITEM 9) */}
+          <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.25)', borderRadius: 8, padding: 8, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Feather name="check-circle" size={14} color="#10b981" />
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#047857' }}>FTA (Free-To-Air) Pack Included (₹0.00)</Text>
+          </View>
           {summaryGroup('DPO', [dpo], false)}
           {summaryGroup(`A-la-carte (${alacarte.length})`, alacarte, true)}
           {summaryGroup(`Broadcasters (${broadcasters.length})`, broadcasters, true)}

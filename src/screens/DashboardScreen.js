@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, useWindowDimensions, TextInput } from 'react-native';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi, setApiConfig } from '../services/oneBssApi';
@@ -20,6 +20,8 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
   const [syncMsg, setSyncMsg] = useState('');
   const [dateSummary, setDateSummary] = useState(null); // customers_by_date.php?summary=1
   const [dateSummaryError, setDateSummaryError] = useState('');
+  const [dashboardSearch, setDashboardSearch] = useState('');
+  const [partnerCounts, setPartnerCounts] = useState({ total: 0, admins: 0, operators: 0 });
 
   const loadDateSummary = async () => {
     try {
@@ -40,6 +42,15 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
     setLoading(true);
     loadDateSummary();
     try {
+      if (isSuperAdmin || currentRole === 'admin') {
+        OneBssApi.getPartners().then((res) => {
+          const list = Array.isArray(res.data) ? res.data : (res.data?.data || []);
+          const total = list.length;
+          const admins = list.filter((p) => (p.account_role || p.role || '').toLowerCase() === 'admin').length;
+          const operators = list.filter((p) => (p.account_role || p.role || '').toLowerCase() === 'operator').length;
+          setPartnerCounts({ total, admins, operators });
+        }).catch(() => {});
+      }
       const res = await OneBssApi.getDashboardTelemetry(currentPartnerId);
       const data = res.data?.data || res.data?.telemetry || res.data;
       if (data && (data.internet || data.iptv)) {
@@ -204,6 +215,55 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
       ) : null}
 
 
+
+      {/* SEARCH INPUT IN DASHBOARD (ITEM 6) */}
+      <View style={{ marginBottom: 16, backgroundColor: '#ffffff', borderWidth: 1, borderColor: COLORS.glassBorder || '#cbd5e1', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+        <Feather name="search" size={18} color={COLORS.textDim || '#94a3b8'} />
+        <TextInput
+          style={{ flex: 1, fontSize: 14, color: COLORS.textMain || '#000000', outlineStyle: 'none' }}
+          placeholder="Search dashboard metrics, subscribers, partners, mobile..."
+          value={dashboardSearch}
+          onChangeText={setDashboardSearch}
+          placeholderTextColor={COLORS.textDim || '#94a3b8'}
+        />
+        {dashboardSearch ? (
+          <TouchableOpacity onPress={() => setDashboardSearch('')}>
+            <Feather name="x" size={16} color={COLORS.textDim || '#94a3b8'} />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+
+      {/* PARTNERS / ADMINS COUNT IN SUPERADMIN DASHBOARD (ITEM 11) */}
+      {(isSuperAdmin || currentRole === 'admin') && (
+        <View style={{ marginBottom: 20 }}>
+          <Text style={[styles.sectionHeaderTitle, { marginBottom: 10 }]}>Partners & Hierarchy Overview</Text>
+          <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>
+            <View style={{ flex: 1, minWidth: 140, backgroundColor: 'rgba(99, 102, 241, 0.08)', borderWidth: 1, borderColor: 'rgba(99, 102, 241, 0.25)', borderRadius: 12, padding: 14 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <Feather name="grid" size={14} color="#6366f1" />
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#6366f1' }}>TOTAL PARTNERS</Text>
+              </View>
+              <Text style={{ fontSize: 22, fontWeight: '800', color: '#4338ca' }}>{partnerCounts.total}</Text>
+            </View>
+
+            <View style={{ flex: 1, minWidth: 140, backgroundColor: 'rgba(16, 185, 129, 0.08)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.25)', borderRadius: 12, padding: 14 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <Feather name="shield" size={14} color="#10b981" />
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>TOTAL ADMINS</Text>
+              </View>
+              <Text style={{ fontSize: 22, fontWeight: '800', color: '#047857' }}>{partnerCounts.admins}</Text>
+            </View>
+
+            <View style={{ flex: 1, minWidth: 140, backgroundColor: 'rgba(59, 130, 246, 0.08)', borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.25)', borderRadius: 12, padding: 14 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                <Feather name="briefcase" size={14} color="#3b82f6" />
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6' }}>OPERATORS / LCOS</Text>
+              </View>
+              <Text style={{ fontSize: 22, fontWeight: '800', color: '#1d4ed8' }}>{partnerCounts.operators}</Text>
+            </View>
+          </View>
+        </View>
+      )}
 
       {/* INTERNET TELEMETRY GRID */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap' }}>

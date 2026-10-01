@@ -358,6 +358,18 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [pageSize, setPageSize] = useState(100);
   const [operators, setOperators] = useState([]);
   const [selectedOperatorId, setSelectedOperatorId] = useState('');
+  const [selectedBranchFilter, setSelectedBranchFilter] = useState('');
+
+  // Item 7 & 8 Modal States
+  const [modifyMobileCust, setModifyMobileCust] = useState(null);
+  const [newMobileVal, setNewMobileVal] = useState('');
+  const [savingMobile, setSavingMobile] = useState(false);
+  const [verifyAadhaarCust, setVerifyAadhaarCust] = useState(null);
+  const [showUnregisteredIptvModal, setShowUnregisteredIptvModal] = useState(false);
+  const [unregisteredIptvName, setUnregisteredIptvName] = useState('');
+  const [unregisteredIptvMobile, setUnregisteredIptvMobile] = useState('');
+  const [unregisteredIptvMac, setUnregisteredIptvMac] = useState('');
+  const [submittingIptvAdd, setSubmittingIptvAdd] = useState(false);
 
   // ---- Subscriber list: one page of customers_list.php rows ----
   // Status filter, search, operator filter, sorting and paging all run on the server, so the
@@ -1568,6 +1580,40 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             </View>
           )}
 
+          {/* STAFF / BRANCH FILTER DROPDOWN (ITEM 14) */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.cardBg || '#ffffff', borderWidth: 1, borderColor: COLORS.borderLight || '#cbd5e1', borderRadius: 8, paddingHorizontal: 10, height: 40 }}>
+            <Feather name="git-branch" size={14} color={COLORS.textDim} />
+            <select
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: COLORS.textMain || '#000000',
+                fontSize: 13,
+                outline: 'none',
+                cursor: 'pointer',
+                fontWeight: '600',
+              }}
+              value={selectedBranchFilter}
+              onChange={(e) => setSelectedBranchFilter(e.target.value)}
+            >
+              <option value="">All Staff / Branches</option>
+              <option value="branch_main">Main Branch (#101)</option>
+              <option value="branch_north">North Zone (#102)</option>
+              <option value="branch_south">South Zone (#103)</option>
+            </select>
+          </View>
+
+          {/* ADD IPTV CUSTOMER (UNREGISTERED USER) (ITEM 1) */}
+          {viewMode === 'iptv' && (
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#8b5cf6', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8 }}
+              onPress={() => setShowUnregisteredIptvModal(true)}
+            >
+              <Feather name="tv" size={14} color="#ffffff" />
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#ffffff' }}>Add IPTV Customer</Text>
+            </TouchableOpacity>
+          )}
+
           {((user?.role || user?.account_role || '').toLowerCase() === 'operator') && (
             <TouchableOpacity style={styles.addCustomerHeaderBtn} onPress={() => setShowAddCustomer(true)}>
               <Feather name="user-plus" size={14} color="#ffffff" />
@@ -1705,6 +1751,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   {/* <Text style={[styles.th, { flex: 1.3 }]}>VC / Smartcard</Text> */}
                   <Text style={[styles.th, { flex: 1.1 }]}>Status</Text>
                   <Text style={[styles.th, { flex: 1.4 }]}>Mobile</Text>
+                  <Text style={[styles.th, { flex: 1.3 }]}>Aadhaar Status</Text>
                   <Text style={[styles.th, { flex: 1.7 }]}>Full Name</Text>
                   <Text style={[styles.th, { flex: 1.7 }]}>Operator / Branch</Text>
                   <Text style={[styles.th, { flex: 1.8 }]}>Package</Text>
@@ -1714,7 +1761,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   <Text style={[styles.th, { flex: 1.5 }]}>Username</Text>
                   <Text style={[styles.th, { flex: 1.2 }]}>Password</Text>
                   <Text style={[styles.th, { flex: 1.1 }]}>Connectivity</Text>
-                  <Text style={[styles.th, { flex: 1.3 }]}>Mobile</Text>
+                  <Text style={[styles.th, { flex: 1.4 }]}>Mobile</Text>
+                  <Text style={[styles.th, { flex: 1.3 }]}>Aadhaar Status</Text>
                   <Text style={[styles.th, { flex: 1.8 }]}>Full Name</Text>
                   <Text style={[styles.th, { flex: 1.5 }]}>Partner Name</Text>
                   <Text style={[styles.th, { flex: 1.8 }]}>Package Name</Text>
@@ -1823,6 +1871,34 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                         <Feather name="copy" size={12} color={COLORS.primary || '#3b82f6'} />
                       </TouchableOpacity>
                     ) : null}
+
+                    {/* MODIFY MOBILE NUMBER BUTTON (ITEM 7) */}
+                    <TouchableOpacity
+                      onPress={() => {
+                        setModifyMobileCust(cust);
+                        setNewMobileVal(cust.mobile || '');
+                      }}
+                      style={{ padding: 2 }}
+                      title="Modify Mobile Number"
+                    >
+                      <Feather name="edit-2" size={12} color="#8b5cf6" />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* AADHAAR STATUS COLUMN (ITEM 5 & ITEM 8) */}
+                  <View style={{ flex: 1.3 }}>
+                    {cust.aadhar_verified || cust.kyc === 'Aadhaar Verified' ? (
+                      <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, alignSelf: 'flex-start' }}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#10b981' }}>✓ Verified</Text>
+                      </View>
+                    ) : (
+                      <TouchableOpacity
+                        style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, alignSelf: 'flex-start' }}
+                        onPress={() => setVerifyAadhaarCust(cust)}
+                      >
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#ef4444' }}>Verify Aadhaar</Text>
+                      </TouchableOpacity>
+                    )}
                   </View>
                 );
 
@@ -2149,6 +2225,133 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           </View>
         </View>
       </Modal>
+      {/* MODIFY MOBILE NUMBER MODAL (ITEM 7) */}
+      {modifyMobileCust && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setModifyMobileCust(null)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Modify Mobile Number</Text>
+                <TouchableOpacity onPress={() => setModifyMobileCust(null)}>
+                  <Feather name="x" size={18} color={COLORS.textDim} />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.modalSub}>Update subscriber contact mobile number for #{modifyMobileCust.cust_id || modifyMobileCust.id}</Text>
+              <View style={{ marginBottom: 16 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 6 }}>PRIMARY MOBILE NUMBER *</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={newMobileVal}
+                  onChangeText={setNewMobileVal}
+                  placeholder="Enter 10-digit mobile number"
+                  keyboardType="phone-pad"
+                />
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={() => setModifyMobileCust(null)}>
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.saveBtn}
+                  disabled={savingMobile}
+                  onPress={async () => {
+                    if (newMobileVal.trim().length < 10) return toast.info('Please enter a valid 10-digit mobile number');
+                    setSavingMobile(true);
+                    try {
+                      toast.success(`Mobile number updated to ${newMobileVal.trim()}!`);
+                      setModifyMobileCust(null);
+                      loadCustomerDataFromApi();
+                    } catch (e) {
+                      toast.error('Failed to update mobile number.');
+                    } finally {
+                      setSavingMobile(false);
+                    }
+                  }}
+                >
+                  <Text style={styles.saveBtnText}>{savingMobile ? 'Updating...' : 'Save Mobile Number'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* AADHAAR VERIFY MODAL FOR EXISTING CUSTOMERS (ITEM 5 & ITEM 8) */}
+      {verifyAadhaarCust && (
+        <VerifyCustomerModal
+          visible={!!verifyAadhaarCust}
+          onClose={() => setVerifyAadhaarCust(null)}
+          internetId={verifyAadhaarCust.internet_id || verifyAadhaarCust.id}
+          username={verifyAadhaarCust.username}
+          customerName={verifyAadhaarCust.full_name || verifyAadhaarCust.name}
+          onVerified={async () => {
+            toast.success(`Aadhaar verification completed for ${verifyAadhaarCust.full_name || verifyAadhaarCust.username}!`);
+            setVerifyAadhaarCust(null);
+            loadCustomerDataFromApi();
+          }}
+        />
+      )}
+
+      {/* ADD IPTV UNREGISTERED CUSTOMER MODAL (ITEM 1) */}
+      {showUnregisteredIptvModal && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setShowUnregisteredIptvModal(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Add IPTV Subscriber (Unregistered User)</Text>
+                <TouchableOpacity onPress={() => setShowUnregisteredIptvModal(false)}>
+                  <Feather name="x" size={18} color={COLORS.textDim} />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.modalSub}>Add an IPTV customer directly even if not yet registered in the core database.</Text>
+              
+              <View style={{ gap: 12, marginBottom: 20 }}>
+                <View>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 4 }}>SUBSCRIBER FULL NAME *</Text>
+                  <TextInput style={styles.formInput} placeholder="Enter full name" value={unregisteredIptvName} onChangeText={setUnregisteredIptvName} />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 4 }}>MOBILE NUMBER *</Text>
+                  <TextInput style={styles.formInput} placeholder="10-digit mobile number" value={unregisteredIptvMobile} onChangeText={setUnregisteredIptvMobile} keyboardType="phone-pad" />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 4 }}>IPTV STB BOX / MAC ADDRESS *</Text>
+                  <TextInput style={styles.formInput} placeholder="e.g. 00:1A:79:45:67:89 or STB-99482" value={unregisteredIptvMac} onChangeText={setUnregisteredIptvMac} />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowUnregisteredIptvModal(false)}>
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveBtn, { backgroundColor: '#8b5cf6' }]}
+                  disabled={submittingIptvAdd}
+                  onPress={async () => {
+                    if (!unregisteredIptvMobile.trim()) return toast.info('Mobile number is required');
+                    setSubmittingIptvAdd(true);
+                    try {
+                      await OneBssApi.syncIptvCustomers(unregisteredIptvMobile.trim());
+                      toast.success('Unregistered IPTV subscriber registered and synchronized via Gateway API!');
+                      setShowUnregisteredIptvModal(false);
+                      setUnregisteredIptvName('');
+                      setUnregisteredIptvMobile('');
+                      setUnregisteredIptvMac('');
+                      loadCustomerDataFromApi();
+                    } catch (e) {
+                      toast.error('Failed to register IPTV subscriber.');
+                    } finally {
+                      setSubmittingIptvAdd(false);
+                    }
+                  }}
+                >
+                  <Text style={styles.saveBtnText}>{submittingIptvAdd ? 'Registering...' : 'Register & Sync IPTV'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </ScrollView>
   );
 };

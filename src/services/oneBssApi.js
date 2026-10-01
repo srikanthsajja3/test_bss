@@ -69,20 +69,22 @@ export const isJwtExpired = (token) => {
 let HIERARCHY_PARTNERS = [];
 
 const getActiveToken = () => {
-  if (AUTH_TOKEN && AUTH_TOKEN.length > 10) {
-    return AUTH_TOKEN.trim();
-  }
   try {
     if (typeof window !== 'undefined') {
+      const impToken = localStorage.getItem('onebss_impersonate_token');
+      if (impToken && impToken.length > 10) return impToken.trim();
       const savedToken = localStorage.getItem('onebss_token');
       if (savedToken && savedToken.length > 10) return savedToken.trim();
       const savedUser = localStorage.getItem('onebss_user');
       if (savedUser) {
-        const u = JSON.parse(savedUser);
+        const u = typeof savedUser === 'string' ? JSON.parse(savedUser) : savedUser;
         if (u?.token && u.token.length > 10) return u.token.trim();
       }
     }
   } catch (e) {}
+  if (AUTH_TOKEN && AUTH_TOKEN.length > 10) {
+    return AUTH_TOKEN.trim();
+  }
   return AUTH_TOKEN ? AUTH_TOKEN.trim() : '';
 };
 
