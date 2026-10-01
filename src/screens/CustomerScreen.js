@@ -1884,9 +1884,10 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       <Feather name="edit-2" size={12} color="#8b5cf6" />
                     </TouchableOpacity>
                   </View>
+                );
 
-                  {/* AADHAAR STATUS COLUMN (ITEM 5 & ITEM 8) */}
-                  <View style={{ flex: 1.3 }}>
+                const aadhaarCell = (flex = 1.3) => (
+                  <View style={{ flex }}>
                     {cust.aadhar_verified || cust.kyc === 'Aadhaar Verified' ? (
                       <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, alignSelf: 'flex-start' }}>
                         <Text style={{ fontSize: 10, fontWeight: '700', color: '#10b981' }}>✓ Verified</Text>
@@ -1946,6 +1947,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       <View style={{ flex: 1.1 }}>{statusPill}</View>
 
                       {mobileCell(1.4)}
+                      {aadhaarCell(1.3)}
 
                       {/* Full Name */}
                       <View style={{ flex: 1.7 }}>
@@ -2054,6 +2056,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                     </View>
 
                     {mobileCell(1.3)}
+                    {aadhaarCell(1.3)}
 
                     {/* Full Name */}
                     <View style={{ flex: 1.8 }}>
