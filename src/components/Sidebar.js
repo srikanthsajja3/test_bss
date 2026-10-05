@@ -41,7 +41,7 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
       {/* Navigation Links */}
       <View style={styles.menuList}>
         {menuItems.map((item) => {
-          const isActive = activeTab === item.id;
+          const isActive = activeTab === item.id || (item.id === 'customers' && activeTab === 'iptv_customers');
           return (
             <TouchableOpacity
               key={item.id}

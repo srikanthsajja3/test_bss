@@ -1071,6 +1071,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const handleToggleMode = (newMode) => {
     setViewMode(newMode);
     setActiveFilter('all');
+    setActiveRange('');
+    setCurrentPage(1);
     setActiveAccountSel(null);
     setActiveCustomerId(null);
     if (onSwitchMode) {
@@ -1612,6 +1614,44 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       <View style={styles.unifiedControlCard}>
         {/* Search Bar, Operator Filter & Add Customer Button */}
         <View style={[styles.topControlRow, { gap: 10, flexWrap: 'wrap', alignItems: 'center' }]}>
+          {/* SUBSCRIBER SERVICE TYPE SELECTOR (INTERNET USERS / IPTV USERS) */}
+          <View
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 8,
+              backgroundColor: viewMode === 'iptv' ? 'rgba(139, 92, 246, 0.08)' : 'rgba(16, 185, 129, 0.08)',
+              borderWidth: 1.5,
+              borderColor: viewMode === 'iptv' ? '#8b5cf6' : COLORS.primary,
+              borderRadius: 8,
+              paddingHorizontal: 12,
+              height: 40,
+            }}
+          >
+            {viewMode === 'iptv' ? (
+              <MaterialIcons name="live-tv" size={17} color="#8b5cf6" />
+            ) : (
+              <Feather name="wifi" size={15} color={COLORS.primary} />
+            )}
+            <select
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: viewMode === 'iptv' ? '#6d28d9' : '#047857',
+                fontSize: 13,
+                fontWeight: '700',
+                outline: 'none',
+                cursor: 'pointer',
+              }}
+              value={viewMode}
+              onChange={(e) => handleToggleMode(e.target.value)}
+              title="Select Service: Internet Users or IPTV Users"
+            >
+              <option value="broadband" style={{ color: '#0f172a', fontWeight: '600' }}>Internet Users</option>
+              <option value="iptv" style={{ color: '#0f172a', fontWeight: '600' }}>IPTV Users</option>
+            </select>
+          </View>
+
           <View style={[styles.searchBox, { width: isMobile ? '100%' : 380, maxWidth: '100%' }]}>
             <Feather name="search" size={15} color={COLORS.textDim} />
             <TextInput
