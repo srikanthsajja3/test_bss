@@ -91,6 +91,12 @@ export default function App() {
   const [user, setUserState] = useState(getInitialUserState());
   const [isLoginVisible, setIsLoginVisible] = useState(false);
   const [partnerCreateRole, setPartnerCreateRole] = useState(null);
+  const [partnerInitialRole, setPartnerInitialRole] = useState('');
+
+  const handleNavigateToPartners = (role = '') => {
+    setPartnerInitialRole(role || '');
+    setActiveTab('partners');
+  };
 
   // Initialize base URL hash on first render if missing so browser back history doesn't land on a blank hash
   React.useEffect(() => {
@@ -265,9 +271,24 @@ export default function App() {
   const renderActiveScreen = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <DashboardScreen key={`dashboard_${globalRefreshKey}`} user={user} onNavigateToCustomers={handleNavigateToCustomers} />;
+        return (
+          <DashboardScreen
+            key={`dashboard_${globalRefreshKey}`}
+            user={user}
+            onNavigateToCustomers={handleNavigateToCustomers}
+            onNavigateToPartners={handleNavigateToPartners}
+          />
+        );
       case 'partners':
-        return <PartnerScreen key={`partners_${globalRefreshKey}`} initialCreateRole={partnerCreateRole} onOpenCreate={(r) => setPartnerCreateRole(r)} user={user} />;
+        return (
+          <PartnerScreen
+            key={`partners_${globalRefreshKey}`}
+            initialCreateRole={partnerCreateRole}
+            initialRoleFilter={partnerInitialRole}
+            onOpenCreate={(r) => setPartnerCreateRole(r)}
+            user={user}
+          />
+        );
       case 'customers':
         return <CustomerScreen key={`customers_${globalRefreshKey}`} user={user} isIptvMode={false} initialFilter={customerInitialFilter} initialRange={customerInitialRange} initialSearch={customerInitialSearch} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
       case 'iptv_customers':

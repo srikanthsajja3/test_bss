@@ -5,7 +5,7 @@ import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi, setApiConfig } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
 
-export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
+export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartners }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
@@ -385,29 +385,50 @@ export const DashboardScreen = ({ user, onNavigateToCustomers }) => {
         <View style={{ marginBottom: 20 }}>
           <Text style={[styles.sectionHeaderTitle, { marginBottom: 10 }]}>Partners & Hierarchy Overview</Text>
           <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>
-            <View style={{ flex: 1, minWidth: 140, backgroundColor: 'rgba(99, 102, 241, 0.08)', borderWidth: 1, borderColor: 'rgba(99, 102, 241, 0.25)', borderRadius: 12, padding: 14 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                <Feather name="grid" size={14} color="#6366f1" />
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#6366f1' }}>TOTAL PARTNERS</Text>
+            <TouchableOpacity
+              style={{ flex: 1, minWidth: 140, backgroundColor: 'rgba(99, 102, 241, 0.08)', borderWidth: 1, borderColor: 'rgba(99, 102, 241, 0.25)', borderRadius: 12, padding: 14 }}
+              onPress={() => onNavigateToPartners && onNavigateToPartners('')}
+              activeOpacity={0.7}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Feather name="grid" size={14} color="#6366f1" />
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#6366f1' }}>TOTAL PARTNERS</Text>
+                </View>
+                <Feather name="arrow-up-right" size={13} color="#6366f1" />
               </View>
               <Text style={{ fontSize: 22, fontWeight: '800', color: '#4338ca' }}>{partnerCounts.total}</Text>
-            </View>
+            </TouchableOpacity>
 
-            <View style={{ flex: 1, minWidth: 140, backgroundColor: 'rgba(16, 185, 129, 0.08)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.25)', borderRadius: 12, padding: 14 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                <Feather name="shield" size={14} color="#10b981" />
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>TOTAL ADMINS</Text>
+            <TouchableOpacity
+              style={{ flex: 1, minWidth: 140, backgroundColor: 'rgba(16, 185, 129, 0.08)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.25)', borderRadius: 12, padding: 14 }}
+              onPress={() => onNavigateToPartners && onNavigateToPartners('admin')}
+              activeOpacity={0.7}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Feather name="shield" size={14} color="#10b981" />
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>TOTAL ADMINS</Text>
+                </View>
+                <Feather name="arrow-up-right" size={13} color="#10b981" />
               </View>
               <Text style={{ fontSize: 22, fontWeight: '800', color: '#047857' }}>{partnerCounts.admins}</Text>
-            </View>
+            </TouchableOpacity>
 
-            <View style={{ flex: 1, minWidth: 140, backgroundColor: 'rgba(59, 130, 246, 0.08)', borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.25)', borderRadius: 12, padding: 14 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 }}>
-                <Feather name="briefcase" size={14} color="#3b82f6" />
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6' }}>OPERATORS / LCOS</Text>
+            <TouchableOpacity
+              style={{ flex: 1, minWidth: 140, backgroundColor: 'rgba(59, 130, 246, 0.08)', borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.25)', borderRadius: 12, padding: 14 }}
+              onPress={() => onNavigateToPartners && onNavigateToPartners('operator')}
+              activeOpacity={0.7}
+            >
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Feather name="briefcase" size={14} color="#3b82f6" />
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6' }}>TOTAL OPERATORS</Text>
+                </View>
+                <Feather name="arrow-up-right" size={13} color="#3b82f6" />
               </View>
               <Text style={{ fontSize: 22, fontWeight: '800', color: '#1d4ed8' }}>{partnerCounts.operators}</Text>
-            </View>
+            </TouchableOpacity>
           </View>
         </View>
       )}

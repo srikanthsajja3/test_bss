@@ -16,14 +16,14 @@ import { OneBssApi, setApiConfig, decodeJwt } from '../services/oneBssApi';
 import { CreateAccountModal } from '../components/CreateAccountModal';
 import { toast } from 'react-toastify';
 
-export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
+export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRoleFilter }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
   const [partners, setPartners] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
-  const [selectedRole, setSelectedRole] = useState('');
+  const [selectedRole, setSelectedRole] = useState(initialRoleFilter || '');
   const [selectedPartner, setSelectedPartner] = useState(null);
   const [partnerTelemetry, setPartnerTelemetry] = useState(null);
   const [loadingPartnerTelemetry, setLoadingPartnerTelemetry] = useState(false);
