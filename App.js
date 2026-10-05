@@ -290,9 +290,9 @@ export default function App() {
           />
         );
       case 'customers':
-        return <CustomerScreen key={`customers_${globalRefreshKey}`} user={user} isIptvMode={false} initialFilter={customerInitialFilter} initialRange={customerInitialRange} initialSearch={customerInitialSearch} onSwitchMode={handleNavigateToCustomers} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
+        return <CustomerScreen key={`customers_${globalRefreshKey}`} user={user} isIptvMode={false} initialFilter={customerInitialFilter} initialRange={customerInitialRange} initialSearch={customerInitialSearch} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
       case 'iptv_customers':
-        return <CustomerScreen key={`iptv_${globalRefreshKey}`} user={user} isIptvMode={true} initialFilter={customerInitialFilter} initialRange={customerInitialRange} initialSearch={customerInitialSearch} onSwitchMode={handleNavigateToCustomers} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
+        return <CustomerScreen key={`iptv_${globalRefreshKey}`} user={user} isIptvMode={true} initialFilter={customerInitialFilter} initialRange={customerInitialRange} initialSearch={customerInitialSearch} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
       default:
         return <DashboardScreen key={`dashboard_def_${globalRefreshKey}`} user={user} onNavigateToCustomers={handleNavigateToCustomers} />;
     }

@@ -418,20 +418,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [pageSize, setPageSize] = useState(100);
   const [operators, setOperators] = useState([]);
   const [selectedOperatorId, setSelectedOperatorId] = useState('');
-  const [operatorSearchQuery, setOperatorSearchQuery] = useState('');
-  const [operatorDropdownOpen, setOperatorDropdownOpen] = useState(false);
   const [selectedBranchFilter, setSelectedBranchFilter] = useState('');
-
-  const filteredOperatorsList = useMemo(() => {
-    if (!operatorSearchQuery.trim()) return operators;
-    const q = operatorSearchQuery.toLowerCase().trim();
-    return operators.filter((op) => {
-      const name = String(op.partner_name || op.company_name || op.name || '').toLowerCase();
-      const id = String(op.partner_id || op.id || '');
-      const mob = String(op.partner_mobile || op.mobile || '');
-      return name.includes(q) || id.includes(q) || mob.includes(q);
-    });
-  }, [operators, operatorSearchQuery]);
 
   // Item 7 & 8 Modal States
   const [modifyMobileCust, setModifyMobileCust] = useState(null);
@@ -1084,8 +1071,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const handleToggleMode = (newMode) => {
     setViewMode(newMode);
     setActiveFilter('all');
-    setActiveRange('');
-    setCurrentPage(1);
     setActiveAccountSel(null);
     setActiveCustomerId(null);
     if (onSwitchMode) {
@@ -1627,89 +1612,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       <View style={styles.unifiedControlCard}>
         {/* Search Bar, Operator Filter & Add Customer Button */}
         <View style={[styles.topControlRow, { gap: 10, flexWrap: 'wrap', alignItems: 'center' }]}>
-          {/* SERVICE SELECTION TABS: INTERNET USERS & IPTV USERS (BESIDE EACH OTHER) */}
-          <View
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              backgroundColor: '#f1f5f9',
-              borderRadius: 10,
-              padding: 3,
-              gap: 4,
-              borderWidth: 1,
-              borderColor: '#e2e8f0',
-            }}
-          >
-            <TouchableOpacity
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-                paddingHorizontal: 14,
-                paddingVertical: 8,
-                borderRadius: 8,
-                backgroundColor: viewMode !== 'iptv' ? (COLORS.primary || '#10b981') : 'transparent',
-                boxShadow: viewMode !== 'iptv' ? '0 2px 6px rgba(16, 185, 129, 0.25)' : 'none',
-              }}
-              onPress={() => {
-                if (viewMode === 'iptv') {
-                  if (onSwitchMode) {
-                    onSwitchMode('all');
-                  } else {
-                    setViewMode('broadband');
-                  }
-                }
-              }}
-              activeOpacity={0.8}
-            >
-              <Feather name="wifi" size={14} color={viewMode !== 'iptv' ? '#ffffff' : '#64748b'} />
-              <Text
-                style={{
-                  fontSize: 13,
-                  fontWeight: '700',
-                  color: viewMode !== 'iptv' ? '#ffffff' : '#64748b',
-                }}
-              >
-                Internet Users
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-                paddingHorizontal: 14,
-                paddingVertical: 8,
-                borderRadius: 8,
-                backgroundColor: viewMode === 'iptv' ? '#8b5cf6' : 'transparent',
-                boxShadow: viewMode === 'iptv' ? '0 2px 6px rgba(139, 92, 246, 0.25)' : 'none',
-              }}
-              onPress={() => {
-                if (viewMode !== 'iptv') {
-                  if (onSwitchMode) {
-                    onSwitchMode('iptv_all');
-                  } else {
-                    setViewMode('iptv');
-                  }
-                }
-              }}
-              activeOpacity={0.8}
-            >
-              <MaterialIcons name="live-tv" size={16} color={viewMode === 'iptv' ? '#ffffff' : '#64748b'} />
-              <Text
-                style={{
-                  fontSize: 13,
-                  fontWeight: '700',
-                  color: viewMode === 'iptv' ? '#ffffff' : '#64748b',
-                }}
-              >
-                IPTV Users
-              </Text>
-            </TouchableOpacity>
-          </View>
-
-          <View style={[styles.searchBox, { width: isMobile ? '100%' : 360, maxWidth: '100%' }]}>
+          <View style={[styles.searchBox, { width: isMobile ? '100%' : 380, maxWidth: '100%' }]}>
             <Feather name="search" size={15} color={COLORS.textDim} />
             <TextInput
               style={styles.searchInput}
@@ -1728,182 +1631,29 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             ) : null}
           </View>
 
-          {/* SEARCHABLE OPERATOR FILTER PICKER */}
           {(isSuperAdmin(user) || (user?.account_role || user?.role || '').toLowerCase() === 'admin') && operators.length > 0 && (
-            <View style={{ position: 'relative', zIndex: 100 }}>
-              <TouchableOpacity
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.cardBg || '#ffffff', borderWidth: 1, borderColor: COLORS.borderLight || '#cbd5e1', borderRadius: 8, paddingHorizontal: 10, height: 40 }}>
+              <Feather name="filter" size={14} color={COLORS.textDim} />
+              <select
                 style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 8,
-                  backgroundColor: selectedOperatorId ? 'rgba(59, 130, 246, 0.08)' : (COLORS.cardBg || '#ffffff'),
-                  borderWidth: 1,
-                  borderColor: selectedOperatorId ? '#3b82f6' : (COLORS.borderLight || '#cbd5e1'),
-                  borderRadius: 8,
-                  paddingHorizontal: 12,
-                  height: 40,
-                  minWidth: isMobile ? '100%' : 220,
-                  maxWidth: isMobile ? '100%' : 300,
-                  justifyContent: 'space-between',
+                  border: 'none',
+                  background: 'transparent',
+                  color: COLORS.textMain || '#000000',
+                  fontSize: 13,
+                  outline: 'none',
+                  cursor: 'pointer',
+                  fontWeight: '600',
                 }}
-                onPress={() => setOperatorDropdownOpen(!operatorDropdownOpen)}
+                value={selectedOperatorId}
+                onChange={(e) => setSelectedOperatorId(e.target.value)}
               >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, overflow: 'hidden' }}>
-                  <Feather name="filter" size={14} color={selectedOperatorId ? '#2563eb' : COLORS.textDim} />
-                  <Text
-                    numberOfLines={1}
-                    style={{
-                      fontSize: 13,
-                      fontWeight: selectedOperatorId ? '700' : '600',
-                      color: selectedOperatorId ? '#1d4ed8' : (COLORS.textMain || '#000000'),
-                    }}
-                  >
-                    {(() => {
-                      const selectedOpObj = operators.find((op) => String(op.partner_id || op.id) === String(selectedOperatorId));
-                      return selectedOpObj
-                        ? `#${selectedOpObj.partner_id || selectedOpObj.id} - ${selectedOpObj.partner_name || selectedOpObj.company_name}`
-                        : `All Operators (${operators.length})`;
-                    })()}
-                  </Text>
-                </View>
-
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  {selectedOperatorId ? (
-                    <TouchableOpacity
-                      onPress={(e) => {
-                        e.stopPropagation && e.stopPropagation();
-                        setSelectedOperatorId('');
-                        setOperatorDropdownOpen(false);
-                      }}
-                      style={{ padding: 2 }}
-                      title="Clear operator filter"
-                    >
-                      <Feather name="x" size={13} color="#64748b" />
-                    </TouchableOpacity>
-                  ) : null}
-                  <Feather name={operatorDropdownOpen ? "chevron-up" : "chevron-down"} size={14} color={COLORS.textDim} />
-                </View>
-              </TouchableOpacity>
-
-              {/* FLOATING SEARCHABLE OPERATOR DROPDOWN MENU */}
-              {operatorDropdownOpen && (
-                <View
-                  style={{
-                    position: 'absolute',
-                    top: 44,
-                    left: 0,
-                    width: isMobile ? '100%' : 320,
-                    backgroundColor: '#ffffff',
-                    borderRadius: 10,
-                    borderWidth: 1,
-                    borderColor: '#cbd5e1',
-                    boxShadow: '0 8px 24px rgba(0,0,0,0.15)',
-                    zIndex: 9999,
-                    elevation: 10,
-                    padding: 8,
-                  }}
-                >
-                  {/* Search input inside dropdown */}
-                  <View
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      gap: 6,
-                      backgroundColor: '#f8fafc',
-                      borderWidth: 1,
-                      borderColor: '#e2e8f0',
-                      borderRadius: 6,
-                      paddingHorizontal: 8,
-                      paddingVertical: 6,
-                      marginBottom: 8,
-                    }}
-                  >
-                    <Feather name="search" size={13} color="#64748b" />
-                    <TextInput
-                      style={{ flex: 1, fontSize: 12, color: '#0f172a', outlineStyle: 'none' }}
-                      placeholder="Search operator name, ID, phone..."
-                      value={operatorSearchQuery}
-                      onChangeText={setOperatorSearchQuery}
-                      placeholderTextColor="#94a3b8"
-                      autoFocus
-                    />
-                    {operatorSearchQuery ? (
-                      <TouchableOpacity onPress={() => setOperatorSearchQuery('')}>
-                        <Feather name="x" size={12} color="#94a3b8" />
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-
-                  {/* Scrollable list of operators */}
-                  <ScrollView style={{ maxHeight: 220 }}>
-                    {/* All Operators option */}
-                    <TouchableOpacity
-                      style={{
-                        paddingVertical: 8,
-                        paddingHorizontal: 10,
-                        borderRadius: 6,
-                        backgroundColor: selectedOperatorId === '' ? '#eff6ff' : 'transparent',
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        justifyContent: 'space-between',
-                      }}
-                      onPress={() => {
-                        setSelectedOperatorId('');
-                        setOperatorDropdownOpen(false);
-                        setOperatorSearchQuery('');
-                      }}
-                    >
-                      <Text style={{ fontSize: 13, fontWeight: selectedOperatorId === '' ? '700' : '500', color: selectedOperatorId === '' ? '#2563eb' : '#334155' }}>
-                        All Operators ({operators.length})
-                      </Text>
-                      {selectedOperatorId === '' && <Feather name="check" size={14} color="#2563eb" />}
-                    </TouchableOpacity>
-
-                    {filteredOperatorsList.map((op) => {
-                      const opId = String(op.partner_id || op.id);
-                      const isSelected = String(selectedOperatorId) === opId;
-                      const opName = op.partner_name || op.company_name || `Operator #${opId}`;
-                      return (
-                        <TouchableOpacity
-                          key={opId}
-                          style={{
-                            paddingVertical: 8,
-                            paddingHorizontal: 10,
-                            borderRadius: 6,
-                            backgroundColor: isSelected ? '#eff6ff' : 'transparent',
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                          }}
-                          onPress={() => {
-                            setSelectedOperatorId(opId);
-                            setOperatorDropdownOpen(false);
-                            setOperatorSearchQuery('');
-                          }}
-                        >
-                          <View style={{ flex: 1, paddingRight: 6 }}>
-                            <Text numberOfLines={1} style={{ fontSize: 12, fontWeight: isSelected ? '700' : '600', color: isSelected ? '#2563eb' : '#0f172a' }}>
-                              #{opId} - {opName}
-                            </Text>
-                            {op.partner_mobile ? (
-                              <Text style={{ fontSize: 10, color: '#64748b', marginTop: 1 }}>
-                                Phone: {op.partner_mobile}
-                              </Text>
-                            ) : null}
-                          </View>
-                          {isSelected && <Feather name="check" size={14} color="#2563eb" />}
-                        </TouchableOpacity>
-                      );
-                    })}
-
-                    {filteredOperatorsList.length === 0 && (
-                      <View style={{ padding: 12, alignItems: 'center' }}>
-                        <Text style={{ fontSize: 12, color: '#94a3b8' }}>No operators match "{operatorSearchQuery}"</Text>
-                      </View>
-                    )}
-                  </ScrollView>
-                </View>
-              )}
+                <option value="">All Operators ({operators.length})</option>
+                {operators.map((op) => (
+                  <option key={op.partner_id || op.id} value={op.partner_id || op.id}>
+                    #{op.partner_id || op.id} - {op.partner_name || op.company_name}
+                  </option>
+                ))}
+              </select>
             </View>
           )}
 
