@@ -386,22 +386,22 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
           <Text style={[styles.sectionHeaderTitle, { marginBottom: 10 }]}>Partners & Hierarchy Overview</Text>
           <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>
             <TouchableOpacity
-              style={{ flex: 1, minWidth: 140, backgroundColor: 'rgba(99, 102, 241, 0.08)', borderWidth: 1, borderColor: 'rgba(99, 102, 241, 0.25)', borderRadius: 12, padding: 14 }}
-              onPress={() => onNavigateToPartners && onNavigateToPartners('')}
+              style={{ flex: 1, minWidth: 160, backgroundColor: 'rgba(59, 130, 246, 0.08)', borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.25)', borderRadius: 12, padding: 14 }}
+              onPress={() => onNavigateToPartners && onNavigateToPartners('operator')}
               activeOpacity={0.7}
             >
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Feather name="grid" size={14} color="#6366f1" />
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#6366f1' }}>TOTAL PARTNERS</Text>
+                  <Feather name="briefcase" size={14} color="#3b82f6" />
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6' }}>TOTAL OPERATORS</Text>
                 </View>
-                <Feather name="arrow-up-right" size={13} color="#6366f1" />
+                <Feather name="arrow-up-right" size={13} color="#3b82f6" />
               </View>
-              <Text style={{ fontSize: 22, fontWeight: '800', color: '#4338ca' }}>{partnerCounts.total}</Text>
+              <Text style={{ fontSize: 22, fontWeight: '800', color: '#1d4ed8' }}>{partnerCounts.operators || partnerCounts.total}</Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={{ flex: 1, minWidth: 140, backgroundColor: 'rgba(16, 185, 129, 0.08)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.25)', borderRadius: 12, padding: 14 }}
+              style={{ flex: 1, minWidth: 160, backgroundColor: 'rgba(16, 185, 129, 0.08)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.25)', borderRadius: 12, padding: 14 }}
               onPress={() => onNavigateToPartners && onNavigateToPartners('admin')}
               activeOpacity={0.7}
             >
@@ -413,21 +413,6 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
                 <Feather name="arrow-up-right" size={13} color="#10b981" />
               </View>
               <Text style={{ fontSize: 22, fontWeight: '800', color: '#047857' }}>{partnerCounts.admins}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={{ flex: 1, minWidth: 140, backgroundColor: 'rgba(59, 130, 246, 0.08)', borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.25)', borderRadius: 12, padding: 14 }}
-              onPress={() => onNavigateToPartners && onNavigateToPartners('operator')}
-              activeOpacity={0.7}
-            >
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Feather name="briefcase" size={14} color="#3b82f6" />
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6' }}>TOTAL OPERATORS</Text>
-                </View>
-                <Feather name="arrow-up-right" size={13} color="#3b82f6" />
-              </View>
-              <Text style={{ fontSize: 22, fontWeight: '800', color: '#1d4ed8' }}>{partnerCounts.operators}</Text>
             </TouchableOpacity>
           </View>
         </View>
