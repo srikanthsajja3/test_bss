@@ -317,8 +317,10 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       const res = await OneBssApi.createPartner(payload);
       const resData = res.data || {};
 
-      if (res.status === 400 || res.status === 409 || resData.success === false) {
-        toast.error(resData.message || resData.data?.message || 'Failed to create operator. Please check input parameters.');
+      if (!res.ok || (res.status && res.status >= 400) || resData.success === false) {
+        const errMsg = resData.message || resData.data?.message || resData.error || 'Failed to create operator. Please check input parameters.';
+        toast.error(errMsg);
+        setError(errMsg);
       } else {
         const createdPartner = resData.data || {
           partner_id: resData.partner_id || Math.floor(1100 + Math.random() * 8800),
@@ -346,19 +348,9 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
         onClose();
       }
     } catch (err) {
-      const localPartner = {
-        partner_id: Math.floor(1100 + Math.random() * 8800),
-        partner_name: partnerName.trim(),
-        company_name: companyName.trim(),
-        account_username: username.trim(),
-        account_role: role,
-        status: 'enabled',
-      };
-      toast.success(`Operator "${partnerName.trim()}" registered successfully!`);
-      if (onAccountCreated) {
-        onAccountCreated(localPartner, `Operator "${partnerName.trim()}" registered successfully!`);
-      }
-      onClose();
+      const errMsg = err?.message || 'Failed to create operator account. Please check network connection.';
+      toast.error(errMsg);
+      setError(errMsg);
     } finally {
       setLoading(false);
     }

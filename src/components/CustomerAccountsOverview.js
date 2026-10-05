@@ -257,7 +257,7 @@ export const defaultRechargeType = (account) => {
  *  onInternetRecharge(rawInternetAccount, advance)  opens the plan-picker recharge modal
  *  onVerify(rawInternetAccount)                     opens Verify Customer (required before recharge)
  */
-export const CustomerAccountsOverview = ({ customer, loading = false, syncing = false, onBack, onOpenDetails, onInternetRecharge, onIptvRecharge, onVerify, onRefresh }) => {
+export const CustomerAccountsOverview = ({ customer, loading = false, syncing = false, onBack, onOpenDetails, onInternetRecharge, onIptvRecharge, onVerify, onRefresh, onModifyMobile }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
@@ -317,14 +317,27 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
               <Text style={styles.custName}>{name}</Text>
               <Text style={styles.custId}>#{customer.cust_id}</Text>
-              {customer.aadhar_verified ? (
+              {isAccountVerified(customer) ? (
                 <Pill text="Aadhaar verified" tone={TONE.ok} />
               ) : (
                 <Pill text="KYC pending" tone={TONE.warn} />
               )}
             </View>
             <View style={styles.metaRow}>
-              <View style={styles.metaItem}><Feather name="phone" size={12} color="#64748b" /><Text style={styles.metaText}>{clean(customer.mobile) || '—'}</Text></View>
+              <View style={styles.metaItem}>
+                <Feather name="phone" size={12} color="#64748b" />
+                <Text style={styles.metaText}>{clean(customer.mobile) || '—'}</Text>
+                {onModifyMobile ? (
+                  <TouchableOpacity
+                    onPress={() => onModifyMobile(customer)}
+                    style={{ marginLeft: 6, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: 'rgba(139, 92, 246, 0.1)', flexDirection: 'row', alignItems: 'center', gap: 3 }}
+                    title="Modify Mobile Number"
+                  >
+                    <Feather name="edit-2" size={10} color="#8b5cf6" />
+                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#8b5cf6' }}>Edit</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
               <View style={styles.metaItem}><Feather name="mail" size={12} color="#64748b" /><Text style={styles.metaText}>{clean(customer.email) || '—'}</Text></View>
               <View style={styles.metaItem}><Feather name="calendar" size={12} color="#64748b" /><Text style={styles.metaText}>Since {formatApiDate(customer.registered_date, false)}</Text></View>
             </View>

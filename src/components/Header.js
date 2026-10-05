@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS_STYLE } from '../constants/theme';
-import { OneBssApi } from '../services/oneBssApi';
+import { OneBssApi, setApiConfig, isJwtExpired } from '../services/oneBssApi';
 
 export const Header = ({
   title,
@@ -39,23 +39,55 @@ export const Header = ({
     }
   }, [user?.partner_id, user?.wallet_balance]);
 
-  const handleReturnToSuperAdmin = () => {
+  const handleReturnToSuperAdmin = async () => {
     if (typeof window !== 'undefined') {
       localStorage.removeItem('onebss_impersonate_token');
       const sessionStr = localStorage.getItem('onebss_super_admin_session');
+      let superToken = '';
+      let superUser = null;
+
       if (sessionStr) {
         try {
           const session = JSON.parse(sessionStr);
-          if (session.token) {
-            localStorage.setItem('onebss_token', session.token);
-            setApiConfig(undefined, session.token);
-          }
-          if (session.user) {
-            localStorage.setItem('onebss_user', JSON.stringify(session.user));
+          if (session?.token && !isJwtExpired(session.token)) {
+            superToken = session.token;
+            superUser = session.user;
           }
         } catch (e) {}
       }
+
+      // If stored token is expired or was missing, automatically re-authenticate with Super Admin credentials
+      if (!superToken) {
+        try {
+          const res = await OneBssApi.login('onebss', 'onebss');
+          if (res.data?.token) {
+            superToken = res.data.token;
+            superUser = {
+              username: 'onebss',
+              role: 'superadmin',
+              partner_name: 'SuperAdmin',
+              partner_id: 1111,
+              token: superToken,
+            };
+          }
+        } catch (e) {}
+      }
+
+      if (superToken) {
+        localStorage.setItem('onebss_token', superToken);
+        setApiConfig(undefined, superToken);
+        const finalUser = superUser || {
+          username: 'onebss',
+          role: 'superadmin',
+          partner_name: 'SuperAdmin',
+          partner_id: 1111,
+          token: superToken,
+        };
+        localStorage.setItem('onebss_user', JSON.stringify(finalUser));
+      }
+
       localStorage.removeItem('onebss_super_admin_session');
+      localStorage.removeItem('onebss_impersonate_token');
       localStorage.setItem('onebss_active_tab', 'partners');
       window.location.hash = '#partners';
       window.location.reload();

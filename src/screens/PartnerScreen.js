@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
-import { OneBssApi } from '../services/oneBssApi';
+import { OneBssApi, setApiConfig, decodeJwt } from '../services/oneBssApi';
 import { CreateAccountModal } from '../components/CreateAccountModal';
 import { toast } from 'react-toastify';
 
@@ -72,6 +72,10 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   const [walletAction, setWalletAction] = useState('credit'); // 'credit' | 'debit'
   const [confirmStatusPartner, setConfirmStatusPartner] = useState(null);
   const [refreshingTelemetry, setRefreshingTelemetry] = useState(false);
+  const [kycPartner, setKycPartner] = useState(null);
+  const [assignedKycProviders, setAssignedKycProviders] = useState(['digilocker', 'scoreme', 'manual']);
+  const [loadingKycProviders, setLoadingKycProviders] = useState(false);
+  const [savingKycProviders, setSavingKycProviders] = useState(false);
 
   useEffect(() => {
     if (selectedPartner?.partner_id) {
@@ -388,22 +392,24 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   };
 
   // 2. Wallet Handlers
-  const handleOpenWallet = async (partner) => {
+  const handleOpenWallet = async (partner, initialAction = 'credit') => {
     if (!partner) return;
     setWalletPartner(partner);
+    setWalletAction(initialAction);
     if (!selectedPartner || String(selectedPartner.partner_id) === String(partner.partner_id || partner.id)) {
       setSelectedPartner(partner);
     }
     if (typeof window !== 'undefined') {
       const pId = partner.partner_id || partner.id;
-      window.location.hash = `partners?partner_id=${pId}&wallet=${pId}`;
+      window.location.hash = `partners?partner_id=${pId}&wallet=${pId}&action=${initialAction}`;
     }
     setTopupAmount('');
     setWalletRemark('');
     setPaymentMode('Online Transfer');
     setLoadingWalletTxns(true);
     try {
-      const res = await OneBssApi.getWallet(partner.partner_id);
+      const pId = partner.partner_id || partner.id;
+      const res = await OneBssApi.getWallet(pId);
       const data = res.data || {};
       if (data.wallet_balance !== undefined) {
         setWalletPartner((prev) => (prev ? { ...prev, wallet_balance: data.wallet_balance } : prev));
@@ -869,51 +875,213 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
   };
 
   const handleImpersonatePartner = async (partner) => {
-    setImpersonatingId(partner.partner_id);
+    if (!partner) return;
+    const pId = partner.partner_id || partner.id;
+    if (String(pId) === '1111' || (partner.account_role || '').toLowerCase() === 'superadmin') {
+      toast.info('You are already in the Super Admin session.');
+      return;
+    }
+
+    setImpersonatingId(pId);
     try {
       if (typeof window !== 'undefined') {
-        const existingSuperSession = localStorage.getItem('onebss_super_admin_session');
-        if (!existingSuperSession) {
-          const currentToken = localStorage.getItem('onebss_token');
-          const currentUser = localStorage.getItem('onebss_user');
-          if (currentToken && currentUser) {
-            try {
-              const parsedUser = JSON.parse(currentUser);
-              localStorage.setItem('onebss_super_admin_session', JSON.stringify({ token: currentToken, user: parsedUser }));
-            } catch (err) {
-              localStorage.setItem('onebss_super_admin_session', JSON.stringify({ token: currentToken, user: currentUser }));
-            }
+        const curToken = user?.token || localStorage.getItem('onebss_token');
+        const curUser = user || (localStorage.getItem('onebss_user') ? JSON.parse(localStorage.getItem('onebss_user')) : null);
+        const decoded = decodeJwt(curToken);
+        const isSuper = decoded?.role?.toLowerCase() === 'superadmin' || user?.role === 'superadmin';
+        if (curToken && isSuper) {
+          try {
+            const parsedUser = typeof curUser === 'string' ? JSON.parse(curUser) : curUser;
+            localStorage.setItem('onebss_super_admin_session', JSON.stringify({ token: curToken, user: parsedUser }));
+          } catch (err) {
+            localStorage.setItem('onebss_super_admin_session', JSON.stringify({ token: curToken, user: curUser }));
           }
         }
       }
 
-      const res = await OneBssApi.impersonatePartner(partner.partner_id);
+      if (user?.token) setApiConfig(undefined, user.token);
+      const res = await OneBssApi.impersonatePartner(pId);
       const data = res.data || {};
-      if (data.success && data.token) {
-        setApiConfig(undefined, data.token);
+
+      if (res.ok && (data.token || data.data?.token)) {
+        const token = data.token || data.data?.token;
+        setApiConfig(undefined, token);
         if (typeof window !== 'undefined') {
-          localStorage.setItem('onebss_token', data.token);
-          localStorage.setItem('onebss_impersonate_token', data.token);
-          if (data.impersonating) {
-            const impUser = { ...data.impersonating, token: data.token };
-            localStorage.setItem('onebss_user', JSON.stringify(impUser));
-          }
+          localStorage.setItem('onebss_token', token);
+          localStorage.setItem('onebss_impersonate_token', token);
+          const impUser = {
+            ...(data.impersonating || data.data?.impersonating || partner),
+            token: token,
+            role: (data.impersonating?.role || partner.account_role || 'operator').toLowerCase(),
+            partner_id: pId,
+          };
+          localStorage.setItem('onebss_user', JSON.stringify(impUser));
           localStorage.setItem('onebss_active_tab', 'dashboard');
           localStorage.setItem('onebss_filter', 'all');
           window.location.hash = '#dashboard';
         }
-        toast.success(`Logging in as ${partner.partner_name} (#${partner.partner_id})...`);
+        toast.success(`Logged in as ${partner.partner_name || partner.company_name} (#${pId})!`);
         setTimeout(() => {
           if (typeof window !== 'undefined') window.location.reload();
-        }, 1000);
+        }, 500);
       } else {
-        toast.error(data.message || 'Login failed.');
+        const errMsg = data.message || (res.status === 404 ? `Partner #${pId} not found on server.` : 'Login request failed.');
+        toast.error(errMsg);
+        console.warn('Impersonate failed:', res);
       }
     } catch (e) {
-      toast.error('Login request failed.');
+      toast.error('Login request failed: ' + (e?.message || 'Network error'));
+      console.error('handleImpersonatePartner exception:', e);
     } finally {
       setImpersonatingId(null);
     }
+  };
+
+  const handleOpenKycProviders = async (partner) => {
+    if (!partner) return;
+    const pId = partner.partner_id || partner.id;
+    setKycPartner(partner);
+    setLoadingKycProviders(true);
+    try {
+      const res = await OneBssApi.kycProviders(pId);
+      const data = res.data || {};
+      const list = Array.isArray(data.providers) ? data.providers : (Array.isArray(data.data?.providers) ? data.data.providers : null);
+      if (list && list.length > 0) {
+        setAssignedKycProviders(list.map((p) => String(p).toLowerCase()));
+      } else {
+        setAssignedKycProviders(['digilocker', 'scoreme', 'manual']);
+      }
+    } catch (e) {
+      setAssignedKycProviders(['digilocker', 'scoreme', 'manual']);
+    } finally {
+      setLoadingKycProviders(false);
+    }
+  };
+
+  const handleSaveKycProviders = async () => {
+    if (!kycPartner) return;
+    const pId = kycPartner.partner_id || kycPartner.id;
+    if (assignedKycProviders.length === 0) {
+      toast.warn('Please select at least one KYC provider.');
+      return;
+    }
+    setSavingKycProviders(true);
+    try {
+      const res = await OneBssApi.assignKycProviders(pId, assignedKycProviders);
+      const data = res.data || {};
+      if (res.ok || data.success !== false) {
+        toast.success(`KYC providers updated successfully for ${kycPartner.partner_name || 'operator'}!`);
+        setKycPartner(null);
+        fetchPartners();
+      } else {
+        toast.error(data.message || 'Failed to update KYC providers.');
+      }
+    } catch (e) {
+      toast.error('Failed to update KYC providers.');
+    } finally {
+      setSavingKycProviders(false);
+    }
+  };
+
+  const renderKycProvidersModal = () => {
+    if (!kycPartner) return null;
+    const providers = [
+      { id: 'digilocker', title: 'DigiLocker Online Aadhaar', desc: 'Instant OTP/consent-based Aadhaar verification via DigiLocker gateway', icon: 'shield' },
+      { id: 'scoreme', title: 'ScoreMe Aadhaar OTP', desc: 'Direct Aadhaar OTP validation with demographic auto-fill', icon: 'smartphone' },
+      { id: 'manual', title: 'Manual / Offline KYC', desc: 'Allow physical document inspection and manual approval by operator', icon: 'file-text' },
+    ];
+    return (
+      <Modal visible transparent animationType="fade" onRequestClose={() => setKycPartner(null)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <View style={{ width: '100%', maxWidth: 520, backgroundColor: COLORS.bgSecondary || '#1e293b', borderRadius: 16, padding: 24, borderWidth: 1, borderColor: COLORS.border || '#334155' }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(246, 92, 241, 0.15)', justifyContent: 'center', alignItems: 'center' }}>
+                  <Feather name="user-check" size={18} color="#f65cf4" />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.textMain || '#ffffff' }}>Assign KYC Providers</Text>
+                  <Text style={{ fontSize: 12, color: COLORS.textMuted || '#94a3b8' }}>
+                    {kycPartner.partner_name || kycPartner.company_name} (#{kycPartner.partner_id || kycPartner.id})
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setKycPartner(null)}>
+                <Feather name="x" size={20} color={COLORS.textMuted || '#94a3b8'} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ fontSize: 13, color: COLORS.textMuted || '#94a3b8', marginBottom: 16 }}>
+              Select which Aadhaar KYC verification methods this operator is authorized to offer to their subscribers during onboarding:
+            </Text>
+
+            {loadingKycProviders ? (
+              <ActivityIndicator size="small" color="#f65cf4" style={{ marginVertical: 20 }} />
+            ) : (
+              <View style={{ gap: 10, marginBottom: 20 }}>
+                {providers.map((p) => {
+                  const isChecked = assignedKycProviders.includes(p.id);
+                  return (
+                    <TouchableOpacity
+                      key={p.id}
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 12,
+                        padding: 12,
+                        borderRadius: 10,
+                        backgroundColor: isChecked ? 'rgba(246, 92, 241, 0.08)' : 'rgba(0,0,0,0.03)',
+                        borderWidth: 1,
+                        borderColor: isChecked ? '#f65cf4' : 'rgba(0,0,0,0.1)',
+                      }}
+                      onPress={() => {
+                        setAssignedKycProviders((prev) =>
+                          isChecked ? prev.filter((x) => x !== p.id) : [...prev, p.id]
+                        );
+                      }}
+                    >
+                      <Feather
+                        name={isChecked ? 'check-square' : 'square'}
+                        size={18}
+                        color={isChecked ? '#f65cf4' : COLORS.textDim}
+                      />
+                      <View style={{ flex: 1 }}>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMain }}>{p.title}</Text>
+                        <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>{p.desc}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
+              <TouchableOpacity
+                style={styles.btnSecondary}
+                onPress={() => setKycPartner(null)}
+                disabled={savingKycProviders}
+              >
+                <Text style={styles.btnSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.btnPrimary, { backgroundColor: '#f65cf4' }]}
+                onPress={handleSaveKycProviders}
+                disabled={savingKycProviders || loadingKycProviders}
+              >
+                {savingKycProviders ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Feather name="check" size={14} color="#fff" />
+                    <Text style={styles.btnPrimaryText}>Save KYC Mapping</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
   };
 
   const renderResetPasswordModal = () => (
@@ -2120,7 +2288,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
               {/* WALLET TOPUP BUTTON */}
               <TouchableOpacity
                 style={[styles.simpleActionBtn, { borderColor: 'rgba(16, 185, 129, 0.4)', backgroundColor: 'rgba(16, 185, 129, 0.08)' }]}
-                onPress={() => handleOpenWallet(selectedPartner)}
+                onPress={() => handleOpenWallet(selectedPartner, 'credit')}
               >
                 <Text style={{ fontSize: 14, fontWeight: '700', color: '#10b981' }}>₹</Text>
                 <Text style={[styles.simpleActionBtnText, { color: '#10b981' }]}>
@@ -2134,7 +2302,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
               {/* WALLET DEBIT BUTTON */}
               <TouchableOpacity
                 style={[styles.simpleActionBtn, { borderColor: 'rgba(185, 16, 16, 0.4)', backgroundColor: 'rgba(185, 16, 16, 0.08)' }]}
-                
+                onPress={() => handleOpenWallet(selectedPartner, 'debit')}
               >
                 <Text style={{ fontSize: 14, fontWeight: '700', color: '#b91010' }}>₹</Text>
                 <Text style={[styles.simpleActionBtnText, { color: '#b91010' }]}>
@@ -2253,6 +2421,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
         </ScrollView>
         {renderResetPasswordModal()}
         {renderConfirmStatusModal()}
+        {renderKycProvidersModal()}
       </View>
     );
   }
@@ -2284,48 +2453,59 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
             />
           </View>
 
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', flex: 1, justifyContent: 'flex-end' }}>
-            {/* ADD OPERATOR BUTTON */}
-            <TouchableOpacity
-              style={{
-                flexDirection: 'row',
-                alignItems: 'center',
-                gap: 6,
-                paddingHorizontal: 14,
-                paddingVertical: 9,
-                borderRadius: 8,
-                backgroundColor: COLORS.primary || '#3b82f6',
-              }}
-              onPress={() => handleOpenCreate('operator')}
-            >
-              <Feather name="user-plus" size={14} color="#ffffff" />
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#ffffff' }}>Add Operator</Text>
-            </TouchableOpacity>
+          <View style={[
+            { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', flex: 1, justifyContent: 'flex-end' },
+            isMobile && { width: '100%', flex: 0, justifyContent: 'space-between', marginTop: 4 }
+          ]}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, width: isMobile ? '100%' : 'auto' }}>
+              {/* ADD OPERATOR BUTTON */}
+              <TouchableOpacity
+                style={[
+                  {
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 6,
+                    paddingHorizontal: 14,
+                    paddingVertical: 9,
+                    borderRadius: 8,
+                    backgroundColor: COLORS.primary || '#3b82f6',
+                  },
+                  isMobile && { flex: 1, justifyContent: 'center' }
+                ]}
+                onPress={() => handleOpenCreate('operator')}
+              >
+                <Feather name="user-plus" size={14} color="#ffffff" />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#ffffff' }}>Add Operator</Text>
+              </TouchableOpacity>
 
-            {/* MANUAL REFRESH TELEMETRY BUTTON (ITEM 16) */}
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.3)' }}
-              onPress={async () => {
-                setRefreshingTelemetry(true);
-                await fetchPartners();
-                setRefreshingTelemetry(false);
-                toast.success('Partner telemetry active & online counts refreshed!');
-              }}
-              disabled={refreshingTelemetry}
-            >
-              <Feather name="refresh-cw" size={14} color="#3b82f6" />
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#3b82f6' }}>
-                {refreshingTelemetry ? 'Refreshing...' : 'Refresh Telemetry'}
-              </Text>
-            </TouchableOpacity>
+              {/* MANUAL REFRESH TELEMETRY BUTTON (ITEM 16) */}
+              <TouchableOpacity
+                style={[
+                  { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.3)' },
+                  isMobile && { flex: 1, justifyContent: 'center' }
+                ]}
+                onPress={async () => {
+                  setRefreshingTelemetry(true);
+                  await fetchPartners();
+                  setRefreshingTelemetry(false);
+                  toast.success('Partner telemetry active & online counts refreshed!');
+                }}
+                disabled={refreshingTelemetry}
+              >
+                <Feather name="refresh-cw" size={14} color="#3b82f6" />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#3b82f6' }}>
+                  {refreshingTelemetry ? 'Refreshing...' : 'Refresh Telemetry'}
+                </Text>
+              </TouchableOpacity>
+            </View>
 
-            <View style={[styles.roleFilters, isMobile && { width: '100%', justifyContent: 'space-between' }]}>
+            <View style={[styles.roleFilters, isMobile && { width: '100%', justifyContent: 'space-between', marginTop: 4 }]}>
               {['', 'operator', 'admin'].map((role) => (
                 <TouchableOpacity
                   key={role}
                   style={[
                     styles.roleChip,
-                    isMobile && { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 10, paddingHorizontal: 4 },
+                    isMobile && { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 4 },
                     selectedRole === role && styles.roleChipActive,
                   ]}
                   onPress={() => setSelectedRole(role)}
@@ -2428,20 +2608,25 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                         </View>
                       </View>
 
-                      <View style={[styles.mobileCardFooter, { justifyContent: 'space-between', alignItems: 'center', gap: 8, flexWrap: 'wrap' }]}>
-                        {/* ENABLE / DISABLE STATUS TOGGLE WITH ALERT CONFIRMATION (ITEM 14) */}
-                        <TouchableOpacity onPress={() => setConfirmStatusPartner(item)}>
-                          <View style={[styles.statusTag, isEnabled ? styles.tagEnabled : styles.tagDisabled]}>
-                            <View style={[styles.statusDot, isEnabled ? styles.dotEnabled : styles.dotDisabled]} />
-                            <Text style={[styles.tagText, isEnabled ? styles.tagTextEnabled : styles.tagTextDisabled]}>
-                              {isEnabled ? 'ENABLED' : 'DISABLED'}
-                            </Text>
-                          </View>
-                        </TouchableOpacity>
+                      <View style={[styles.mobileCardFooter, { flexDirection: 'column', alignItems: 'stretch', gap: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.06)' }]}>
+                        {/* Status Row */}
+                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted }}>Operator Status:</Text>
+                          {/* ENABLE / DISABLE STATUS TOGGLE WITH ALERT CONFIRMATION (ITEM 14) */}
+                          <TouchableOpacity onPress={() => setConfirmStatusPartner(item)}>
+                            <View style={[styles.statusTag, isEnabled ? styles.tagEnabled : styles.tagDisabled]}>
+                              <View style={[styles.statusDot, isEnabled ? styles.dotEnabled : styles.dotDisabled]} />
+                              <Text style={[styles.tagText, isEnabled ? styles.tagTextEnabled : styles.tagTextDisabled]}>
+                                {isEnabled ? 'ENABLED' : 'DISABLED'}
+                              </Text>
+                            </View>
+                          </TouchableOpacity>
+                        </View>
 
-                        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center' }}>
+                        {/* Action buttons row with even distribution */}
+                        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', width: '100%' }}>
                           <TouchableOpacity
-                            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.3)' }}
+                            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, borderRadius: 6, backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.3)' }}
                             onPress={() => {
                               setEditingPartner(item);
                               setEditForm({ ...item, iptv_branch_id: item.iptv_branch_id || '' });
@@ -2452,7 +2637,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                           </TouchableOpacity>
 
                           <TouchableOpacity
-                            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' }}
+                            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, borderRadius: 6, backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' }}
                             onPress={() => handleOpenPartnerResetPass(item)}
                           >
                             <Feather name="key" size={12} color="#f59e0b" />
@@ -2460,7 +2645,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
                           </TouchableOpacity>
 
                           <TouchableOpacity
-                            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: 'rgba(236, 72, 153, 0.1)', borderWidth: 1, borderColor: 'rgba(236, 72, 153, 0.3)' }}
+                            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, borderRadius: 6, backgroundColor: 'rgba(236, 72, 153, 0.1)', borderWidth: 1, borderColor: 'rgba(236, 72, 153, 0.3)' }}
                             onPress={() => handleImpersonatePartner(item)}
                             disabled={impersonatingId === item.partner_id}
                           >
@@ -2629,6 +2814,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user }) => {
 
         {renderResetPasswordModal()}
         {renderConfirmStatusModal()}
+        {renderKycProvidersModal()}
       </ScrollView>
     </View>
   );

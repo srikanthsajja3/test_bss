@@ -86,6 +86,8 @@ export default function App() {
   const [activeTab, setActiveTabState] = useState(initialNav.tab);
   const [customerInitialFilter, setCustomerInitialFilter] = useState(initialNav.filter);
   const [customerInitialRange, setCustomerInitialRange] = useState(initialNav.range || ''); // expiry / registration range
+  const [customerInitialSearch, setCustomerInitialSearch] = useState('');
+  const [globalRefreshKey, setGlobalRefreshKey] = useState(0);
   const [user, setUserState] = useState(getInitialUserState());
   const [isLoginVisible, setIsLoginVisible] = useState(false);
   const [partnerCreateRole, setPartnerCreateRole] = useState(null);
@@ -231,8 +233,11 @@ export default function App() {
     }
   };
 
-  // range: optional expiry / registration range key (customers_by_date.php)
-  const handleNavigateToCustomers = (filterKey = 'all', range = '') => {
+  // range: optional expiry / registration range key (customers_by_date.php), search: optional search query
+  const handleNavigateToCustomers = (filterKey = 'all', range = '', search = '') => {
+    setCustomerInitialFilter(filterKey);
+    setCustomerInitialRange(range);
+    setCustomerInitialSearch(search || '');
     if (filterKey.startsWith('iptv') || filterKey === 'iptv') {
       const cleanFilter = (filterKey === 'iptv' || filterKey === 'iptv_all') ? 'all' : filterKey.replace('iptv_', '');
       setActiveTab('iptv_customers', cleanFilter, range);
@@ -260,15 +265,15 @@ export default function App() {
   const renderActiveScreen = () => {
     switch (activeTab) {
       case 'dashboard':
-        return <DashboardScreen user={user} onNavigateToCustomers={handleNavigateToCustomers} />;
+        return <DashboardScreen key={`dashboard_${globalRefreshKey}`} user={user} onNavigateToCustomers={handleNavigateToCustomers} />;
       case 'partners':
-        return <PartnerScreen initialCreateRole={partnerCreateRole} onOpenCreate={(r) => setPartnerCreateRole(r)} user={user} />;
+        return <PartnerScreen key={`partners_${globalRefreshKey}`} initialCreateRole={partnerCreateRole} onOpenCreate={(r) => setPartnerCreateRole(r)} user={user} />;
       case 'customers':
-        return <CustomerScreen key="customers" user={user} isIptvMode={false} initialFilter={customerInitialFilter} initialRange={customerInitialRange} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
+        return <CustomerScreen key={`customers_${globalRefreshKey}`} user={user} isIptvMode={false} initialFilter={customerInitialFilter} initialRange={customerInitialRange} initialSearch={customerInitialSearch} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
       case 'iptv_customers':
-        return <CustomerScreen key="iptv_customers" user={user} isIptvMode={true} initialFilter={customerInitialFilter} initialRange={customerInitialRange} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
+        return <CustomerScreen key={`iptv_${globalRefreshKey}`} user={user} isIptvMode={true} initialFilter={customerInitialFilter} initialRange={customerInitialRange} initialSearch={customerInitialSearch} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
       default:
-        return <DashboardScreen user={user} onNavigateToCustomers={handleNavigateToCustomers} />;
+        return <DashboardScreen key={`dashboard_def_${globalRefreshKey}`} user={user} onNavigateToCustomers={handleNavigateToCustomers} />;
     }
   };
 
@@ -345,6 +350,7 @@ export default function App() {
             subtitle={meta.subtitle}
             activeView={activeTab}
             onViewChange={setActiveTab}
+            onRefresh={() => setGlobalRefreshKey((k) => k + 1)}
             onOpenCreate={() => handleOpenCreateRole('operator')}
             onToggleSidebar={toggleSidebarCollapse}
             user={user}

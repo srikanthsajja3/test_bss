@@ -314,7 +314,7 @@ const ACCOUNT_LEVEL_KEYS = [
   'internet_id', 'package_id', 'subplan_id', 'acc_id',
 ];
 
-export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all', initialRange = '', onSwitchMode, onAutoCloseSidebar }) => {
+export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all', initialRange = '', initialSearch = '', onSwitchMode, onAutoCloseSidebar }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
@@ -326,7 +326,67 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   useEffect(() => {
     setActiveRange(findDateRange(initialRange) ? initialRange : '');
   }, [initialRange]);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState(initialSearch || '');
+  const [debouncedSearch, setDebouncedSearch] = useState(initialSearch || '');
+
+  useEffect(() => {
+    if (initialSearch !== undefined) {
+      setSearchQuery(initialSearch || '');
+      setDebouncedSearch(initialSearch || '');
+    }
+  }, [initialSearch]);
+
+  // Session-persistent verified IDs so verified state never reverts
+  const [locallyVerifiedCustIds, setLocallyVerifiedCustIds] = useState(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const stored = localStorage.getItem('onebss_verified_cust_ids');
+        return stored ? new Set(JSON.parse(stored)) : new Set();
+      }
+    } catch (e) {}
+    return new Set();
+  });
+
+  const markCustomerAsVerifiedLocally = (target) => {
+    if (!target) return;
+    setLocallyVerifiedCustIds((prev) => {
+      const next = new Set(prev);
+      if (typeof target === 'object') {
+        if (target.id) next.add(String(target.id));
+        if (target.cust_id) next.add(String(target.cust_id));
+        if (target.internet_id) next.add(String(target.internet_id));
+        if (target.username) next.add(String(target.username));
+        if (target.mobile) next.add(String(target.mobile));
+      } else {
+        next.add(String(target));
+      }
+      try {
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('onebss_verified_cust_ids', JSON.stringify([...next]));
+        }
+      } catch (e) {}
+      return next;
+    });
+  };
+
+  const checkIsAadhaarVerified = (cust) => {
+    if (!cust) return false;
+    if (
+      (cust.id && locallyVerifiedCustIds.has(String(cust.id))) ||
+      (cust.cust_id && locallyVerifiedCustIds.has(String(cust.cust_id))) ||
+      (cust.internet_id && locallyVerifiedCustIds.has(String(cust.internet_id))) ||
+      (cust.username && locallyVerifiedCustIds.has(String(cust.username))) ||
+      (cust.mobile && locallyVerifiedCustIds.has(String(cust.mobile)))
+    ) {
+      return true;
+    }
+    const v = cust.aadhar_verified ?? cust.aadhaar_verified ?? cust.is_aadhar_verified ?? cust.is_aadhaar_verified ?? cust.verified;
+    if (v === true || v === 1 || v === '1' || v === 'true' || String(v).toLowerCase() === 'verified') return true;
+    const k = String(cust.kyc || '').toLowerCase();
+    if (k.includes('aadhaar') || k.includes('verified') || k.includes('scoreme') || k.includes('digilocker')) return true;
+    return false;
+  };
+
   const [showPasswordMap, setShowPasswordMap] = useState({});
   const [selectedRowIds, setSelectedRowIds] = useState(new Set());
 
@@ -379,7 +439,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [listCounts, setListCounts] = useState({}); // per-status counts (status filter ignored)
   const [loadingData, setLoadingData] = useState(true);
   const [listError, setListError] = useState('');
-  const [debouncedSearch, setDebouncedSearch] = useState('');
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
@@ -473,14 +532,18 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       setLoadingDetailsFor(key);
       try {
         if (user?.token) setApiConfig(undefined, user.token);
-        // 1st try by cust_id, then fall back to the customer's mobile
-        let record = extractLookupRecord(await OneBssApi.customerLookup(key), custId);
+        // 1st try by mobile/username from the list item, then fall back to cust_id
+        const listItem = rawCustomersRef.current.find((c) => String(c.cust_id) === key || String(c.id) === key);
+        const mobile = String(listItem?.mobile || '').replace(/\D/g, '').slice(-10);
+        let record = null;
+        if (mobile.length === 10) {
+          record = extractLookupRecord(await OneBssApi.customerLookup(mobile), custId);
+        }
+        if (!record && listItem?.username) {
+          record = extractLookupRecord(await OneBssApi.customerLookup(listItem.username), custId);
+        }
         if (!record) {
-          const listItem = rawCustomersRef.current.find((c) => String(c.cust_id) === key);
-          const mobile = String(listItem?.mobile || '').replace(/\D/g, '').slice(-10);
-          if (mobile.length === 10) {
-            record = extractLookupRecord(await OneBssApi.customerLookup(mobile), custId);
-          }
+          record = extractLookupRecord(await OneBssApi.customerLookup(key), custId);
         }
         if (record) {
           customerDetailsRef.current = { ...customerDetailsRef.current, [key]: record };
@@ -843,6 +906,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     const acc = verifyReq;
     if (!acc) return;
     setVerifiedOverrides((prev) => ({ ...prev, [String(acc.internet_id)]: true }));
+    markCustomerAsVerifiedLocally(acc);
+    if (activeCustomer) markCustomerAsVerifiedLocally(activeCustomer);
     // pull the new status into the local DB, then refresh the lookup
     if (activeCustomerId !== null) syncInternetAccounts(activeCustomerId, [acc.internet_id]);
   };
@@ -1171,6 +1236,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         onVerify={(acc) => setVerifyReq(acc)}
         onBack={handleCloseCustomerOverview}
         onOpenDetails={handleOpenAccountDetails}
+        onModifyMobile={(c) => { setModifyMobileCust(c); setNewMobileVal(c?.mobile || ''); }}
       />
       {accountActionModals}
       </>
@@ -1367,9 +1433,20 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 12, color: '#64748b' }}>Mobile</Text>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>{activeSubProfile.mobile || '—'}</Text>
                   {activeSubProfile.mobile_verified ? <Feather name="check-circle" size={13} color="#10b981" /> : null}
+                  <TouchableOpacity
+                    onPress={() => {
+                      setModifyMobileCust(activeSubProfile);
+                      setNewMobileVal(activeSubProfile.mobile || '');
+                    }}
+                    style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.25)', flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                    title="Modify Mobile Number"
+                  >
+                    <Feather name="edit-2" size={10} color="#8b5cf6" />
+                    <Text style={{ fontSize: 11, fontWeight: '600', color: '#8b5cf6' }}>Edit</Text>
+                  </TouchableOpacity>
                 </View>
               </View>
 
@@ -1614,6 +1691,29 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             </TouchableOpacity>
           )}
 
+          {/* REFRESH BUTTON (UPDATES ONLINE COUNTS & SUBSCRIBER LIST) */}
+          <TouchableOpacity
+            style={{
+              flexDirection: 'row',
+              alignItems: 'center',
+              gap: 6,
+              backgroundColor: 'rgba(59, 130, 246, 0.1)',
+              borderWidth: 1,
+              borderColor: 'rgba(59, 130, 246, 0.3)',
+              paddingHorizontal: 12,
+              height: 40,
+              borderRadius: 8,
+            }}
+            onPress={loadCustomerDataFromApi}
+            disabled={loadingData}
+            title="Refresh subscriber accounts & live online status"
+          >
+            <Feather name="refresh-cw" size={14} color="#2563eb" />
+            <Text style={{ fontSize: 12, fontWeight: '700', color: '#2563eb' }}>
+              {loadingData ? 'Refreshing...' : 'Refresh'}
+            </Text>
+          </TouchableOpacity>
+
           {((user?.role || user?.account_role || '').toLowerCase() === 'operator') && (
             <TouchableOpacity style={styles.addCustomerHeaderBtn} onPress={() => setShowAddCustomer(true)}>
               <Feather name="user-plus" size={14} color="#ffffff" />
@@ -1691,6 +1791,29 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             </View>
 
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+              {/* REFRESH BUTTON FOR ONLINE COUNTS & TELEMETRY (ITEM 16) */}
+              <TouchableOpacity
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 6,
+                  paddingHorizontal: 12,
+                  paddingVertical: 6,
+                  borderRadius: 6,
+                  backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                  borderWidth: 1,
+                  borderColor: 'rgba(37, 99, 235, 0.3)',
+                }}
+                onPress={() => loadCustomerDataFromApi()}
+                disabled={loadingData}
+                title="Refresh subscriber accounts & live online status"
+              >
+                <Feather name="refresh-cw" size={13} color="#2563eb" />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#2563eb' }}>
+                  {loadingData ? 'Refreshing...' : 'Refresh Online Counts'}
+                </Text>
+              </TouchableOpacity>
+
               {/* Items Per Page Selector */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                 <Text style={{ fontSize: 12, color: COLORS.textMuted || '#64748b' }}>Per page:</Text>
@@ -1730,7 +1853,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             </View>
           </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: viewMode === 'iptv' ? 1250 : 1350, width: '100%' }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: viewMode === 'iptv' ? 1280 : 1480, width: '100%' }}>
           <View style={{ width: '100%' }}>
             {/* Table Header */}
             <View style={styles.tableHeader}>
@@ -1747,30 +1870,29 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </TouchableOpacity>
               {viewMode === 'iptv' ? (
                 <>
-                  <Text style={[styles.th, { flex: 1.7 }]}>STB / Box No.</Text>
-                  {/* <Text style={[styles.th, { flex: 1.3 }]}>VC / Smartcard</Text> */}
-                  <Text style={[styles.th, { flex: 1.1 }]}>Status</Text>
-                  <Text style={[styles.th, { flex: 1.4 }]}>Mobile</Text>
-                  <Text style={[styles.th, { flex: 1.3 }]}>Aadhaar Status</Text>
-                  <Text style={[styles.th, { flex: 1.7 }]}>Full Name</Text>
-                  <Text style={[styles.th, { flex: 1.7 }]}>Operator / Branch</Text>
-                  <Text style={[styles.th, { flex: 1.8 }]}>Package</Text>
+                  <Text style={[styles.th, { flex: 1.7, minWidth: 140 }]}>STB / Box No.</Text>
+                  <Text style={[styles.th, { flex: 1.1, minWidth: 95 }]}>Status</Text>
+                  <Text style={[styles.th, { flex: 1.4, minWidth: 120 }]}>Mobile</Text>
+                  <Text style={[styles.th, { flex: 1.3, minWidth: 120 }]}>Aadhaar Status</Text>
+                  <Text style={[styles.th, { flex: 1.7, minWidth: 130 }]}>Full Name</Text>
+                  <Text style={[styles.th, { flex: 1.7, minWidth: 130 }]}>Operator / Branch</Text>
+                  <Text style={[styles.th, { flex: 1.8, minWidth: 140 }]}>Package</Text>
                 </>
               ) : (
                 <>
-                  <Text style={[styles.th, { flex: 1.5 }]}>Username</Text>
-                  <Text style={[styles.th, { flex: 1.2 }]}>Password</Text>
-                  <Text style={[styles.th, { flex: 1.1 }]}>Connectivity</Text>
-                  <Text style={[styles.th, { flex: 1.4 }]}>Mobile</Text>
-                  <Text style={[styles.th, { flex: 1.3 }]}>Aadhaar Status</Text>
-                  <Text style={[styles.th, { flex: 1.8 }]}>Full Name</Text>
-                  <Text style={[styles.th, { flex: 1.5 }]}>Partner Name</Text>
-                  <Text style={[styles.th, { flex: 1.8 }]}>Package Name</Text>
-                  <Text style={[styles.th, { flex: 1.4 }]}>Subplan Name</Text>
+                  <Text style={[styles.th, { flex: 1.5, minWidth: 120 }]}>Username</Text>
+                  <Text style={[styles.th, { flex: 1.2, minWidth: 100 }]}>Password</Text>
+                  <Text style={[styles.th, { flex: 1.1, minWidth: 95 }]}>Connectivity</Text>
+                  <Text style={[styles.th, { flex: 1.4, minWidth: 120 }]}>Mobile</Text>
+                  <Text style={[styles.th, { flex: 1.3, minWidth: 120 }]}>Aadhaar Status</Text>
+                  <Text style={[styles.th, { flex: 1.8, minWidth: 140 }]}>Full Name</Text>
+                  <Text style={[styles.th, { flex: 1.5, minWidth: 120 }]}>Partner Name</Text>
+                  <Text style={[styles.th, { flex: 1.8, minWidth: 140 }]}>Package Name</Text>
+                  <Text style={[styles.th, { flex: 1.4, minWidth: 110 }]}>Subplan Name</Text>
                 </>
               )}
               <TouchableOpacity
-                style={[{ flex: viewMode === 'iptv' ? 2 : 2.2, flexDirection: 'row', alignItems: 'center', gap: 4 }, styles.th]}
+                style={[{ flex: viewMode === 'iptv' ? 2 : 2.2, minWidth: 140, flexDirection: 'row', alignItems: 'center', gap: 4 }, styles.th]}
                 onPress={() => {
                   if (sortField === 'expiration') {
                     setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
@@ -1787,8 +1909,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   color={sortField === 'expiration' ? COLORS.primary : COLORS.textMuted}
                 />
               </TouchableOpacity>
-              {showRegisteredCol ? <Text style={[styles.th, { flex: 1.3 }]}>Registered On</Text> : null}
-              <Text style={[styles.th, { flex: viewMode === 'iptv' ? 1 : 1.1, textAlign: viewMode === 'iptv' ? 'center' : 'left' }]}>
+              {showRegisteredCol ? <Text style={[styles.th, { flex: 1.3, minWidth: 110 }]}>Registered On</Text> : null}
+              <Text style={[styles.th, { flex: viewMode === 'iptv' ? 1 : 1.1, minWidth: 80, textAlign: viewMode === 'iptv' ? 'center' : 'left' }]}>
                 {viewMode === 'iptv' ? 'Action' : 'Navigation'}
               </Text>
             </View>
@@ -1841,8 +1963,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   </View>
                 );
 
-                const mobileCell = (flex) => (
-                  <View style={{ flex, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                const mobileCell = (flex, minWidth = 120) => (
+                  <View style={{ flex, minWidth, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                     <TouchableOpacity
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
                       onPress={() => {
@@ -1871,40 +1993,31 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                         <Feather name="copy" size={12} color={COLORS.primary || '#3b82f6'} />
                       </TouchableOpacity>
                     ) : null}
-
-                    {/* MODIFY MOBILE NUMBER BUTTON (ITEM 7) */}
-                    <TouchableOpacity
-                      onPress={() => {
-                        setModifyMobileCust(cust);
-                        setNewMobileVal(cust.mobile || '');
-                      }}
-                      style={{ padding: 2 }}
-                      title="Modify Mobile Number"
-                    >
-                      <Feather name="edit-2" size={12} color="#8b5cf6" />
-                    </TouchableOpacity>
                   </View>
                 );
 
-                const aadhaarCell = (flex = 1.3) => (
-                  <View style={{ flex }}>
-                    {cust.aadhar_verified || cust.kyc === 'Aadhaar Verified' ? (
-                      <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, alignSelf: 'flex-start' }}>
-                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#10b981' }}>✓ Verified</Text>
+                const isAadhaarDone = checkIsAadhaarVerified(cust);
+                const aadhaarCell = (flex = 1.3, minWidth = 120) => (
+                  <View style={{ flex, minWidth }}>
+                    {isAadhaarDone ? (
+                      <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.3)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                        <Feather name="check-circle" size={11} color="#10b981" />
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#10b981' }}>Verified</Text>
                       </View>
                     ) : (
                       <TouchableOpacity
-                        style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, alignSelf: 'flex-start' }}
+                        style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4 }}
                         onPress={() => setVerifyAadhaarCust(cust)}
                       >
+                        <Feather name="shield" size={11} color="#ef4444" />
                         <Text style={{ fontSize: 10, fontWeight: '700', color: '#ef4444' }}>Verify Aadhaar</Text>
                       </TouchableOpacity>
                     )}
                   </View>
                 );
 
-                const expiryCell = (flex) => (
-                  <View style={{ flex }}>
+                const expiryCell = (flex, minWidth = 140) => (
+                  <View style={{ flex, minWidth }}>
                     <Text style={styles.tdText}>{cust.expiration ? formatApiDate(cust.expiration) : '—'}</Text>
                     {balInfo.status !== 'unknown' ? (
                       <View style={{ backgroundColor: balInfo.status === 'active' ? '#dcfce7' : (balInfo.status === 'warning' ? '#fef3c7' : '#ffe4e6'), paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start', marginTop: 3 }}>
@@ -1915,7 +2028,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 );
 
                 const registeredCell = showRegisteredCol ? (
-                  <View style={{ flex: 1.3 }}>
+                  <View style={{ flex: 1.3, minWidth: 110 }}>
                     <Text style={[styles.tdText, { color: '#0369a1', fontWeight: '600' }]}>
                       {cust.registered_on ? formatApiDate(cust.registered_on, false) : '—'}
                     </Text>
@@ -1929,7 +2042,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       {selectCell}
 
                       {/* STB / Box */}
-                      <View style={{ flex: 1.7 }}>
+                      <View style={{ flex: 1.7, minWidth: 140 }}>
                         <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
                           <Text style={[styles.tdClickableUsername, { color: '#7c3aed', fontFamily: 'monospace' }]}>{stb}</Text>
                         </TouchableOpacity>
@@ -1938,41 +2051,36 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                         ) : null}
                       </View>
 
-                      {/* VC / Smartcard */}
-                      {/* <View style={{ flex: 1.3 }}>
-                        <Text style={[styles.tdText, { fontFamily: 'monospace' }]}>{cust.smartcard || '—'}</Text>
-                      </View> */}
-
                       {/* Status */}
-                      <View style={{ flex: 1.1 }}>{statusPill}</View>
+                      <View style={{ flex: 1.1, minWidth: 95 }}>{statusPill}</View>
 
-                      {mobileCell(1.4)}
-                      {aadhaarCell(1.3)}
+                      {mobileCell(1.4, 120)}
+                      {aadhaarCell(1.3, 120)}
 
                       {/* Full Name */}
-                      <View style={{ flex: 1.7 }}>
+                      <View style={{ flex: 1.7, minWidth: 130 }}>
                         <Text style={styles.tdText}>{cust.full_name || '—'}</Text>
                       </View>
 
                       {/* Operator / Branch */}
-                      <View style={{ flex: 1.7 }}>
+                      <View style={{ flex: 1.7, minWidth: 130 }}>
                         <Text style={styles.tdText}>{cust.partner_name || '—'}</Text>
                         {cust.branch_name ? <Text style={styles.tdSub}>{cust.branch_name}</Text> : null}
                       </View>
 
                       {/* Package + validity */}
-                      <View style={{ flex: 1.8 }}>
+                      <View style={{ flex: 1.8, minWidth: 140 }}>
                         <Text style={[styles.tdBold, { color: '#7c3aed' }]}>{cust.package_name || '—'}</Text>
                         <Text style={styles.tdSub}>
                           {[cust.subplan_name, cust.auto_renew ? 'Auto-renew' : null].filter(Boolean).join(' · ') || ' '}
                         </Text>
                       </View>
 
-                      {expiryCell(2)}
+                      {expiryCell(2.0, 140)}
                       {registeredCell}
 
                       {/* Action */}
-                      <View style={{ flex: 1, alignItems: 'center' }}>
+                      <View style={{ flex: 1.0, minWidth: 80, alignItems: 'center' }}>
                         <TouchableOpacity
                           onPress={() => handleOpenSubscriberScreen(cust)}
                           style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.3)' }}
@@ -2000,7 +2108,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                     {selectCell}
 
                     {/* Username + status */}
-                    <View style={{ flex: 1.5, gap: 3 }}>
+                    <View style={{ flex: 1.5, minWidth: 120, gap: 3 }}>
                       <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
                         <Text
                           style={[
@@ -2015,7 +2123,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                     </View>
 
                     {/* Password Column with Eye Toggle (a missing password shows a centred dash) */}
-                    <View style={{ flex: 1.2, flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: hasPassword ? 'flex-start' : 'center' }}>
+                    <View style={{ flex: 1.2, minWidth: 100, flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: hasPassword ? 'flex-start' : 'center' }}>
                       <Text style={[styles.tdText, { fontFamily: Platform?.OS === 'web' && hasPassword ? 'monospace' : undefined, textAlign: hasPassword ? 'left' : 'center' }]}>
                         {hasPassword ? (isPassRevealed ? String(cust.password) : '••••••••') : '—'}
                       </Text>
@@ -2035,7 +2143,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                     </View>
 
                     {/* Connectivity Badge — online is green */}
-                    <View style={{ flex: 1.1 }}>
+                    <View style={{ flex: 1.1, minWidth: 95 }}>
                       <View
                         style={{
                           flexDirection: 'row',
@@ -2055,34 +2163,34 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       </View>
                     </View>
 
-                    {mobileCell(1.3)}
-                    {aadhaarCell(1.3)}
+                    {mobileCell(1.4, 120)}
+                    {aadhaarCell(1.3, 120)}
 
                     {/* Full Name */}
-                    <View style={{ flex: 1.8 }}>
+                    <View style={{ flex: 1.8, minWidth: 140 }}>
                       <Text style={styles.tdText}>{cust.full_name || cust.name || '—'}</Text>
                     </View>
 
                     {/* Partner Name */}
-                    <View style={{ flex: 1.5 }}>
+                    <View style={{ flex: 1.5, minWidth: 120 }}>
                       <Text style={styles.tdText}>{cust.partner_name || '—'}</Text>
                     </View>
 
                     {/* Package Name */}
-                    <View style={{ flex: 1.8 }}>
+                    <View style={{ flex: 1.8, minWidth: 140 }}>
                       <Text style={styles.tdBold}>{cust.package_name || '—'}</Text>
                     </View>
 
                     {/* Subplan Name */}
-                    <View style={{ flex: 1.4 }}>
+                    <View style={{ flex: 1.4, minWidth: 110 }}>
                       <Text style={styles.tdSub}>{cust.subplan_name || '—'}</Text>
                     </View>
 
-                    {expiryCell(2.2)}
+                    {expiryCell(2.2, 140)}
                     {registeredCell}
 
                     {/* Navigation / Map Button */}
-                    <View style={{ flex: 1.1 }}>
+                    <View style={{ flex: 1.1, minWidth: 80 }}>
                       <TouchableOpacity
                         style={{
                           flexDirection: 'row',
@@ -2481,9 +2589,9 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: COLORS.glassBorder, borderRadius: 14, padding: 20, marginBottom: 20 },
   cardHeader: { marginBottom: 14 },
   cardTitle: { fontSize: 16, fontWeight: '700', color: COLORS.textMain },
-  tableHeader: { flexDirection: 'row', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.glassBorder },
+  tableHeader: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.glassBorder },
   th: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase' },
-  tr: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.05)' },
+  tr: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.05)', minHeight: 48 },
   tdBold: { fontSize: 13, fontWeight: '700', color: COLORS.textMain },
   tdSub: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted },
   tdText: { fontSize: 12, fontWeight: '700', color: COLORS.textMain },

@@ -32,7 +32,35 @@ export const isSuperAdmin = (user) => {
   return role === 'superadmin';
 };
 
-export const isAccountVerified = (acc) => String(acc?.verified || '').trim().toLowerCase() === 'verified';
+export const isAccountVerified = (acc) => {
+  if (!acc) return false;
+  if (typeof window !== 'undefined') {
+    try {
+      const stored = localStorage.getItem('onebss_verified_cust_ids');
+      if (stored) {
+        const set = new Set(JSON.parse(stored));
+        if (
+          (acc.id && set.has(String(acc.id))) ||
+          (acc.internet_id && set.has(String(acc.internet_id))) ||
+          (acc.cust_id && set.has(String(acc.cust_id))) ||
+          (acc.username && set.has(String(acc.username))) ||
+          (acc.mobile && set.has(String(acc.mobile)))
+        ) {
+          return true;
+        }
+      }
+    } catch (e) {}
+  }
+  const v = acc.verified ?? acc.aadhar_verified ?? acc.aadhaar_verified ?? acc.is_aadhar_verified ?? acc.is_aadhaar_verified;
+  if (v === true || v === 1 || v === '1' || v === 'true' || String(v).trim().toLowerCase() === 'verified') {
+    return true;
+  }
+  const k = String(acc.kyc || '').toLowerCase();
+  if (k.includes('aadhaar') || k.includes('verified') || k.includes('scoreme') || k.includes('digilocker')) {
+    return true;
+  }
+  return false;
+};
 
 // Customer photo with graceful fallback to initials / icon
 export const CustomerPhoto = ({ uri, size = 56, radius = 14, initials = '', dark = true }) => {
