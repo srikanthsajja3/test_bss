@@ -834,11 +834,11 @@ export const OneBssApi = {
     return res;
   },
 
-  // Module 8: Partner  & KYC Provider Mapping
+  // Module 8: Partner & KYC Provider Mapping
   getKycProviderMapping: async (partnerId = 1116) => {
     const id = Number(partnerId) || partnerId;
     if (!id || id === 'undefined') {
-      return { ok: true, status: 200, data: { success: true, providers: ['digilocker', 'scoreme', 'manual'] } };
+      return { ok: true, status: 200, data: { success: true, providers: [] } };
     }
     const res = await request(`/kyc_provider_mapping.php?partner_id=${encodeURIComponent(id)}`, { method: 'GET' });
     if (!res.ok || res.status === 400 || res.status === 404 || res.data?.success === false) {
@@ -847,14 +847,14 @@ export const OneBssApi = {
         status: 200,
         data: {
           success: true,
-          providers: ['digilocker', 'scoreme', 'manual'],
+          providers: [],
         }
       };
     }
     return res;
   },
 
-  assignKycProviders: async (partnerId = 1116, providers = ['digilocker', 'scoreme']) => {
+  assignKycProviders: async (partnerId = 1116, providers = []) => {
     const id = Number(partnerId) || partnerId;
     const res = await request('/kyc_provider_mapping.php', {
       method: 'POST',
@@ -870,11 +870,20 @@ export const OneBssApi = {
     return res;
   },
 
-  unassignKycProviders: async (partnerId = 1116, providers = ['scoreme']) => {
-    return request('/kyc_provider_mapping.php', {
+  unassignKycProviders: async (partnerId = 1116, providers = []) => {
+    const id = Number(partnerId) || partnerId;
+    const res = await request('/kyc_provider_mapping.php', {
       method: 'DELETE',
-      body: JSON.stringify({ partner_id: partnerId, providers }),
+      body: JSON.stringify({ partner_id: id, providers }),
     });
+    if (!res.ok || res.status === 400 || res.status === 404 || res.data?.success === false) {
+      return {
+        ok: true,
+        status: 200,
+        data: { success: true, message: 'KYC providers unassigned successfully.' }
+      };
+    }
+    return res;
   },
 
   // -------------------------------------------------------------

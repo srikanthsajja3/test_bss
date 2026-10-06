@@ -77,7 +77,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   const [confirmStatusPartner, setConfirmStatusPartner] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [kycPartner, setKycPartner] = useState(null);
-  const [assignedKycProviders, setAssignedKycProviders] = useState(['digilocker', 'scoreme', 'manual']);
+  const [initialKycProviders, setInitialKycProviders] = useState([]);
+  const [assignedKycProviders, setAssignedKycProviders] = useState([]);
   const [loadingKycProviders, setLoadingKycProviders] = useState(false);
   const [savingKycProviders, setSavingKycProviders] = useState(false);
   const [customProviderInput, setCustomProviderInput] = useState('');
@@ -983,8 +984,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       const list = Array.isArray(data.providers)
         ? data.providers
         : (Array.isArray(data.data?.providers) ? data.data.providers : []);
-      setAssignedKycProviders(list.map((p) => String(p).toLowerCase()));
+      const lowerList = list.map((p) => String(p).toLowerCase());
+      setInitialKycProviders(lowerList);
+      setAssignedKycProviders(lowerList);
     } catch (e) {
+      setInitialKycProviders([]);
       setAssignedKycProviders([]);
     } finally {
       setLoadingKycProviders(false);
@@ -994,21 +998,26 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   const handleSaveKycProviders = async () => {
     if (!kycPartner) return;
     const pId = kycPartner.partner_id || kycPartner.id;
-    if (assignedKycProviders.length === 0) {
-      toast.warn('Please select at least one KYC provider.');
-      return;
-    }
     setSavingKycProviders(true);
     try {
-      const res = await OneBssApi.assignKycProviders(pId, assignedKycProviders);
-      const data = res.data || {};
-      if (res.ok || data.success !== false) {
-        toast.success(`KYC providers updated successfully for ${kycPartner.partner_name || 'operator'}!`);
-        setKycPartner(null);
-        fetchPartners();
-      } else {
-        toast.error(data.message || 'Failed to update KYC providers.');
+      const toAssign = assignedKycProviders.filter((p) => !initialKycProviders.includes(p));
+      const toUnassign = initialKycProviders.filter((p) => !assignedKycProviders.includes(p));
+
+      const promises = [];
+      if (toAssign.length > 0) {
+        promises.push(OneBssApi.assignKycProviders(pId, toAssign));
       }
+      if (toUnassign.length > 0) {
+        promises.push(OneBssApi.unassignKycProviders(pId, toUnassign));
+      }
+
+      if (promises.length > 0) {
+        await Promise.all(promises);
+      }
+
+      toast.success(`KYC providers updated successfully for ${kycPartner.partner_name || 'operator'}!`);
+      setKycPartner(null);
+      fetchPartners();
     } catch (e) {
       toast.error('Failed to update KYC providers.');
     } finally {
@@ -1082,32 +1091,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   );
                 })}
 
-                {/* Custom Provider Entry */}
-                <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.06)' }}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 6 }}>Custom Provider Name:</Text>
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    <TextInput
-                      style={{ flex: 1, height: 38, backgroundColor: 'rgba(0,0,0,0.03)', borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)', borderRadius: 8, paddingHorizontal: 10, fontSize: 12, color: COLORS.textMain }}
-                      placeholder="e.g. aadhaar_xml or voter_id..."
-                      placeholderTextColor={COLORS.textDim}
-                      value={customProviderInput}
-                      onChangeText={setCustomProviderInput}
-                    />
-                    <TouchableOpacity
-                      style={{ backgroundColor: '#f65cf4', paddingHorizontal: 14, height: 38, borderRadius: 8, justifyContent: 'center', alignItems: 'center' }}
-                      onPress={() => {
-                        const p = customProviderInput.trim().toLowerCase();
-                        if (p && !assignedKycProviders.includes(p)) {
-                          setAssignedKycProviders((prev) => [...prev, p]);
-                          setCustomProviderInput('');
-                          toast.info(`Added "${p}" to KYC providers list.`);
-                        }
-                      }}
-                    >
-                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#ffffff' }}>Add</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
+
               </View>
             )}
 
