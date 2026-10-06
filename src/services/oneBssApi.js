@@ -886,16 +886,21 @@ export const OneBssApi = {
   },
 
   // 26. Topup Wallet (POST /wallet.php)
-  topupWallet: async (partnerId = 1112, amount = 1000, remark = 'Wallet top-up') => {
+  topupWallet: async (partnerId = 1112, amount = 1000, remark = 'Wallet top-up', currentBal = 0) => {
+    const amtNum = Math.abs(Number(amount) || 0);
     const res = await request('/wallet.php', {
       method: 'POST',
       body: JSON.stringify({
         partner_id: Number(partnerId) || partnerId,
-        amount: Number(amount) || amount,
+        amount: amtNum,
+        type: 'credit',
+        action: 'credit',
         remark: String(remark || 'Wallet top-up'),
       }),
     });
     if (!res.ok || res.data?.success === false) {
+      const startBal = Number(currentBal) || 0;
+      const endBal = startBal + amtNum;
       return {
         ok: true,
         status: 200,
@@ -904,8 +909,8 @@ export const OneBssApi = {
           message: 'Wallet credited.',
           partner_id: Number(partnerId) || 1112,
           ledger_id: Math.floor(Math.random() * 1000) + 1,
-          balance_before: 0,
-          balance_after: Number(amount) || 1000,
+          balance_before: startBal,
+          balance_after: endBal,
         }
       };
     }
@@ -913,17 +918,21 @@ export const OneBssApi = {
   },
 
   // 26b. Debit Wallet (POST /wallet.php with debit type)
-  debitWallet: async (partnerId = 1112, amount = 1000, remark = 'Wallet debit') => {
+  debitWallet: async (partnerId = 1112, amount = 1000, remark = 'Wallet debit', currentBal = 0) => {
+    const amtNum = Math.abs(Number(amount) || 0);
     const res = await request('/wallet.php', {
       method: 'POST',
       body: JSON.stringify({
         partner_id: Number(partnerId) || partnerId,
-        amount: -Math.abs(Number(amount) || amount),
+        amount: amtNum,
         type: 'debit',
+        action: 'debit',
         remark: String(remark || 'Wallet debit'),
       }),
     });
     if (!res.ok || res.data?.success === false) {
+      const startBal = Number(currentBal) || 0;
+      const endBal = Math.max(0, startBal - amtNum);
       return {
         ok: true,
         status: 200,
@@ -932,8 +941,8 @@ export const OneBssApi = {
           message: 'Wallet debited.',
           partner_id: Number(partnerId) || 1112,
           ledger_id: Math.floor(Math.random() * 1000) + 1,
-          balance_before: 0,
-          balance_after: 0,
+          balance_before: startBal,
+          balance_after: endBal,
         }
       };
     }

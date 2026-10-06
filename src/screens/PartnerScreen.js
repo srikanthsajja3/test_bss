@@ -449,12 +449,20 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       const defaultRemark = isDebit ? `Wallet Debit via ${paymentMode}` : `Wallet Top-up via ${paymentMode}`;
       const remarkText = walletRemark.trim() || defaultRemark;
       const res = isDebit
-        ? await OneBssApi.debitWallet(walletPartner.partner_id, amountNum, remarkText)
-        : await OneBssApi.topupWallet(walletPartner.partner_id, amountNum, remarkText);
+        ? await OneBssApi.debitWallet(walletPartner.partner_id, amountNum, remarkText, currentBal)
+        : await OneBssApi.topupWallet(walletPartner.partner_id, amountNum, remarkText, currentBal);
       const data = res.data || {};
-      const newBalance = data.balance_after !== undefined
-        ? data.balance_after
-        : (isDebit ? (currentBal - amountNum) : (currentBal + amountNum));
+
+      const expectedBal = isDebit ? Math.max(0, currentBal - amountNum) : (currentBal + amountNum);
+      let newBalance = expectedBal;
+      if (data.balance_after !== undefined && data.balance_after !== null && !isNaN(Number(data.balance_after))) {
+        const backendBal = Number(data.balance_after);
+        if (backendBal === 0 && expectedBal > 0) {
+          newBalance = expectedBal;
+        } else {
+          newBalance = backendBal;
+        }
+      }
 
       setPartners((prev) =>
         prev.map((p) => (p.partner_id === walletPartner.partner_id ? { ...p, wallet_balance: newBalance } : p))
@@ -470,8 +478,20 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       }
 
       const walletRes = await OneBssApi.getWallet(walletPartner.partner_id);
-      if (Array.isArray(walletRes.data?.transactions)) {
-        setWalletTransactions(walletRes.data.transactions);
+      if (walletRes.data) {
+        if (Array.isArray(walletRes.data.transactions)) {
+          setWalletTransactions(walletRes.data.transactions);
+        }
+        if (walletRes.data.wallet_balance !== undefined && walletRes.data.wallet_balance !== null && !isNaN(Number(walletRes.data.wallet_balance))) {
+          const freshBal = Number(walletRes.data.wallet_balance);
+          setPartners((prev) =>
+            prev.map((p) => (p.partner_id === walletPartner.partner_id ? { ...p, wallet_balance: freshBal } : p))
+          );
+          if (selectedPartner?.partner_id === walletPartner.partner_id) {
+            setSelectedPartner((prev) => ({ ...prev, wallet_balance: freshBal }));
+          }
+          setWalletPartner((prev) => (prev ? { ...prev, wallet_balance: freshBal } : prev));
+        }
       }
       setTopupAmount('');
       setWalletRemark('');
