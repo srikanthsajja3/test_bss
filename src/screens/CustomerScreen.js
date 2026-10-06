@@ -279,11 +279,12 @@ const STATUS_BADGE = {
 
 const isBlankValue = (v) => v === undefined || v === null || String(v).trim() === '' || String(v).trim().toLowerCase() === 'null';
 
-const mapInternetListRow = (r) => {
+const mapInternetListRow = (r, idx) => {
   const statusKey = r.status_key || listStatusKey(r.status_text);
+  const intId = r.internet_id ?? r.username ?? r.cust_id ?? r.id ?? idx;
   return {
     ...r,
-    id: `int_${r.internet_id ?? r.username}`,
+    id: `int_${intId}`,
     name: r.full_name || '',
     status: statusKey,
     status_key: statusKey,
@@ -294,11 +295,12 @@ const mapInternetListRow = (r) => {
   };
 };
 
-const mapIptvListRow = (r) => {
+const mapIptvListRow = (r, idx) => {
   const statusKey = r.status_key || listStatusKey(r.status);
+  const iptvIdentifier = r.iptv_id ?? r.stb_box ?? r.pioneer_stb_id ?? r.cust_id ?? r.id ?? idx;
   return {
     ...r,
-    id: `iptv_${r.iptv_id}`,
+    id: `iptv_${iptvIdentifier}`,
     name: r.full_name || '',
     status_text: r.status,
     status: statusKey,
@@ -534,7 +536,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         setListTotal(0);
         return;
       }
-      const list = Array.isArray(body.data) ? body.data : (Array.isArray(body) ? body : []);
+      let list = Array.isArray(body.data) ? body.data : (Array.isArray(body) ? body : []);
       setListError('');
       setRawCustomers(list);
       setListTotal(Number(body.total ?? list.length) || 0);
@@ -580,15 +582,24 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       if (!force) return pending;
       await pending.catch(() => null);
     }
-    const run = (async () => {
+    let run;
+    run = (async () => {
       setLoadingDetailsFor(key);
       try {
         if (user?.token) setApiConfig(undefined, user.token);
         // 1st try by mobile/username from the list item, then fall back to cust_id
         const listItem = rawCustomersRef.current.find((c) => String(c.cust_id) === key || String(c.id) === key);
-        const mobile = String(listItem?.mobile || '').replace(/\D/g, '').slice(-10);
+        let mobile = String(listItem?.mobile || customerDetailsRef.current[key]?.mobile || '').replace(/\D/g, '').slice(-10);
         let record = null;
+        let syncStatus = null;
         if (mobile.length === 10) {
+          try {
+            const syncRes = await OneBssApi.syncIptvCustomers(mobile);
+            const s = syncRes?.data?.summary || syncRes?.summary;
+            if ((syncRes?.data?.success || syncRes?.success) && s && Number(s.stbs_added || 0) === 0 && Number(s.stbs_skipped || 0) === 0) {
+              syncStatus = 'no_devices';
+            }
+          } catch (e) {}
           record = extractLookupRecord(await OneBssApi.customerLookup(mobile), custId);
         }
         if (!record && listItem?.username) {
@@ -598,10 +609,90 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           record = extractLookupRecord(await OneBssApi.customerLookup(key), custId);
         }
         if (record) {
+          const recMobile = String(record.mobile || '').replace(/\D/g, '').slice(-10);
+          if (recMobile.length === 10 && recMobile !== mobile) {
+            try {
+              const syncRes = await OneBssApi.syncIptvCustomers(recMobile);
+              const s = syncRes?.data?.summary || syncRes?.summary;
+              if ((syncRes?.data?.success || syncRes?.success) && s && Number(s.stbs_added || 0) === 0 && Number(s.stbs_skipped || 0) === 0) {
+                syncStatus = 'no_devices';
+              }
+              const reLookup = await OneBssApi.customerLookup(recMobile);
+              const reRec = extractLookupRecord(reLookup, custId);
+              if (reRec) record = reRec;
+            } catch (e) {}
+          }
+        }
+        if (!record && listItem) {
+          // Graceful fallback from list item data if lookup endpoint does not have detailed record
+          const matchingRows = rawCustomersRef.current.filter((c) => String(c.cust_id) === key || String(c.id) === key);
+          const intAccounts = matchingRows
+            .filter((r) => r.internet_id || r.username || r.account_type === 'internet' || (!r.iptv_id && !r.stb_box && !r.stb_id))
+            .map((r, i) => ({
+              internet_id: r.internet_id || r.id || r.username || (i + 1),
+              acc_id: r.acc_id || r.id || r.internet_id,
+              username: r.username,
+              status_text: r.status_text || r.status || 'ACTIVE',
+              status_color: r.status_color,
+              online: r.online || (r.is_online ? 'ONLINE' : 'OFFLINE'),
+              package_id: r.package_id,
+              package_name: r.package_name || r.plan,
+              subplan_id: r.subplan_id,
+              subplan_name: r.subplan_name,
+              expiration: r.expiration || r.expiryDate,
+              balance: r.balance,
+              last_loff_off: r.last_loff_off || r.last_logoff,
+              partner_id: r.partner_id || r.operator_id,
+            }));
+
+          const iptvAccs = matchingRows
+            .filter((r) => r.iptv_id || r.stb_box || r.stb_id || r.account_type === 'iptv')
+            .map((r, i) => ({
+              id: r.iptv_id || r.id || (i + 1),
+              stb_id: r.stb_id || r.pioneer_stb_id || `STB-${r.cust_id || i}`,
+              stb_box: r.stb_box || r.stb_id,
+              pioneer_stb_id: r.pioneer_stb_id,
+              stb_mac: r.stb_mac,
+              status: r.status || 'Active',
+              sts: r.status || 'Active',
+              plan_id: r.package_id || r.plan_id,
+              plan_name: r.package_name || r.plan,
+              package_name: r.package_name || r.plan,
+              subplan_id: r.subplan_id,
+              subplan_name: r.subplan_name,
+              expiration: r.expiration || r.expiryDate,
+              expriration: r.expiration || r.expiryDate,
+              balance: r.balance,
+              branch_name: r.branch_name,
+              partner_id: r.partner_id || r.operator_id,
+            }));
+
+          record = {
+            cust_id: custId,
+            id: custId,
+            full_name: listItem.full_name || listItem.name || 'Subscriber',
+            name: listItem.full_name || listItem.name || 'Subscriber',
+            mobile: listItem.mobile || '',
+            partner_id: listItem.partner_id || listItem.operator_id,
+            partner_name: listItem.partner_name,
+            internet_accounts: intAccounts.length > 0 ? intAccounts : [{
+              internet_id: listItem.internet_id || listItem.username || custId,
+              acc_id: listItem.acc_id || listItem.internet_id || custId,
+              username: listItem.username,
+              status_text: listItem.status_text || listItem.status || 'ACTIVE',
+              plan_id: listItem.package_id,
+              package_name: listItem.package_name,
+              subplan_name: listItem.subplan_name,
+              expiration: listItem.expiration,
+              partner_id: listItem.partner_id || listItem.operator_id,
+            }],
+            iptv_accounts: iptvAccs,
+          };
+        }
+        if (record) {
+          record.iptv_sync_status = syncStatus || null;
           customerDetailsRef.current = { ...customerDetailsRef.current, [key]: record };
           setCustomerDetails((prev) => ({ ...prev, [key]: record }));
-        } else if (rawCustomersRef.current.length > 0) {
-          toast.error(`Could not load accounts for customer #${custId}.`);
         }
         return record;
       } catch (e) {
@@ -617,35 +708,60 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   };
   const detailsInFlight = React.useRef({});
 
-  // ---- RADIUS -> local sync (internet_customer_detail_sync.php) ----
-  // Pulls each internet account's latest state from RADIUS into our DB, then re-reads
-  // customer_lookup so the screen shows it. Runs for ALL of the customer's internet
-  // accounts when the customer is opened (or Refresh is pressed), and for the recharged
-  // account after a successful recharge.
+  // ---- Gateway -> local sync (internet_customer_detail_sync.php & iptv_customer_sync.php) ----
+  // Pulls each internet account's latest state from RADIUS and IPTV customer state from IPTV gateway into our DB,
+  // then re-reads customer_lookup so the screen shows it. Runs for ALL accounts when customer is opened or Refreshed.
   const [syncingFor, setSyncingFor] = useState(null);
   const syncInFlight = React.useRef({});
-  const syncInternetAccounts = async (custId, internetIds) => {
+  const syncCustomerAccounts = async (custId, internetIds, mobile) => {
     if (custId === null || custId === undefined) return;
     const key = String(custId);
     const ids = [...new Set((internetIds || []).filter(Boolean).map(String))];
-    if (ids.length === 0) {
+    const cleanMobile = String(mobile || '').replace(/\D/g, '').slice(-10);
+    if (ids.length === 0 && !cleanMobile) {
       await fetchCustomerDetails(custId, true);
       return;
     }
     if (syncInFlight.current[key]) await syncInFlight.current[key].catch(() => null);
-    const run = (async () => {
+    let run;
+    run = (async () => {
       setSyncingFor(key);
       try {
         if (user?.token) setApiConfig(undefined, user.token);
-        const results = await Promise.allSettled(ids.map((id) => OneBssApi.syncInternetCustomerDetail(id)));
-        const failed = results
-          .map((r, i) => ({ r, id: ids[i] }))
-          .filter(({ r }) => r.status === 'rejected' || !r.value?.ok || r.value?.data?.success === false);
-        if (failed.length) {
-          const msg = failed[0].r.value?.data?.message || 'gateway unreachable';
-          toast.warning(`Could not sync ${failed.length} of ${ids.length} account${ids.length > 1 ? 's' : ''} from RADIUS (${msg}). Showing last saved data.`);
+        const tasks = [];
+        if (ids.length > 0) {
+          tasks.push(
+            Promise.allSettled(ids.map((id) => OneBssApi.syncInternetCustomerDetail(id))).then((results) => {
+              const failed = results
+                .map((r, i) => ({ r, id: ids[i] }))
+                .filter(({ r }) => r.status === 'rejected' || !r.value?.ok || r.value?.data?.success === false);
+              if (failed.length) {
+                const msg = failed[0].r.value?.data?.message || 'gateway unreachable';
+                toast.warning(`Could not sync ${failed.length} of ${ids.length} account${ids.length > 1 ? 's' : ''} from RADIUS (${msg}). Showing last saved data.`);
+              }
+            })
+          );
         }
-        await fetchCustomerDetails(custId, true);
+        let iptvSyncResultStatus = null;
+        if (cleanMobile.length === 10) {
+          tasks.push(
+            OneBssApi.syncIptvCustomers(cleanMobile).then((syncRes) => {
+              const s = syncRes?.data?.summary || syncRes?.summary;
+              if ((syncRes?.data?.success || syncRes?.success) && s && Number(s.stbs_added || 0) === 0 && Number(s.stbs_skipped || 0) === 0) {
+                iptvSyncResultStatus = 'no_devices';
+              }
+            }).catch((err) => {
+              console.warn('IPTV sync error:', err);
+            })
+          );
+        }
+        await Promise.allSettled(tasks);
+        const refRec = await fetchCustomerDetails(custId, true);
+        if (refRec) {
+          refRec.iptv_sync_status = iptvSyncResultStatus || null;
+          customerDetailsRef.current = { ...customerDetailsRef.current, [key]: refRec };
+          setCustomerDetails((prev) => ({ ...prev, [key]: refRec }));
+        }
       } finally {
         if (syncInFlight.current[key] === run) delete syncInFlight.current[key];
         setSyncingFor((cur) => (cur === key ? null : cur));
@@ -655,10 +771,16 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     return run;
   };
 
+  const syncInternetAccounts = async (custId, internetIds, mobile) => {
+    const rawMobile = mobile || customerDetailsRef.current[String(custId)]?.mobile || '';
+    return syncCustomerAccounts(custId, internetIds, rawMobile);
+  };
+
   const syncAllAccountsOf = async (custId) => {
     const record = await fetchCustomerDetails(custId);
     const ids = (record?.internet_accounts || []).map((a) => a.internet_id);
-    return syncInternetAccounts(custId, ids);
+    const rawMobile = record?.mobile || customerDetailsRef.current[String(custId)]?.mobile || rawCustomersRef.current.find((c) => String(c.cust_id) === String(custId))?.mobile || '';
+    return syncCustomerAccounts(custId, ids, rawMobile);
   };
 
   const customerDetailsRef = React.useRef(customerDetails);
@@ -678,6 +800,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     });
     const details = customerDetails[String(activeCustomerId)] || {};
     const merged = { cust_id: activeCustomerId, ...listItem, ...details };
+
     // customer_lookup has only package/sub-plan IDs; customers_list has one row per internet
     // account (same cust_id) with the plan names — copy those names onto the matching account.
     const rowsForCustomer = rawCustomers.filter((c) => String(c.cust_id) === String(activeCustomerId));
@@ -709,7 +832,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   }, [activeCustomerId, rawCustomers]);
 
   // On opening a customer: once its accounts are known, sync every internet account from
-  // RADIUS and reload. Runs once per opening (reset when the customer is closed).
+  // RADIUS and sync IPTV customer data from IPTV gateway (POST /iptv_customer_sync.php) and reload.
   const autoSyncedFor = React.useRef(null);
   const activeDetailsLoaded = activeCustomerId !== null && !!customerDetails[String(activeCustomerId)];
   useEffect(() => {
@@ -719,8 +842,10 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
     if (!activeDetailsLoaded || autoSyncedFor.current === String(activeCustomerId)) return;
     autoSyncedFor.current = String(activeCustomerId);
-    const ids = (customerDetails[String(activeCustomerId)]?.internet_accounts || []).map((a) => a.internet_id);
-    syncInternetAccounts(activeCustomerId, ids);
+    const details = customerDetails[String(activeCustomerId)];
+    const ids = (details?.internet_accounts || []).map((a) => a.internet_id);
+    const mobile = details?.mobile || rawCustomersRef.current.find((c) => String(c.cust_id) === String(activeCustomerId))?.mobile || '';
+    syncCustomerAccounts(activeCustomerId, ids, mobile);
   }, [activeCustomerId, activeDetailsLoaded]);
 
   // Build the detail-screen row for one specific account of a customer.
@@ -1039,6 +1164,84 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
   };
 
+  const handleAddIptvForCustomer = async ({ customer, name, mobile, stbMac, stbId, branchCode, partnerId }) => {
+    const rawMobile = mobile || customer?.mobile || '';
+    const digitsOnly = String(rawMobile).replace(/\D/g, '');
+    const cleanMobile = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : (rawMobile || '9125253535');
+    const targetName = name || customer?.full_name || [customer?.first_name, customer?.last_name].filter(Boolean).join(' ') || 'Subscriber';
+    const custId = customer?.cust_id || customer?.id;
+    const finalStbId = stbId || `STB-${custId || cleanMobile.slice(-4)}`;
+    const resolvedPartnerId = partnerId || customer?.internet_accounts?.[0]?.partner_id || customer?.partner_id || user?.partner_id;
+    const resolvedBranchCode = branchCode || customer?.branch_code || '';
+
+    try {
+      if (user?.token) setApiConfig(undefined, user.token);
+
+      // 1. Call POST /iptv_add_customer.php
+      const parts = targetName.split(/\s+/).filter(Boolean);
+      const firstName = parts[0] || customer?.first_name || 'Subscriber';
+      const lastName = parts.slice(1).join(' ') || customer?.last_name || '';
+
+      const iptvPayload = {
+        partner_id: Number(resolvedPartnerId),
+        mobile: cleanMobile,
+        first_name: firstName,
+        last_name: lastName,
+        email: customer?.email || '',
+        address: customer?.installation_address || customer?.address || '',
+        branch_code: resolvedBranchCode,
+        state: customer?.state || '',
+        city: customer?.city || '',
+      };
+
+      try {
+        await OneBssApi.addIptvCustomer(iptvPayload);
+      } catch (addErr) {
+        console.warn('IPTV Add Customer API call:', addErr);
+      }
+
+      // 2. Synchronize / register IPTV customer via gateway
+      const res = await OneBssApi.syncIptvCustomers(cleanMobile);
+      const syncData = res?.data || {};
+
+      const s = syncData?.summary || res?.summary;
+      const isNoDevices = (
+        (syncData?.success || res?.success) &&
+        s &&
+        Number(s.stbs_added || 0) === 0 &&
+        Number(s.stbs_skipped || 0) === 0
+      );
+
+      if (isNoDevices) {
+        toast.info('customer registered successfully , No devices found');
+      } else if (syncData?.success || res?.success) {
+        toast.success(`IPTV account successfully added for ${targetName}!`);
+      } else {
+        toast.info(syncData.message || res?.message || `Customer registered successfully for ${targetName}`);
+      }
+
+      // 3. Refresh customer details and subscriber records
+      const refreshed = await fetchCustomerDetails(custId, true);
+
+      const curDetails = customerDetailsRef.current[String(custId)] || customerDetails[String(custId)] || customer || {};
+      const existingIptv = curDetails.iptv_accounts || [];
+      const updated = {
+        ...curDetails,
+        ...refreshed,
+        iptv_sync_status: isNoDevices ? 'no_devices' : (refreshed?.iptv_sync_status || curDetails?.iptv_sync_status || null),
+        iptv_accounts: isNoDevices ? (refreshed?.iptv_accounts || []) : (existingIptv.length > 0 ? existingIptv : []),
+      };
+      customerDetailsRef.current = { ...customerDetailsRef.current, [String(custId)]: updated };
+      setCustomerDetails((prev) => ({ ...prev, [String(custId)]: updated }));
+
+      await loadCustomerDataFromApi();
+      return isNoDevices ? { status: 'no_devices' } : true;
+    } catch (err) {
+      toast.error(`Failed to add IPTV account: ${err?.message || 'Error occurred'}`);
+      return false;
+    }
+  };
+
   // Edit Modal State
   const [editingCustomer, setEditingCustomer] = useState(null);
   const [editForm, setEditForm] = useState({ name: '', mobile: '', plan: '', status: 'active', stb_id: '', stb_mac: '' });
@@ -1298,6 +1501,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         onBack={handleCloseCustomerOverview}
         onOpenDetails={handleOpenAccountDetails}
         onModifyMobile={(c) => { setModifyMobileCust(c); setNewMobileVal(c?.mobile || ''); }}
+        onAddIptv={handleAddIptvForCustomer}
       />
       {accountActionModals}
       </>
@@ -2204,8 +2408,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
                 if (viewMode === 'iptv') {
                   const stb = cust.stb_box || cust.pioneer_stb_id || `IPTV #${cust.iptv_id}`;
+                  const rowKey = cust.id && cust.id !== 'iptv_undefined' ? cust.id : `iptv_row_${idx}_${cust.cust_id ?? idx}`;
                   return (
-                    <View key={cust.id || `iptv_row_${idx}`} style={[styles.tr, isRowSelected && { backgroundColor: 'rgba(139, 92, 246, 0.05)' }]}>
+                    <View key={rowKey} style={[styles.tr, isRowSelected && { backgroundColor: 'rgba(139, 92, 246, 0.05)' }]}>
                       {selectCell}
 
                       {/* STB / Box */}
@@ -2269,9 +2474,10 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   disabled: '#64748b',
                   new: '#7c3aed',
                 }[cust.status_key] || COLORS.primary;
+                const intRowKey = cust.id && cust.id !== 'int_undefined' ? cust.id : `int_row_${idx}_${cust.cust_id ?? idx}`;
 
                 return (
-                  <View key={cust.id || `int_row_${idx}`} style={[styles.tr, isRowSelected && { backgroundColor: 'rgba(59, 130, 246, 0.04)' }]}>
+                  <View key={intRowKey} style={[styles.tr, isRowSelected && { backgroundColor: 'rgba(59, 130, 246, 0.04)' }]}>
                     {selectCell}
 
                     {/* Username + status */}
