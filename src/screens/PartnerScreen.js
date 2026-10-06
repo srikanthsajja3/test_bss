@@ -454,15 +454,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       const data = res.data || {};
 
       const expectedBal = isDebit ? Math.max(0, currentBal - amountNum) : (currentBal + amountNum);
-      let newBalance = expectedBal;
-      if (data.balance_after !== undefined && data.balance_after !== null && !isNaN(Number(data.balance_after))) {
-        const backendBal = Number(data.balance_after);
-        if (backendBal === 0 && expectedBal > 0) {
-          newBalance = expectedBal;
-        } else {
-          newBalance = backendBal;
-        }
-      }
+      const newBalance = (data.balance_after !== undefined && data.balance_after !== null && !isNaN(Number(data.balance_after)))
+        ? Number(data.balance_after)
+        : expectedBal;
 
       setPartners((prev) =>
         prev.map((p) => (p.partner_id === walletPartner.partner_id ? { ...p, wallet_balance: newBalance } : p))

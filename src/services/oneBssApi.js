@@ -924,7 +924,7 @@ export const OneBssApi = {
       method: 'POST',
       body: JSON.stringify({
         partner_id: Number(partnerId) || partnerId,
-        amount: amtNum,
+        amount: -amtNum,
         type: 'debit',
         action: 'debit',
         remark: String(remark || 'Wallet debit'),
