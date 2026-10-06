@@ -1004,9 +1004,26 @@ export const OneBssApi = {
   getIptvRechargePlans: async (iptvId) =>
     request(`/iptv_recharge_plans.php?iptv_id=${encodeURIComponent(iptvId)}`, { method: 'GET' }),
 
+  // IPTV Branch Sync (POST /iptv_branch_sync.php)
+  syncIptvBranches: async (partnerId, key = '') =>
+    request('/iptv_branch_sync.php', {
+      method: 'POST',
+      body: JSON.stringify({ partner_id: Number(partnerId) || partnerId, key: String(key || '') }),
+    }),
+
   // IPTV Branch Mapping (GET /iptv_branch_mapping.php?partner_id=...)
   getIptvBranchMapping: async (partnerId) =>
     request(`/iptv_branch_mapping.php?partner_id=${encodeURIComponent(partnerId)}`, { method: 'GET' }),
+
+  // IPTV Save Branch Mapping (POST /iptv_branch_mapping.php)
+  assignIptvBranchMapping: async (partnerId, branchIds = []) =>
+    request('/iptv_branch_mapping.php', {
+      method: 'POST',
+      body: JSON.stringify({
+        partner_id: Number(partnerId) || partnerId,
+        branch_ids: (branchIds || []).map((id) => Number(id) || id),
+      }),
+    }),
 
   // IPTV Add Customer (POST /iptv_add_customer.php)
   addIptvCustomer: async (payload) =>

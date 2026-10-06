@@ -85,6 +85,15 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   const [savingKycProviders, setSavingKycProviders] = useState(false);
   const [customProviderInput, setCustomProviderInput] = useState('');
 
+  // Assign Branches Action States
+  const [branchPartner, setBranchPartner] = useState(null);
+  const [availableBranches, setAvailableBranches] = useState([]);
+  const [selectedBranchIds, setSelectedBranchIds] = useState([]);
+  const [loadingBranches, setLoadingBranches] = useState(false);
+  const [savingBranches, setSavingBranches] = useState(false);
+  const [syncingBranches, setSyncingBranches] = useState(false);
+  const [pioneerKey, setPioneerKey] = useState('');
+
   useEffect(() => {
     if (selectedPartner?.partner_id) {
       OneBssApi.getWallet(selectedPartner.partner_id)
@@ -1065,6 +1074,77 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
   };
 
+  const handleOpenAssignBranches = async (partner) => {
+    if (!partner) return;
+    const pId = partner.partner_id || partner.id;
+    setBranchPartner(partner);
+    setLoadingBranches(true);
+    setPioneerKey('');
+    try {
+      const res = await OneBssApi.getIptvBranchMapping(pId);
+      const data = res.data || {};
+      const branchesList = Array.isArray(data.branches)
+        ? data.branches
+        : (Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data : []));
+      
+      setAvailableBranches(branchesList);
+      const mappedIds = branchesList
+        .filter((b) => b.is_mapped || b.mapped || b.selected)
+        .map((b) => b.id || b.branch_id || b.branch_code);
+      setSelectedBranchIds(mappedIds);
+    } catch (e) {
+      setAvailableBranches([]);
+      setSelectedBranchIds([]);
+    } finally {
+      setLoadingBranches(false);
+    }
+  };
+
+  const handleSyncBranches = async () => {
+    if (!branchPartner) return;
+    const pId = branchPartner.partner_id || branchPartner.id;
+    setSyncingBranches(true);
+    try {
+      const res = await OneBssApi.syncIptvBranches(pId, pioneerKey);
+      const data = res.data || {};
+      if (data.success !== false) {
+        toast.success(data.message || 'Branches synced from Pioneer Gateway successfully!');
+        const freshRes = await OneBssApi.getIptvBranchMapping(pId);
+        const freshData = freshRes.data || {};
+        const freshBranches = Array.isArray(freshData.branches)
+          ? freshData.branches
+          : (Array.isArray(freshData.data) ? freshData.data : (Array.isArray(freshData) ? freshData : []));
+        setAvailableBranches(freshBranches);
+      } else {
+        toast.info(data.message || 'Branch sync completed.');
+      }
+    } catch (e) {
+      toast.error('Branch sync failed: Network error');
+    } finally {
+      setSyncingBranches(false);
+    }
+  };
+
+  const handleSaveBranchMapping = async () => {
+    if (!branchPartner) return;
+    const pId = branchPartner.partner_id || branchPartner.id;
+    setSavingBranches(true);
+    try {
+      const res = await OneBssApi.assignIptvBranchMapping(pId, selectedBranchIds);
+      const data = res.data || {};
+      if (data.success !== false) {
+        toast.success(data.message || `Branches mapped successfully for ${branchPartner.partner_name || 'Partner'} (#${pId})!`);
+        setBranchPartner(null);
+      } else {
+        toast.error(data.message || 'Failed to save branch mapping.');
+      }
+    } catch (e) {
+      toast.error('Failed to save branch mapping.');
+    } finally {
+      setSavingBranches(false);
+    }
+  };
+
   const renderKycProvidersModal = () => {
     if (!kycPartner) return null;
     const providers = [
@@ -1154,6 +1234,149 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   <>
                     <Feather name="check" size={14} color="#fff" />
                     <Text style={styles.btnPrimaryText}>Save KYC Mapping</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  const renderAssignBranchesModal = () => {
+    if (!branchPartner) return null;
+    return (
+      <Modal visible transparent animationType="fade" onRequestClose={() => setBranchPartner(null)}>
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <View style={{ width: '100%', maxWidth: 540, backgroundColor: COLORS.bgSecondary || '#1e293b', borderRadius: 16, padding: 24, borderWidth: 1, borderColor: COLORS.border || '#334155' }}>
+            {/* Header */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{ width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(6, 182, 212, 0.15)', justifyContent: 'center', alignItems: 'center' }}>
+                  <Feather name="git-branch" size={18} color="#06b6d4" />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.textMain || '#ffffff' }}>Assign Branches</Text>
+                  <Text style={{ fontSize: 12, color: COLORS.textMuted || '#94a3b8' }}>
+                    {branchPartner.partner_name || branchPartner.company_name} (#{branchPartner.partner_id || branchPartner.id})
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => setBranchPartner(null)}>
+                <Feather name="x" size={20} color={COLORS.textMuted || '#94a3b8'} />
+              </TouchableOpacity>
+            </View>
+
+            {/* Pioneer Sync Section */}
+            <View style={{ marginBottom: 16, padding: 12, borderRadius: 10, backgroundColor: 'rgba(6, 182, 212, 0.05)', borderWidth: 1, borderColor: 'rgba(6, 182, 212, 0.2)' }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: '#06b6d4', marginBottom: 8, letterSpacing: 0.5 }}>
+                SYNC BRANCHES FROM PIONEER GATEWAY
+              </Text>
+              <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                <TextInput
+                  style={{ flex: 1, height: 36, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)', borderRadius: 8, paddingHorizontal: 10, fontSize: 12, color: '#000000', outlineStyle: 'none' }}
+                  placeholder="Enter Pioneer Key (optional)"
+                  value={pioneerKey}
+                  onChangeText={setPioneerKey}
+                  placeholderTextColor="#9ca3af"
+                />
+                <TouchableOpacity
+                  style={{ height: 36, paddingHorizontal: 12, backgroundColor: '#06b6d4', borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                  onPress={handleSyncBranches}
+                  disabled={syncingBranches}
+                >
+                  {syncingBranches ? (
+                    <ActivityIndicator size="small" color="#fff" />
+                  ) : (
+                    <Feather name="refresh-cw" size={13} color="#fff" />
+                  )}
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#fff' }}>
+                    {syncingBranches ? 'Syncing...' : 'Sync Branches'}
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* List of Available Branches */}
+            {loadingBranches ? (
+              <ActivityIndicator size="small" color="#06b6d4" style={{ marginVertical: 20 }} />
+            ) : availableBranches.length === 0 ? (
+              <View style={{ padding: 20, alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.02)', borderRadius: 10, marginBottom: 16 }}>
+                <Feather name="info" size={20} color={COLORS.textMuted} />
+                <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 6, textAlign: 'center' }}>
+                  No branches found for this partner. Click "Sync Branches" above to sync from Pioneer.
+                </Text>
+              </View>
+            ) : (
+              <ScrollView style={{ maxHeight: 260, marginBottom: 16 }}>
+                <View style={{ gap: 8 }}>
+                  {availableBranches.map((b, idx) => {
+                    const bId = b.id || b.branch_id || b.branch_code || idx + 1;
+                    const bName = b.branch_name || b.name || b.branch_code || `Branch #${bId}`;
+                    const bCode = b.branch_code || b.code || bId;
+                    const isChecked = selectedBranchIds.includes(bId) || selectedBranchIds.includes(Number(bId)) || selectedBranchIds.includes(String(bId));
+                    
+                    return (
+                      <TouchableOpacity
+                        key={bId || `branch_${idx}`}
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 12,
+                          padding: 12,
+                          borderRadius: 10,
+                          backgroundColor: isChecked ? 'rgba(6, 182, 212, 0.08)' : 'rgba(0,0,0,0.03)',
+                          borderWidth: 1,
+                          borderColor: isChecked ? '#06b6d4' : 'rgba(0,0,0,0.1)',
+                        }}
+                        onPress={() => {
+                          setSelectedBranchIds((prev) => {
+                            const exists = prev.includes(bId) || prev.includes(Number(bId)) || prev.includes(String(bId));
+                            if (exists) {
+                              return prev.filter((x) => String(x) !== String(bId));
+                            } else {
+                              return [...prev, bId];
+                            }
+                          });
+                        }}
+                      >
+                        <Feather
+                          name={isChecked ? 'check-square' : 'square'}
+                          size={18}
+                          color={isChecked ? '#06b6d4' : COLORS.textDim}
+                        />
+                        <View style={{ flex: 1 }}>
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMain }}>{bName}</Text>
+                          <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 2 }}>Branch Code: {bCode}</Text>
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            )}
+
+            {/* Modal Actions */}
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
+              <TouchableOpacity
+                style={styles.btnSecondary}
+                onPress={() => setBranchPartner(null)}
+                disabled={savingBranches}
+              >
+                <Text style={styles.btnSecondaryText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.btnPrimary, { backgroundColor: '#06b6d4' }]}
+                onPress={handleSaveBranchMapping}
+                disabled={savingBranches || loadingBranches}
+              >
+                {savingBranches ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Feather name="check" size={14} color="#fff" />
+                    <Text style={styles.btnPrimaryText}>Save Branch Mapping</Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -2470,6 +2693,15 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 </Text>
               </TouchableOpacity>
 
+              {/* ASSIGN BRANCHES BUTTON */}
+              <TouchableOpacity
+                style={[styles.simpleActionBtn, { borderColor: 'rgba(6, 182, 212, 0.4)', backgroundColor: 'rgba(6, 182, 212, 0.08)' }]}
+                onPress={() => handleOpenAssignBranches(selectedPartner)}
+              >
+                <Feather name="git-branch" size={14} color="#06b6d4" />
+                <Text style={[styles.simpleActionBtnText, { color: '#06b6d4' }]}>Assign Branches</Text>
+              </TouchableOpacity>
+
               {/* IMPERSONATE BUTTON */}
               <TouchableOpacity
                 style={[styles.simpleActionBtn, { borderColor: 'rgba(236, 72, 153, 0.4)', backgroundColor: 'rgba(236, 72, 153, 0.08)' }]}
@@ -2534,6 +2766,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         {renderResetPasswordModal()}
         {renderConfirmStatusModal()}
         {renderKycProvidersModal()}
+        {renderAssignBranchesModal()}
       </View>
     );
   }
@@ -2908,6 +3141,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         {renderResetPasswordModal()}
         {renderConfirmStatusModal()}
         {renderKycProvidersModal()}
+        {renderAssignBranchesModal()}
       </ScrollView>
     </View>
   );
