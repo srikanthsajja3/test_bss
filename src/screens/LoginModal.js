@@ -11,6 +11,7 @@ export const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [syncingIptv, setSyncingIptv] = useState(false);
+  const [syncingInet, setSyncingInet] = useState(false);
   const [syncStatus, setSyncStatus] = useState('');
 
   const handleSyncIptvUsers = async () => {
@@ -28,6 +29,24 @@ export const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
       setSyncStatus('❌ Sync failed: Network error');
     } finally {
       setSyncingIptv(false);
+    }
+  };
+
+  const handleSyncInternetUsers = async () => {
+    setSyncingInet(true);
+    setSyncStatus('');
+    try {
+      const res = await OneBssApi.syncInternetCustomersBulk();
+      const data = res.data || {};
+      if (data.success !== false) {
+        setSyncStatus(`✅ ${data.message || 'Internet users synced successfully!'}`);
+      } else {
+        setSyncStatus(`⚠️ ${data.message || 'Internet sync completed.'}`);
+      }
+    } catch (e) {
+      setSyncStatus('❌ Sync failed: Network error');
+    } finally {
+      setSyncingInet(false);
     }
   };
 
@@ -100,21 +119,38 @@ export const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
           </View>
           <Text style={styles.subtitle}>Enter your account credentials to authenticate</Text>
 
-          {/* SYNC IPTV USERS BUTTON (BEFORE LOGIN) */}
-          <TouchableOpacity
-            style={styles.btnSyncIptv}
-            onPress={handleSyncIptvUsers}
-            disabled={syncingIptv}
-          >
-            {syncingIptv ? (
-              <ActivityIndicator size="small" color="#8b5cf6" />
-            ) : (
-              <Feather name="refresh-cw" size={14} color="#8b5cf6" />
-            )}
-            <Text style={styles.btnSyncIptvText}>
-              {syncingIptv ? 'Syncing IPTV Users...' : 'Sync IPTV Users'}
-            </Text>
-          </TouchableOpacity>
+          {/* SYNC BUTTONS (BEFORE LOGIN) */}
+          <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
+            <TouchableOpacity
+              style={[styles.btnSyncIptv, { flex: 1, marginBottom: 0, backgroundColor: 'rgba(16, 185, 129, 0.1)', borderColor: 'rgba(16, 185, 129, 0.3)' }]}
+              onPress={handleSyncInternetUsers}
+              disabled={syncingInet}
+            >
+              {syncingInet ? (
+                <ActivityIndicator size="small" color="#10b981" />
+              ) : (
+                <Feather name="refresh-cw" size={14} color="#10b981" />
+              )}
+              <Text style={[styles.btnSyncIptvText, { color: '#10b981', fontSize: 12 }]}>
+                {syncingInet ? 'Syncing...' : 'Sync Internet Users'}
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.btnSyncIptv, { flex: 1, marginBottom: 0 }]}
+              onPress={handleSyncIptvUsers}
+              disabled={syncingIptv}
+            >
+              {syncingIptv ? (
+                <ActivityIndicator size="small" color="#8b5cf6" />
+              ) : (
+                <Feather name="refresh-cw" size={14} color="#8b5cf6" />
+              )}
+              <Text style={[styles.btnSyncIptvText, { fontSize: 12 }]}>
+                {syncingIptv ? 'Syncing...' : 'Sync IPTV Users'}
+              </Text>
+            </TouchableOpacity>
+          </View>
 
           {syncStatus ? (
             <Text style={styles.syncStatusText}>{syncStatus}</Text>

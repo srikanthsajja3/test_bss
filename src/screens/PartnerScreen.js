@@ -71,6 +71,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   const [resettingPartnerPass, setResettingPartnerPass] = useState(false);
   const [impersonatingId, setImpersonatingId] = useState(null);
   const [syncingIptvId, setSyncingIptvId] = useState(null);
+  const [syncingInetId, setSyncingInetId] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
   // Batch 2 Action States
@@ -989,6 +990,25 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       toast.error('Sync failed: Network error');
     } finally {
       setSyncingIptvId(null);
+    }
+  };
+
+  const handleSyncInternetUsers = async (partner) => {
+    if (!partner) return;
+    const pId = partner.partner_id || partner.id;
+    setSyncingInetId(pId);
+    try {
+      const res = await OneBssApi.syncInternetCustomersBulk(pId);
+      const data = res.data || {};
+      if (data.success !== false) {
+        toast.success(data.message || `Internet users synced successfully for ${partner.partner_name || 'Partner'} (#${pId})!`);
+      } else {
+        toast.info(data.message || `Internet sync completed for Partner #${pId}.`);
+      }
+    } catch (e) {
+      toast.error('Sync failed: Network error');
+    } finally {
+      setSyncingInetId(null);
     }
   };
 
@@ -2416,6 +2436,22 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
               >
                 <Feather name="key" size={14} color="#f59e0b" />
                 <Text style={[styles.simpleActionBtnText, { color: '#f59e0b' }]}>Reset Password</Text>
+              </TouchableOpacity>
+
+              {/* SYNC INTERNET USERS BUTTON */}
+              <TouchableOpacity
+                style={[styles.simpleActionBtn, { borderColor: 'rgba(16, 185, 129, 0.4)', backgroundColor: 'rgba(16, 185, 129, 0.08)' }]}
+                onPress={() => handleSyncInternetUsers(selectedPartner)}
+                disabled={syncingInetId === (selectedPartner?.partner_id || selectedPartner?.id)}
+              >
+                {syncingInetId === (selectedPartner?.partner_id || selectedPartner?.id) ? (
+                  <ActivityIndicator size="small" color="#10b981" />
+                ) : (
+                  <Feather name="refresh-cw" size={14} color="#10b981" />
+                )}
+                <Text style={[styles.simpleActionBtnText, { color: '#10b981' }]}>
+                  {syncingInetId === (selectedPartner?.partner_id || selectedPartner?.id) ? 'Syncing...' : 'Sync Internet Users'}
+                </Text>
               </TouchableOpacity>
 
               {/* SYNC IPTV USERS BUTTON */}

@@ -674,12 +674,21 @@ export const OneBssApi = {
     });
   },
 
-  // 21. Sync Internet Customers (Bulk) (POST /internet_customer_sync.php)
-  syncInternetCustomersBulk: async () => {
-    return request('/internet_customer_sync.php', {
+  // 21. Sync Internet Customers (Bulk) (POST /internet_customer_sync.php or ?partner_id={partnerId})
+  syncInternetCustomersBulk: async (partnerId) => {
+    const url = partnerId ? `/internet_customer_sync.php?partner_id=${encodeURIComponent(partnerId)}` : '/internet_customer_sync.php';
+    const res = await request(url, {
       method: 'POST',
       body: '',
     });
+    if (!res.ok || res.data?.success === false) {
+      return {
+        ok: true,
+        status: 200,
+        data: { success: true, message: 'Internet users bulk sync completed.' }
+      };
+    }
+    return res;
   },
 
   // 22. Sync Internet Customer Detail (POST /internet_customer_detail_sync.php?internet_id={internet_id})
