@@ -694,49 +694,10 @@ export const OneBssApi = {
   // 23. Sync IPTV Customer (POST /iptv_customer_sync.php)
   syncIptvCustomers: async (mobile = '9125253535') => {
     const cleanMobile = String(mobile).replace(/\D/g, '').slice(-10) || '9125253535';
-    const res = await request('/iptv_customer_sync.php', {
+    return request('/iptv_customer_sync.php', {
       method: 'POST',
       body: JSON.stringify({ mobile: cleanMobile }),
     });
-
-    if (!res.ok || res.data?.success === false) {
-      // If 403 (Superadmin restriction) or gateway response, perform lookup or return fallback success
-      try {
-        const lookup = await request(`/customer_lookup.php?mobile=${encodeURIComponent(cleanMobile)}`, { method: 'GET' });
-        if (lookup.ok && lookup.data?.data) {
-          return {
-            ok: true,
-            status: 200,
-            data: {
-              success: true,
-              message: 'Sync complete.',
-              cust_id: lookup.data.data[0]?.cust_id || 12,
-              summary: {
-                customer_created: false,
-                stbs_added: lookup.data.data[0]?.iptv_accounts?.length || 1,
-                stbs_skipped: 0
-              }
-            }
-          };
-        }
-      } catch (e) {}
-
-      return {
-        ok: true,
-        status: 200,
-        data: {
-          success: true,
-          message: 'Sync complete.',
-          cust_id: 12,
-          summary: {
-            customer_created: false,
-            stbs_added: 1,
-            stbs_skipped: 0
-          }
-        }
-      };
-    }
-    return res;
   },
 
   // Internet username availability (GET /check_internet_username.php?username=..&operator_id=..)
@@ -757,8 +718,34 @@ export const OneBssApi = {
       res = await request(`/customer_lookup.php?mobile=${encodeURIComponent(q)}`, { method: 'GET' });
     } else if (/^\d+$/.test(q)) {
       res = await request(`/customer_lookup.php?cust_id=${encodeURIComponent(q)}`, { method: 'GET' });
+      if (!res.ok || res.data?.success === false) {
+        try {
+          const listRes = await request('/customers_list.php?limit=100', { method: 'GET' });
+          const rows = listRes.data?.data || listRes.data?.customers || [];
+          const found = rows.find((r) => String(r.cust_id) === q || String(r.id) === q);
+          if (found?.mobile) {
+            const cleanM = String(found.mobile).replace(/\D/g, '').slice(-10);
+            if (cleanM.length === 10) {
+              res = await request(`/customer_lookup.php?mobile=${encodeURIComponent(cleanM)}`, { method: 'GET' });
+            }
+          }
+        } catch (e) {}
+      }
     } else {
       res = await request(`/customer_lookup.php?username=${encodeURIComponent(q)}`, { method: 'GET' });
+      if (!res.ok || res.data?.success === false) {
+        try {
+          const listRes = await request('/customers_list.php?limit=100', { method: 'GET' });
+          const rows = listRes.data?.data || listRes.data?.customers || [];
+          const found = rows.find((r) => String(r.username) === q);
+          if (found?.mobile) {
+            const cleanM = String(found.mobile).replace(/\D/g, '').slice(-10);
+            if (cleanM.length === 10) {
+              res = await request(`/customer_lookup.php?mobile=${encodeURIComponent(cleanM)}`, { method: 'GET' });
+            }
+          }
+        } catch (e) {}
+      }
     }
     if (!res.ok && (res.status === 400 || res.status === 404)) {
       return {
@@ -990,6 +977,17 @@ export const OneBssApi = {
   // price) + the STB's current packs for pre-selection (GET /iptv_recharge_plans.php)
   getIptvRechargePlans: async (iptvId) =>
     request(`/iptv_recharge_plans.php?iptv_id=${encodeURIComponent(iptvId)}`, { method: 'GET' }),
+
+  // IPTV Branch Mapping (GET /iptv_branch_mapping.php?partner_id=...)
+  getIptvBranchMapping: async (partnerId) =>
+    request(`/iptv_branch_mapping.php?partner_id=${encodeURIComponent(partnerId)}`, { method: 'GET' }),
+
+  // IPTV Add Customer (POST /iptv_add_customer.php)
+  addIptvCustomer: async (payload) =>
+    request('/iptv_add_customer.php', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
 
   // ---- Per-account internet actions (backend/internet_*.php) ----
   // All return { success, status, message, results } — failures are NOT converted to success.

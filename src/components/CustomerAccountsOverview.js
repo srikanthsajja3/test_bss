@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, useWindowDimensions } from 'react-native';
+import React, { useState, useEffect } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, useWindowDimensions, Modal, TextInput } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { CustomerPhoto, isAccountVerified } from './internet/shared';
@@ -271,6 +271,15 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
   const isMobile = width < 768;
 
   const [submittingIptv, setSubmittingIptv] = useState(false);
+  const [branchModalVisible, setBranchModalVisible] = useState(false);
+  const [availableBranches, setAvailableBranches] = useState([]);
+  const [selectedBranchCode, setSelectedBranchCode] = useState('');
+  const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
+  const [iptvSyncStatus, setIptvSyncStatus] = useState(customer?.iptv_sync_status || null);
+
+  useEffect(() => {
+    setIptvSyncStatus(customer?.iptv_sync_status || null);
+  }, [customer?.iptv_sync_status, customer?.cust_id]);
 
   if (!customer) return null;
 
@@ -281,8 +290,33 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
   const name = clean(customer.full_name) || [customer.first_name, customer.last_name].filter(Boolean).join(' ') || `Customer #${customer.cust_id}`;
   const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
 
-  // Directly provisions IPTV with existing user data from database
-  const handleAddIptvDirect = async () => {
+  // Check IPTV sync status if 0 IPTV accounts
+  useEffect(() => {
+    const rawMobile = clean(customer?.mobile || customer?.MobileNumber || customer?.internet_accounts?.[0]?.mobile || '');
+    const digitsOnly = rawMobile.replace(/\D/g, '');
+    const finalMobile = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : '';
+    if (iptv.length === 0 && finalMobile) {
+      OneBssApi.syncIptvCustomers(finalMobile).then((res) => {
+        const s = res?.data?.summary || res?.summary;
+        if ((res?.data?.success || res?.success) && s && Number(s.stbs_added || 0) === 0 && Number(s.stbs_skipped || 0) === 0) {
+          setIptvSyncStatus('no_devices');
+        } else {
+          setIptvSyncStatus(null);
+        }
+      }).catch(() => {
+        setIptvSyncStatus(null);
+      });
+    } else {
+      setIptvSyncStatus(null);
+    }
+  }, [customer?.cust_id, customer?.mobile, iptv.length]);
+
+  const executeAddIptv = async (branchCode) => {
+    if (!branchCode || !String(branchCode).trim()) {
+      toast.error('Branch code is required to add IPTV customer.');
+      return;
+    }
+    const cleanBranchCode = String(branchCode).trim();
     const rawMobile = clean(customer.mobile || customer.MobileNumber || (customer.internet_accounts?.[0]?.mobile) || '');
     const digitsOnly = rawMobile.replace(/\D/g, '');
     const finalMobile = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
@@ -290,24 +324,48 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
     const hexSuffix = String(custId || '12').slice(-2).padStart(2, '0');
     const defaultMac = `00:1A:79:${hexSuffix}:45:8A`;
     const defaultStbId = `STB-${custId || finalMobile.slice(-4) || '1001'}`;
+    const partnerId = customer?.internet_accounts?.[0]?.partner_id || customer?.partner_id;
 
-    if (!finalMobile) {
-      toast.error('Customer has no mobile number registered.');
-      return;
-    }
+    const parts = name.split(/\s+/).filter(Boolean);
+    const firstName = parts[0] || customer.first_name || 'Subscriber';
+    const lastName = parts.slice(1).join(' ') || customer.last_name || '';
+
+    const payload = {
+      partner_id: Number(partnerId),
+      mobile: finalMobile,
+      first_name: firstName,
+      last_name: lastName,
+      email: customer.email || '',
+      address: customer.installation_address || customer.address || '',
+      branch_code: cleanBranchCode,
+      state: customer.state || '',
+      city: customer.city || '',
+    };
 
     setSubmittingIptv(true);
     try {
+      try {
+        await OneBssApi.addIptvCustomer(payload);
+      } catch (e) {
+        console.warn('OneBssApi.addIptvCustomer error:', e);
+      }
+
       if (onAddIptv) {
-        await onAddIptv({
+        const res = await onAddIptv({
           customer,
           name,
           mobile: finalMobile,
           stbMac: defaultMac,
           stbId: defaultStbId,
+          branchCode: cleanBranchCode,
+          partnerId,
         });
+        if (res?.status === 'no_devices' || res === 'no_devices') {
+          setIptvSyncStatus('no_devices');
+        }
       } else {
-        await OneBssApi.syncIptvCustomers(finalMobile);
+        const syncRes = await OneBssApi.syncIptvCustomers(finalMobile);
+        const syncData = syncRes?.data || {};
         try {
           await OneBssApi.updateIptvStbDetails({
             stb_id: defaultStbId,
@@ -317,13 +375,111 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
             status: 'active',
           });
         } catch (e) {}
-        toast.success(`IPTV service provisioned successfully for ${name}!`);
+        const s = syncData?.summary || syncRes?.summary;
+        if (
+          (syncData?.success || syncRes?.success) &&
+          s &&
+          Number(s.stbs_added || 0) === 0 &&
+          Number(s.stbs_skipped || 0) === 0
+        ) {
+          setIptvSyncStatus('no_devices');
+          toast.info('customer registered successfully , No devices found');
+        } else {
+          toast.success(`IPTV service provisioned successfully for ${name}!`);
+        }
         if (onRefresh) onRefresh();
       }
+
+      try {
+        const checkSync = await OneBssApi.syncIptvCustomers(finalMobile);
+        const s = checkSync?.data?.summary || checkSync?.summary;
+        if ((checkSync?.data?.success || checkSync?.success) && s && Number(s.stbs_added || 0) === 0 && Number(s.stbs_skipped || 0) === 0) {
+          setIptvSyncStatus('no_devices');
+        }
+      } catch (e) {}
+      setBranchModalVisible(false);
     } catch (e) {
       toast.error('Failed to provision IPTV service.');
     } finally {
       setSubmittingIptv(false);
+    }
+  };
+
+  // Directly provisions IPTV with existing user data from database.
+  // Fetches branch mapping for the customer's partner from GET /iptv_branch_mapping.php?partner_id=...
+  // - If multiple branches are returned from DB, shows dropdown for selecting a branch.
+  // - If single branch is returned from DB, automatically selects and provisions that branch.
+  // - If no branch is found in DB, allows user to input their branch code.
+  const handleAddIptvDirect = async () => {
+    const rawMobile = clean(customer.mobile || customer.MobileNumber || (customer.internet_accounts?.[0]?.mobile) || '');
+    const digitsOnly = rawMobile.replace(/\D/g, '');
+    const finalMobile = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
+
+    if (!finalMobile) {
+      toast.error('Customer has no mobile number registered.');
+      return;
+    }
+
+    setSubmittingIptv(true);
+    try {
+      const partnerId = customer?.internet_accounts?.[0]?.partner_id || customer?.partner_id;
+      let branchList = [];
+      try {
+        const res = await OneBssApi.getIptvBranchMapping(partnerId);
+        if (res?.data) {
+          if (Array.isArray(res.data.data)) branchList = res.data.data;
+          else if (Array.isArray(res.data.branches)) branchList = res.data.branches;
+          else if (Array.isArray(res.data)) branchList = res.data;
+        }
+      } catch (e) {
+        console.warn('Failed to fetch IPTV branch mapping:', e);
+      }
+
+      // Filter and map ONLY real branches from the database response
+      const formattedBranches = (branchList || [])
+        .map((b) => {
+          if (typeof b === 'string' && b.trim()) {
+            return { branch_code: b.trim(), branch_name: b.trim() };
+          }
+          if (typeof b === 'object' && b !== null) {
+            const code = String(b.branch_code || b.code || b.branchCode || b.id || '').trim();
+            const bName = String(b.branch_name || b.name || b.branchName || code).trim();
+            if (code) return { branch_code: code, branch_name: bName || code };
+          }
+          return null;
+        })
+        .filter(Boolean);
+
+      if (formattedBranches.length > 1) {
+        setAvailableBranches(formattedBranches);
+        setSelectedBranchCode(formattedBranches[0].branch_code);
+        setBranchDropdownOpen(false);
+        setBranchModalVisible(true);
+        setSubmittingIptv(false);
+        return;
+      }
+
+      if (formattedBranches.length === 1) {
+        // Single branch from DB
+        await executeAddIptv(formattedBranches[0].branch_code);
+        return;
+      }
+
+      // No branches in DB mapping: check customer profile or let user input branch code
+      const profileBranch = (customer?.branch_code || '').trim();
+      if (profileBranch) {
+        await executeAddIptv(profileBranch);
+        return;
+      }
+
+      // No hard-coded branch: open modal allowing operator to specify their branch code
+      setAvailableBranches([]);
+      setSelectedBranchCode('');
+      setBranchModalVisible(true);
+      setSubmittingIptv(false);
+    } catch (err) {
+      setSubmittingIptv(false);
+      toast.error('Failed to process IPTV addition: ' + (err?.message || ''));
     }
   };
 
@@ -434,26 +590,144 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
               <Text style={styles.emptyPrimaryText}>No IPTV accounts for this customer.</Text>
             </View>
             <View style={{ marginTop: 12, alignItems: 'flex-start' }}>
-              <TouchableOpacity
-                style={styles.addIptvBtn}
-                disabled={submittingIptv}
-                onPress={handleAddIptvDirect}
-              >
-                {submittingIptv ? (
-                  <ActivityIndicator size="small" color="#ffffff" />
-                ) : (
-                  <Feather name="plus-circle" size={13} color="#ffffff" />
-                )}
-                <Text style={styles.addIptvBtnText}>
-                  {submittingIptv ? 'Adding IPTV...' : 'Add IPTV'}
-                </Text>
-              </TouchableOpacity>
+              {(iptvSyncStatus === 'no_devices' || customer?.iptv_sync_status === 'no_devices') ? (
+                <View style={styles.noDevicesBadge}>
+                  <Feather name="check-circle" size={14} color="#16a34a" />
+                  <Text style={styles.noDevicesText}>
+                    customer registered successfully , No devices found
+                  </Text>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  style={styles.addIptvBtn}
+                  disabled={submittingIptv}
+                  onPress={handleAddIptvDirect}
+                >
+                  {submittingIptv ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <Feather name="plus-circle" size={13} color="#ffffff" />
+                  )}
+                  <Text style={styles.addIptvBtnText}>
+                    {submittingIptv ? 'Adding IPTV...' : 'Add IPTV'}
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
           </View>
         }
       >
         {renderCards(iptv)}
       </Section>
+
+      {/* Select IPTV Branch Modal (Shown when operator has multiple branches) */}
+      <Modal visible={branchModalVisible} transparent animationType="fade" onRequestClose={() => setBranchModalVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Feather name="git-branch" size={18} color="#8b5cf6" />
+                <Text style={styles.modalTitle}>Select IPTV Branch</Text>
+              </View>
+              <TouchableOpacity onPress={() => setBranchModalVisible(false)}>
+                <Feather name="x" size={18} color={COLORS.textDim} />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.modalSub}>
+              {availableBranches.length > 1
+                ? `Multiple branches are available in the database for this operator. Select the branch to assign for ${name}.`
+                : `No branch mapping found in database for this operator. Enter the branch code for ${name}.`}
+            </Text>
+
+            <View style={{ marginBottom: 20 }}>
+              <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 6 }}>
+                OPERATOR BRANCH CODE *
+              </Text>
+              {availableBranches.length > 1 ? (
+                <>
+                  <TouchableOpacity
+                    style={styles.dropdownTrigger}
+                    onPress={() => setBranchDropdownOpen(!branchDropdownOpen)}
+                  >
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                      <Feather name="map-pin" size={15} color="#8b5cf6" />
+                      <Text style={styles.dropdownValueText}>
+                        {availableBranches.find((b) => b.branch_code === selectedBranchCode)?.branch_name || selectedBranchCode || 'Select Branch'}
+                        {selectedBranchCode ? ` (${selectedBranchCode})` : ''}
+                      </Text>
+                    </View>
+                    <Feather name={branchDropdownOpen ? 'chevron-up' : 'chevron-down'} size={18} color={COLORS.textMuted} />
+                  </TouchableOpacity>
+
+                  {branchDropdownOpen && (
+                    <View style={styles.dropdownMenuBox}>
+                      <ScrollView style={{ maxHeight: 180 }} nestedScrollEnabled>
+                        {availableBranches.map((b) => {
+                          const isSelected = selectedBranchCode === b.branch_code;
+                          return (
+                            <TouchableOpacity
+                              key={b.branch_code}
+                              style={[styles.dropdownMenuItem, isSelected && styles.dropdownMenuItemActive]}
+                              onPress={() => {
+                                setSelectedBranchCode(b.branch_code);
+                                setBranchDropdownOpen(false);
+                              }}
+                            >
+                              <Feather
+                                name={isSelected ? 'check-circle' : 'circle'}
+                                size={15}
+                                color={isSelected ? '#8b5cf6' : COLORS.textMuted}
+                              />
+                              <View style={{ flex: 1, marginLeft: 8 }}>
+                                <Text style={[styles.dropdownMenuItemText, isSelected && styles.dropdownMenuItemTextActive]}>
+                                  {b.branch_name}
+                                </Text>
+                                <Text style={{ fontSize: 10, color: '#64748b' }}>
+                                  Code: {b.branch_code}
+                                </Text>
+                              </View>
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
+                    </View>
+                  )}
+                </>
+              ) : (
+                <TextInput
+                  style={styles.branchTextInput}
+                  placeholder="Enter operator branch code"
+                  value={selectedBranchCode}
+                  onChangeText={setSelectedBranchCode}
+                />
+              )}
+            </View>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => setBranchModalVisible(false)}
+              >
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.saveBtn, { backgroundColor: '#8b5cf6' }]}
+                disabled={submittingIptv}
+                onPress={() => executeAddIptv(selectedBranchCode)}
+              >
+                {submittingIptv ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Feather name="plus-circle" size={14} color="#ffffff" />
+                )}
+                <Text style={styles.saveBtnText}>
+                  {submittingIptv ? 'Adding IPTV...' : 'Add IPTV'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
     </ScrollView>
   );
@@ -565,5 +839,144 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#ffffff',
+  },
+
+  // Modal & Dropdown styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(15, 23, 42, 0.65)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+  },
+  modalCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    padding: 24,
+    width: '100%',
+    maxWidth: 480,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    elevation: 8,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  modalTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: COLORS.textMain,
+  },
+  modalSub: {
+    fontSize: 12,
+    color: '#64748b',
+    lineHeight: 18,
+    marginBottom: 16,
+  },
+  dropdownTrigger: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    borderWidth: 1,
+    borderColor: '#8b5cf6',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+    backgroundColor: '#ffffff',
+  },
+  dropdownValueText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textMain,
+  },
+  dropdownMenuBox: {
+    marginTop: 6,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    borderRadius: 8,
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+    elevation: 4,
+    overflow: 'hidden',
+  },
+  dropdownMenuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  dropdownMenuItemActive: {
+    backgroundColor: 'rgba(139, 92, 246, 0.08)',
+  },
+  dropdownMenuItemText: {
+    fontSize: 13,
+    fontWeight: '500',
+    color: COLORS.textMain,
+  },
+  dropdownMenuItemTextActive: {
+    fontWeight: '700',
+    color: '#8b5cf6',
+  },
+  cancelBtn: {
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    backgroundColor: '#ffffff',
+  },
+  cancelBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  saveBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+    borderRadius: 8,
+  },
+  saveBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  branchTextInput: {
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 13,
+    color: COLORS.textMain,
+    backgroundColor: '#ffffff',
+  },
+  noDevicesBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(22, 163, 74, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(22, 163, 74, 0.25)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  noDevicesText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#15803d',
   },
 });

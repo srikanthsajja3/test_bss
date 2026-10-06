@@ -589,9 +589,17 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         if (user?.token) setApiConfig(undefined, user.token);
         // 1st try by mobile/username from the list item, then fall back to cust_id
         const listItem = rawCustomersRef.current.find((c) => String(c.cust_id) === key || String(c.id) === key);
-        const mobile = String(listItem?.mobile || '').replace(/\D/g, '').slice(-10);
+        let mobile = String(listItem?.mobile || customerDetailsRef.current[key]?.mobile || '').replace(/\D/g, '').slice(-10);
         let record = null;
+        let syncStatus = null;
         if (mobile.length === 10) {
+          try {
+            const syncRes = await OneBssApi.syncIptvCustomers(mobile);
+            const s = syncRes?.data?.summary || syncRes?.summary;
+            if ((syncRes?.data?.success || syncRes?.success) && s && Number(s.stbs_added || 0) === 0 && Number(s.stbs_skipped || 0) === 0) {
+              syncStatus = 'no_devices';
+            }
+          } catch (e) {}
           record = extractLookupRecord(await OneBssApi.customerLookup(mobile), custId);
         }
         if (!record && listItem?.username) {
@@ -599,6 +607,21 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         }
         if (!record) {
           record = extractLookupRecord(await OneBssApi.customerLookup(key), custId);
+        }
+        if (record) {
+          const recMobile = String(record.mobile || '').replace(/\D/g, '').slice(-10);
+          if (recMobile.length === 10 && recMobile !== mobile) {
+            try {
+              const syncRes = await OneBssApi.syncIptvCustomers(recMobile);
+              const s = syncRes?.data?.summary || syncRes?.summary;
+              if ((syncRes?.data?.success || syncRes?.success) && s && Number(s.stbs_added || 0) === 0 && Number(s.stbs_skipped || 0) === 0) {
+                syncStatus = 'no_devices';
+              }
+              const reLookup = await OneBssApi.customerLookup(recMobile);
+              const reRec = extractLookupRecord(reLookup, custId);
+              if (reRec) record = reRec;
+            } catch (e) {}
+          }
         }
         if (!record && listItem) {
           // Graceful fallback from list item data if lookup endpoint does not have detailed record
@@ -667,6 +690,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           };
         }
         if (record) {
+          record.iptv_sync_status = syncStatus || null;
           customerDetailsRef.current = { ...customerDetailsRef.current, [key]: record };
           setCustomerDetails((prev) => ({ ...prev, [key]: record }));
         }
@@ -684,18 +708,17 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   };
   const detailsInFlight = React.useRef({});
 
-  // ---- RADIUS -> local sync (internet_customer_detail_sync.php) ----
-  // Pulls each internet account's latest state from RADIUS into our DB, then re-reads
-  // customer_lookup so the screen shows it. Runs for ALL of the customer's internet
-  // accounts when the customer is opened (or Refresh is pressed), and for the recharged
-  // account after a successful recharge.
+  // ---- Gateway -> local sync (internet_customer_detail_sync.php & iptv_customer_sync.php) ----
+  // Pulls each internet account's latest state from RADIUS and IPTV customer state from IPTV gateway into our DB,
+  // then re-reads customer_lookup so the screen shows it. Runs for ALL accounts when customer is opened or Refreshed.
   const [syncingFor, setSyncingFor] = useState(null);
   const syncInFlight = React.useRef({});
-  const syncInternetAccounts = async (custId, internetIds) => {
+  const syncCustomerAccounts = async (custId, internetIds, mobile) => {
     if (custId === null || custId === undefined) return;
     const key = String(custId);
     const ids = [...new Set((internetIds || []).filter(Boolean).map(String))];
-    if (ids.length === 0) {
+    const cleanMobile = String(mobile || '').replace(/\D/g, '').slice(-10);
+    if (ids.length === 0 && !cleanMobile) {
       await fetchCustomerDetails(custId, true);
       return;
     }
@@ -705,15 +728,40 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       setSyncingFor(key);
       try {
         if (user?.token) setApiConfig(undefined, user.token);
-        const results = await Promise.allSettled(ids.map((id) => OneBssApi.syncInternetCustomerDetail(id)));
-        const failed = results
-          .map((r, i) => ({ r, id: ids[i] }))
-          .filter(({ r }) => r.status === 'rejected' || !r.value?.ok || r.value?.data?.success === false);
-        if (failed.length) {
-          const msg = failed[0].r.value?.data?.message || 'gateway unreachable';
-          toast.warning(`Could not sync ${failed.length} of ${ids.length} account${ids.length > 1 ? 's' : ''} from RADIUS (${msg}). Showing last saved data.`);
+        const tasks = [];
+        if (ids.length > 0) {
+          tasks.push(
+            Promise.allSettled(ids.map((id) => OneBssApi.syncInternetCustomerDetail(id))).then((results) => {
+              const failed = results
+                .map((r, i) => ({ r, id: ids[i] }))
+                .filter(({ r }) => r.status === 'rejected' || !r.value?.ok || r.value?.data?.success === false);
+              if (failed.length) {
+                const msg = failed[0].r.value?.data?.message || 'gateway unreachable';
+                toast.warning(`Could not sync ${failed.length} of ${ids.length} account${ids.length > 1 ? 's' : ''} from RADIUS (${msg}). Showing last saved data.`);
+              }
+            })
+          );
         }
-        await fetchCustomerDetails(custId, true);
+        let iptvSyncResultStatus = null;
+        if (cleanMobile.length === 10) {
+          tasks.push(
+            OneBssApi.syncIptvCustomers(cleanMobile).then((syncRes) => {
+              const s = syncRes?.data?.summary || syncRes?.summary;
+              if ((syncRes?.data?.success || syncRes?.success) && s && Number(s.stbs_added || 0) === 0 && Number(s.stbs_skipped || 0) === 0) {
+                iptvSyncResultStatus = 'no_devices';
+              }
+            }).catch((err) => {
+              console.warn('IPTV sync error:', err);
+            })
+          );
+        }
+        await Promise.allSettled(tasks);
+        const refRec = await fetchCustomerDetails(custId, true);
+        if (refRec) {
+          refRec.iptv_sync_status = iptvSyncResultStatus || null;
+          customerDetailsRef.current = { ...customerDetailsRef.current, [key]: refRec };
+          setCustomerDetails((prev) => ({ ...prev, [key]: refRec }));
+        }
       } finally {
         if (syncInFlight.current[key] === run) delete syncInFlight.current[key];
         setSyncingFor((cur) => (cur === key ? null : cur));
@@ -723,10 +771,16 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     return run;
   };
 
+  const syncInternetAccounts = async (custId, internetIds, mobile) => {
+    const rawMobile = mobile || customerDetailsRef.current[String(custId)]?.mobile || '';
+    return syncCustomerAccounts(custId, internetIds, rawMobile);
+  };
+
   const syncAllAccountsOf = async (custId) => {
     const record = await fetchCustomerDetails(custId);
     const ids = (record?.internet_accounts || []).map((a) => a.internet_id);
-    return syncInternetAccounts(custId, ids);
+    const rawMobile = record?.mobile || customerDetailsRef.current[String(custId)]?.mobile || rawCustomersRef.current.find((c) => String(c.cust_id) === String(custId))?.mobile || '';
+    return syncCustomerAccounts(custId, ids, rawMobile);
   };
 
   const customerDetailsRef = React.useRef(customerDetails);
@@ -778,7 +832,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   }, [activeCustomerId, rawCustomers]);
 
   // On opening a customer: once its accounts are known, sync every internet account from
-  // RADIUS and reload. Runs once per opening (reset when the customer is closed).
+  // RADIUS and sync IPTV customer data from IPTV gateway (POST /iptv_customer_sync.php) and reload.
   const autoSyncedFor = React.useRef(null);
   const activeDetailsLoaded = activeCustomerId !== null && !!customerDetails[String(activeCustomerId)];
   useEffect(() => {
@@ -788,8 +842,10 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
     if (!activeDetailsLoaded || autoSyncedFor.current === String(activeCustomerId)) return;
     autoSyncedFor.current = String(activeCustomerId);
-    const ids = (customerDetails[String(activeCustomerId)]?.internet_accounts || []).map((a) => a.internet_id);
-    syncInternetAccounts(activeCustomerId, ids);
+    const details = customerDetails[String(activeCustomerId)];
+    const ids = (details?.internet_accounts || []).map((a) => a.internet_id);
+    const mobile = details?.mobile || rawCustomersRef.current.find((c) => String(c.cust_id) === String(activeCustomerId))?.mobile || '';
+    syncCustomerAccounts(activeCustomerId, ids, mobile);
   }, [activeCustomerId, activeDetailsLoaded]);
 
   // Build the detail-screen row for one specific account of a customer.
@@ -1108,55 +1164,78 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
   };
 
-  const handleAddIptvForCustomer = async ({ customer, name, mobile, stbMac, stbId }) => {
+  const handleAddIptvForCustomer = async ({ customer, name, mobile, stbMac, stbId, branchCode, partnerId }) => {
     const rawMobile = mobile || customer?.mobile || '';
     const digitsOnly = String(rawMobile).replace(/\D/g, '');
     const cleanMobile = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : (rawMobile || '9125253535');
     const targetName = name || customer?.full_name || [customer?.first_name, customer?.last_name].filter(Boolean).join(' ') || 'Subscriber';
     const custId = customer?.cust_id || customer?.id;
     const finalStbId = stbId || `STB-${custId || cleanMobile.slice(-4)}`;
-    const finalStbMac = stbMac || `00:1A:79:${String(custId || '12').slice(-2).padStart(2, '0')}:34:56`;
+    const resolvedPartnerId = partnerId || customer?.internet_accounts?.[0]?.partner_id || customer?.partner_id || user?.partner_id;
+    const resolvedBranchCode = branchCode || customer?.branch_code || '';
 
     try {
       if (user?.token) setApiConfig(undefined, user.token);
 
-      // 1. Synchronize / register IPTV customer via gateway
-      const res = await OneBssApi.syncIptvCustomers(cleanMobile);
+      // 1. Call POST /iptv_add_customer.php
+      const parts = targetName.split(/\s+/).filter(Boolean);
+      const firstName = parts[0] || customer?.first_name || 'Subscriber';
+      const lastName = parts.slice(1).join(' ') || customer?.last_name || '';
 
-      toast.success(`IPTV account successfully added for ${targetName}!`);
-
-      // 2. Refresh customer details and subscriber records
-      const refreshed = await fetchCustomerDetails(custId, true);
-
-      // Ensure local state and localStorage immediately reflect the new IPTV account
-      const newIptvAccount = {
-        id: res?.data?.cust_id ? `iptv_${res.data.cust_id}` : `iptv_${Date.now()}`,
-        stb_id: finalStbId,
-        stb_mac: finalStbMac,
-        mac_address: finalStbMac,
-        status: 'Active',
-        plan: 'Standard IPTV Pack',
-        package_name: 'Standard IPTV Pack',
-        expiration: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        expiration_date: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-        created_at: new Date().toISOString(),
-        partner_id: customer?.partner_id || user?.partner_id || 1111,
-        name: targetName,
+      const iptvPayload = {
+        partner_id: Number(resolvedPartnerId),
         mobile: cleanMobile,
+        first_name: firstName,
+        last_name: lastName,
+        email: customer?.email || '',
+        address: customer?.installation_address || customer?.address || '',
+        branch_code: resolvedBranchCode,
+        state: customer?.state || '',
+        city: customer?.city || '',
       };
+
+      try {
+        await OneBssApi.addIptvCustomer(iptvPayload);
+      } catch (addErr) {
+        console.warn('IPTV Add Customer API call:', addErr);
+      }
+
+      // 2. Synchronize / register IPTV customer via gateway
+      const res = await OneBssApi.syncIptvCustomers(cleanMobile);
+      const syncData = res?.data || {};
+
+      const s = syncData?.summary || res?.summary;
+      const isNoDevices = (
+        (syncData?.success || res?.success) &&
+        s &&
+        Number(s.stbs_added || 0) === 0 &&
+        Number(s.stbs_skipped || 0) === 0
+      );
+
+      if (isNoDevices) {
+        toast.info('customer registered successfully , No devices found');
+      } else if (syncData?.success || res?.success) {
+        toast.success(`IPTV account successfully added for ${targetName}!`);
+      } else {
+        toast.info(syncData.message || res?.message || `Customer registered successfully for ${targetName}`);
+      }
+
+      // 3. Refresh customer details and subscriber records
+      const refreshed = await fetchCustomerDetails(custId, true);
 
       const curDetails = customerDetailsRef.current[String(custId)] || customerDetails[String(custId)] || customer || {};
       const existingIptv = curDetails.iptv_accounts || [];
       const updated = {
         ...curDetails,
         ...refreshed,
-        iptv_accounts: existingIptv.length > 0 ? existingIptv : [newIptvAccount],
+        iptv_sync_status: isNoDevices ? 'no_devices' : (refreshed?.iptv_sync_status || curDetails?.iptv_sync_status || null),
+        iptv_accounts: isNoDevices ? (refreshed?.iptv_accounts || []) : (existingIptv.length > 0 ? existingIptv : []),
       };
       customerDetailsRef.current = { ...customerDetailsRef.current, [String(custId)]: updated };
       setCustomerDetails((prev) => ({ ...prev, [String(custId)]: updated }));
 
       await loadCustomerDataFromApi();
-      return true;
+      return isNoDevices ? { status: 'no_devices' } : true;
     } catch (err) {
       toast.error(`Failed to add IPTV account: ${err?.message || 'Error occurred'}`);
       return false;
