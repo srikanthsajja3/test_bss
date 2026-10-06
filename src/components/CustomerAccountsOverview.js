@@ -1,8 +1,10 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { CustomerPhoto, isAccountVerified } from './internet/shared';
+import { OneBssApi } from '../services/oneBssApi';
+import { toast } from 'react-toastify';
 
 // ---------- helpers ----------
 
@@ -217,12 +219,15 @@ const AccountCard = ({ account, isMobile, onInternetRecharge, onIptvRecharge, on
   );
 };
 
-const Section = ({ title, icon, color, count, emptyText, loading, children }) => (
+const Section = ({ title, icon, color, count, emptyText, emptyContent, loading, headerAction, children }) => (
   <View style={{ marginBottom: 22 }}>
     <View style={styles.sectionHeader}>
-      <Feather name={icon} size={15} color={color} />
-      <Text style={styles.sectionTitle}>{title}</Text>
-      <View style={styles.countBadge}><Text style={styles.countBadgeText}>{count}</Text></View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+        <Feather name={icon} size={15} color={color} />
+        <Text style={styles.sectionTitle}>{title}</Text>
+        <View style={styles.countBadge}><Text style={styles.countBadgeText}>{count}</Text></View>
+      </View>
+      {headerAction}
     </View>
     {count === 0 && loading ? (
       <View style={[styles.emptyBox, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
@@ -230,7 +235,11 @@ const Section = ({ title, icon, color, count, emptyText, loading, children }) =>
         <Text style={styles.emptyText}>Loading accounts…</Text>
       </View>
     ) : count === 0 ? (
-      <View style={styles.emptyBox}><Text style={styles.emptyText}>{emptyText}</Text></View>
+      emptyContent ? (
+        emptyContent
+      ) : (
+        <View style={styles.emptyBox}><Text style={styles.emptyText}>{emptyText}</Text></View>
+      )
     ) : (
       <View style={styles.grid}>{children}</View>
     )}
@@ -257,9 +266,11 @@ export const defaultRechargeType = (account) => {
  *  onInternetRecharge(rawInternetAccount, advance)  opens the plan-picker recharge modal
  *  onVerify(rawInternetAccount)                     opens Verify Customer (required before recharge)
  */
-export const CustomerAccountsOverview = ({ customer, loading = false, syncing = false, onBack, onOpenDetails, onInternetRecharge, onIptvRecharge, onVerify, onRefresh, onModifyMobile }) => {
+export const CustomerAccountsOverview = ({ customer, loading = false, syncing = false, onBack, onOpenDetails, onInternetRecharge, onIptvRecharge, onVerify, onRefresh, onModifyMobile, onAddIptv }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
+
+  const [submittingIptv, setSubmittingIptv] = useState(false);
 
   if (!customer) return null;
 
@@ -269,6 +280,52 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
   const activeCount = all.filter((a) => a.statusText.toLowerCase() === 'active').length;
   const name = clean(customer.full_name) || [customer.first_name, customer.last_name].filter(Boolean).join(' ') || `Customer #${customer.cust_id}`;
   const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
+
+  // Directly provisions IPTV with existing user data from database
+  const handleAddIptvDirect = async () => {
+    const rawMobile = clean(customer.mobile || customer.MobileNumber || (customer.internet_accounts?.[0]?.mobile) || '');
+    const digitsOnly = rawMobile.replace(/\D/g, '');
+    const finalMobile = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : digitsOnly;
+    const custId = customer.cust_id || customer.id || '';
+    const hexSuffix = String(custId || '12').slice(-2).padStart(2, '0');
+    const defaultMac = `00:1A:79:${hexSuffix}:45:8A`;
+    const defaultStbId = `STB-${custId || finalMobile.slice(-4) || '1001'}`;
+
+    if (!finalMobile) {
+      toast.error('Customer has no mobile number registered.');
+      return;
+    }
+
+    setSubmittingIptv(true);
+    try {
+      if (onAddIptv) {
+        await onAddIptv({
+          customer,
+          name,
+          mobile: finalMobile,
+          stbMac: defaultMac,
+          stbId: defaultStbId,
+        });
+      } else {
+        await OneBssApi.syncIptvCustomers(finalMobile);
+        try {
+          await OneBssApi.updateIptvStbDetails({
+            stb_id: defaultStbId,
+            stb_mac: defaultMac,
+            name,
+            mobile: finalMobile,
+            status: 'active',
+          });
+        } catch (e) {}
+        toast.success(`IPTV service provisioned successfully for ${name}!`);
+        if (onRefresh) onRefresh();
+      }
+    } catch (e) {
+      toast.error('Failed to provision IPTV service.');
+    } finally {
+      setSubmittingIptv(false);
+    }
+  };
 
   const renderCards = (list) =>
     list.map((acc) => (
@@ -361,7 +418,40 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
         {renderCards(internet)}
       </Section>
 
-      <Section title="IPTV Accounts" icon="tv" color="#8b5cf6" count={iptv.length} loading={loading} emptyText="No IPTV accounts for this customer.">
+      <Section
+        title="IPTV Accounts"
+        icon="tv"
+        color="#8b5cf6"
+        count={iptv.length}
+        loading={loading}
+        emptyText="No IPTV accounts for this customer."
+        emptyContent={
+          <View style={styles.emptyBoxCustom}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={styles.emptyIconBadge}>
+                <Feather name="tv" size={18} color="#8b5cf6" />
+              </View>
+              <Text style={styles.emptyPrimaryText}>No IPTV accounts for this customer.</Text>
+            </View>
+            <View style={{ marginTop: 12, alignItems: 'flex-start' }}>
+              <TouchableOpacity
+                style={styles.addIptvBtn}
+                disabled={submittingIptv}
+                onPress={handleAddIptvDirect}
+              >
+                {submittingIptv ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <Feather name="plus-circle" size={13} color="#ffffff" />
+                )}
+                <Text style={styles.addIptvBtnText}>
+                  {submittingIptv ? 'Adding IPTV...' : 'Add IPTV'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        }
+      >
         {renderCards(iptv)}
       </Section>
 
@@ -425,4 +515,55 @@ const styles = StyleSheet.create({
   syncChipText: { fontSize: 12, fontWeight: '600', color: '#1d4ed8' },
   rechargeHint: { alignSelf: 'center', fontSize: 11, fontWeight: '600', color: '#64748b' },
 
+  // IPTV Empty State & Direct Add styles
+  headerAddIptvBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    backgroundColor: '#8b5cf6',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  headerAddIptvBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+
+  emptyBoxCustom: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderStyle: 'dashed',
+    borderColor: 'rgba(139, 92, 246, 0.35)',
+    padding: 16,
+  },
+  emptyIconBadge: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyPrimaryText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: COLORS.textMain,
+  },
+  addIptvBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#8b5cf6',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  addIptvBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
 });
