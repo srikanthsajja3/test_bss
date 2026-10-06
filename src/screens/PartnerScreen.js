@@ -1083,15 +1083,29 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     try {
       const res = await OneBssApi.getIptvBranchMapping(pId);
       const data = res.data || {};
-      const branchesList = Array.isArray(data.branches)
-        ? data.branches
-        : (Array.isArray(data.data) ? data.data : (Array.isArray(data) ? data : []));
-      
-      setAvailableBranches(branchesList);
-      const mappedIds = branchesList
-        .filter((b) => b.is_mapped || b.mapped || b.selected)
-        .map((b) => b.id || b.branch_id || b.branch_code);
-      setSelectedBranchIds(mappedIds);
+      const rawList = Array.isArray(data.data)
+        ? data.data
+        : (Array.isArray(data.branches) ? data.branches : (Array.isArray(data) ? data : []));
+
+      setAvailableBranches(rawList);
+
+      const assignedIds = [];
+      rawList.forEach((b) => {
+        const id = b.branch_id !== undefined && b.branch_id !== null ? b.branch_id : (b.id !== undefined && b.id !== null ? b.id : b.branch_code);
+        
+        const isAssigned = Boolean(
+          b.is_assigned === true || b.is_assigned == 1 ||
+          b.is_mapped === true || b.is_mapped == 1 ||
+          b.mapped === true || b.mapped == 1 ||
+          b.selected === true || b.selected == 1
+        );
+
+        if (isAssigned) {
+          assignedIds.push(id);
+        }
+      });
+
+      setSelectedBranchIds(assignedIds);
     } catch (e) {
       setAvailableBranches([]);
       setSelectedBranchIds([]);
@@ -1312,10 +1326,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
               <ScrollView style={{ maxHeight: 260, marginBottom: 16 }}>
                 <View style={{ gap: 8 }}>
                   {availableBranches.map((b, idx) => {
-                    const bId = b.id || b.branch_id || b.branch_code || idx + 1;
+                    const bId = b.id !== undefined && b.id !== null ? b.id : (b.branch_id !== undefined && b.branch_id !== null ? b.branch_id : (b.branch_code || idx + 1));
                     const bName = b.branch_name || b.name || b.branch_code || `Branch #${bId}`;
                     const bCode = b.branch_code || b.code || bId;
-                    const isChecked = selectedBranchIds.includes(bId) || selectedBranchIds.includes(Number(bId)) || selectedBranchIds.includes(String(bId));
+                    const isChecked = selectedBranchIds.some(
+                      (x) => String(x) === String(bId) || String(x) === String(bCode) || (b.branch_id && String(x) === String(b.branch_id)) || (b.id && String(x) === String(b.id))
+                    );
                     
                     return (
                       <TouchableOpacity
@@ -1332,9 +1348,13 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                         }}
                         onPress={() => {
                           setSelectedBranchIds((prev) => {
-                            const exists = prev.includes(bId) || prev.includes(Number(bId)) || prev.includes(String(bId));
+                            const exists = prev.some(
+                              (x) => String(x) === String(bId) || String(x) === String(bCode) || (b.branch_id && String(x) === String(b.branch_id)) || (b.id && String(x) === String(b.id))
+                            );
                             if (exists) {
-                              return prev.filter((x) => String(x) !== String(bId));
+                              return prev.filter(
+                                (x) => String(x) !== String(bId) && String(x) !== String(bCode) && String(x) !== String(b.branch_id) && String(x) !== String(b.id)
+                              );
                             } else {
                               return [...prev, bId];
                             }
