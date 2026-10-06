@@ -885,16 +885,16 @@ export const OneBssApi = {
     return request(`/wallet.php?partner_id=${encodeURIComponent(partnerId)}&page=${page}&limit=${limit}`, { method: 'GET' });
   },
 
-  // 26. Topup Wallet (POST /wallet.php)
+  // 26. Topup Wallet (POST /wallet_credit_debit.php)
   topupWallet: async (partnerId = 1112, amount = 1000, remark = 'Wallet top-up', currentBal = 0) => {
     const amtNum = Math.abs(Number(amount) || 0);
-    const res = await request('/wallet.php', {
+    const pId = Number(partnerId) || partnerId;
+    const res = await request('/wallet_credit_debit.php', {
       method: 'POST',
       body: JSON.stringify({
-        partner_id: Number(partnerId) || partnerId,
+        partner_id: pId,
         amount: amtNum,
         type: 'credit',
-        action: 'credit',
         remark: String(remark || 'Wallet top-up'),
       }),
     });
@@ -907,7 +907,7 @@ export const OneBssApi = {
         data: {
           success: true,
           message: 'Wallet credited.',
-          partner_id: Number(partnerId) || 1112,
+          partner_id: pId,
           ledger_id: Math.floor(Math.random() * 1000) + 1,
           balance_before: startBal,
           balance_after: endBal,
@@ -917,16 +917,16 @@ export const OneBssApi = {
     return res;
   },
 
-  // 26b. Debit Wallet (POST /wallet.php with debit type)
+  // 26b. Debit Wallet (POST /wallet_credit_debit.php with type: debit)
   debitWallet: async (partnerId = 1112, amount = 1000, remark = 'Wallet debit', currentBal = 0) => {
     const amtNum = Math.abs(Number(amount) || 0);
-    const res = await request('/wallet.php', {
+    const pId = Number(partnerId) || partnerId;
+    const res = await request('/wallet_credit_debit.php', {
       method: 'POST',
       body: JSON.stringify({
-        partner_id: Number(partnerId) || partnerId,
-        amount: -amtNum,
+        partner_id: pId,
+        amount: amtNum,
         type: 'debit',
-        action: 'debit',
         remark: String(remark || 'Wallet debit'),
       }),
     });
@@ -939,7 +939,7 @@ export const OneBssApi = {
         data: {
           success: true,
           message: 'Wallet debited.',
-          partner_id: Number(partnerId) || 1112,
+          partner_id: pId,
           ledger_id: Math.floor(Math.random() * 1000) + 1,
           balance_before: startBal,
           balance_after: endBal,

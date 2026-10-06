@@ -465,28 +465,43 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         setSelectedPartner((prev) => ({ ...prev, wallet_balance: newBalance }));
       }
       setWalletPartner((prev) => (prev ? { ...prev, wallet_balance: newBalance } : prev));
+
+      const newTxn = {
+        ledger_id: data.ledger_id || Math.floor(Math.random() * 1000) + 1,
+        txn_amount: amountNum,
+        txn_type: isDebit ? 'debit' : 'credit',
+        balance_before_txn: currentBal,
+        balance_after_txn: newBalance,
+        txn_timestamp: new Date().toLocaleString('en-IN'),
+        remark: remarkText,
+      };
+      setWalletTransactions((prev) => [newTxn, ...(Array.isArray(prev) ? prev : [])]);
+
       if (isDebit) {
         toast.success(`₹${amountNum.toLocaleString('en-IN')} debited from Partner #${walletPartner.partner_id} wallet!`);
       } else {
         toast.success(data.message || `₹${amountNum.toLocaleString('en-IN')} credited to Partner #${walletPartner.partner_id} wallet!`);
       }
 
-      const walletRes = await OneBssApi.getWallet(walletPartner.partner_id);
-      if (walletRes.data) {
-        if (Array.isArray(walletRes.data.transactions)) {
-          setWalletTransactions(walletRes.data.transactions);
-        }
-        if (walletRes.data.wallet_balance !== undefined && walletRes.data.wallet_balance !== null && !isNaN(Number(walletRes.data.wallet_balance))) {
-          const freshBal = Number(walletRes.data.wallet_balance);
-          setPartners((prev) =>
-            prev.map((p) => (p.partner_id === walletPartner.partner_id ? { ...p, wallet_balance: freshBal } : p))
-          );
-          if (selectedPartner?.partner_id === walletPartner.partner_id) {
-            setSelectedPartner((prev) => ({ ...prev, wallet_balance: freshBal }));
+      try {
+        const walletRes = await OneBssApi.getWallet(walletPartner.partner_id);
+        if (walletRes.data) {
+          if (Array.isArray(walletRes.data.transactions)) {
+            setWalletTransactions(walletRes.data.transactions);
           }
-          setWalletPartner((prev) => (prev ? { ...prev, wallet_balance: freshBal } : prev));
+          if (walletRes.data.wallet_balance !== undefined && walletRes.data.wallet_balance !== null && !isNaN(Number(walletRes.data.wallet_balance))) {
+            const freshBal = Number(walletRes.data.wallet_balance);
+            setPartners((prev) =>
+              prev.map((p) => (p.partner_id === walletPartner.partner_id ? { ...p, wallet_balance: freshBal } : p))
+            );
+            if (selectedPartner?.partner_id === walletPartner.partner_id) {
+              setSelectedPartner((prev) => ({ ...prev, wallet_balance: freshBal }));
+            }
+            setWalletPartner((prev) => (prev ? { ...prev, wallet_balance: freshBal } : prev));
+          }
         }
-      }
+      } catch (err) {}
+
       setTopupAmount('');
       setWalletRemark('');
     } catch (e) {
