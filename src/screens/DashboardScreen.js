@@ -259,126 +259,128 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
 
 
 
-      {/* SEARCH INPUT IN DASHBOARD (ITEM 6) */}
-      <View style={{ marginBottom: 16, backgroundColor: '#ffffff', borderWidth: 1, borderColor: COLORS.glassBorder || '#cbd5e1', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-        <Feather name="search" size={18} color={COLORS.textDim || '#94a3b8'} />
-        <TextInput
-          style={{ flex: 1, fontSize: 14, color: COLORS.textMain || '#000000', outlineStyle: 'none' }}
-          placeholder="Search dashboard metrics, subscribers, partners, mobile..."
-          value={dashboardSearch}
-          onChangeText={setDashboardSearch}
-          onSubmitEditing={() => onNavigateToCustomers && onNavigateToCustomers('all', '', dashboardSearch.trim())}
-          placeholderTextColor={COLORS.textDim || '#94a3b8'}
-        />
-        {dashboardSearch ? (
-          <TouchableOpacity onPress={() => setDashboardSearch('')}>
-            <Feather name="x" size={16} color={COLORS.textDim || '#94a3b8'} />
-          </TouchableOpacity>
-        ) : null}
-      </View>
-
-      {/* SEARCH RESULTS PANEL */}
-      {dashboardSearch.trim() ? (
-        <View style={{ marginBottom: 20, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#3b82f6', borderRadius: 12, padding: 14, boxShadow: '0 4px 12px rgba(59, 130, 246, 0.1)' }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <Feather name="search" size={14} color="#3b82f6" />
-              <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMain }}>
-                Search Results for "{dashboardSearch.trim()}"
-              </Text>
-              {isSearching && <ActivityIndicator size="small" color="#3b82f6" style={{ marginLeft: 6 }} />}
-            </View>
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(59, 130, 246, 0.1)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 }}
-              onPress={() => onNavigateToCustomers && onNavigateToCustomers('all', '', dashboardSearch.trim())}
-            >
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#2563eb' }}>View all in Subscribers</Text>
-              <Feather name="arrow-right" size={13} color="#2563eb" />
+      {/* SEARCH INPUT IN DASHBOARD WITH FLOATING DROPDOWN */}
+      <View style={{ position: 'relative', zIndex: 1000, marginBottom: 16 }}>
+        <View style={{ backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0, 0, 0, 0.08)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          <Feather name="search" size={18} color="#9ca3af" />
+          <TextInput
+            style={{ flex: 1, fontSize: 14, color: '#000000', outlineStyle: 'none' }}
+            placeholder="Search dashboard metrics, subscribers, partners, mobile..."
+            value={dashboardSearch}
+            onChangeText={setDashboardSearch}
+            onSubmitEditing={() => onNavigateToCustomers && onNavigateToCustomers('all', '', dashboardSearch.trim())}
+            placeholderTextColor="#9ca3af"
+          />
+          {dashboardSearch ? (
+            <TouchableOpacity onPress={() => setDashboardSearch('')}>
+              <Feather name="x" size={16} color="#9ca3af" />
             </TouchableOpacity>
-          </View>
+          ) : null}
+        </View>
 
-          {/* Matching Subscribers */}
-          {searchResults.customers.length > 0 && (
-            <View style={{ marginBottom: 12 }}>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 6, letterSpacing: 0.5 }}>
-                MATCHING SUBSCRIBERS ({searchResults.customers.length})
-              </Text>
-              <View style={{ gap: 6 }}>
-                {searchResults.customers.map((c, i) => {
-                  const uName = c.username || c.name || `User #${c.id || i}`;
-                  const mob = c.mobile || '—';
-                  const sts = (c.status || c.status_text || 'active').toLowerCase();
-                  return (
-                    <TouchableOpacity
-                      key={c.id || `sc_${i}`}
-                      style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 8, borderRadius: 8, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0' }}
-                      onPress={() => onNavigateToCustomers && onNavigateToCustomers('all', '', c.username || c.mobile || dashboardSearch.trim())}
+        {/* FLOATING DROPDOWN SEARCH RESULTS */}
+        {dashboardSearch.trim() ? (
+          <View style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 6, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#3b82f6', borderRadius: 12, padding: 14, boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)', zIndex: 2000, maxHeight: 400, overflowY: 'auto', elevation: 10 }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Feather name="search" size={14} color="#3b82f6" />
+                <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMain }}>
+                  Search Results for "{dashboardSearch.trim()}"
+                </Text>
+                {isSearching && <ActivityIndicator size="small" color="#3b82f6" style={{ marginLeft: 6 }} />}
+              </View>
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(59, 130, 246, 0.1)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 }}
+                onPress={() => onNavigateToCustomers && onNavigateToCustomers('all', '', dashboardSearch.trim())}
+              >
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#2563eb' }}>View all in Subscribers</Text>
+                <Feather name="arrow-right" size={13} color="#2563eb" />
+              </TouchableOpacity>
+            </View>
+
+            {/* Matching Subscribers */}
+            {searchResults.customers.length > 0 && (
+              <View style={{ marginBottom: 12 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 6, letterSpacing: 0.5 }}>
+                  MATCHING SUBSCRIBERS ({searchResults.customers.length})
+                </Text>
+                <View style={{ gap: 6 }}>
+                  {searchResults.customers.map((c, i) => {
+                    const uName = c.username || c.name || `User #${c.id || i}`;
+                    const mob = c.mobile || '—';
+                    const sts = (c.status || c.status_text || 'active').toLowerCase();
+                    return (
+                      <TouchableOpacity
+                        key={c.id || `sc_${i}`}
+                        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 8, borderRadius: 8, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0' }}
+                        onPress={() => onNavigateToCustomers && onNavigateToCustomers('all', '', c.username || c.mobile || dashboardSearch.trim())}
+                      >
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                          <Feather name="user" size={14} color="#3b82f6" />
+                          <View>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: '#0f172a' }}>{uName}</Text>
+                            <Text style={{ fontSize: 11, color: '#64748b' }}>Phone: {mob} • Plan: {c.package_name || c.plan || 'Internet'}</Text>
+                          </View>
+                        </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                          <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: sts === 'active' ? '#dcfce7' : (sts === 'expired' ? '#fee2e2' : '#f1f5f9') }}>
+                            <Text style={{ fontSize: 10, fontWeight: '700', color: sts === 'active' ? '#15803d' : (sts === 'expired' ? '#b91c1c' : '#475569') }}>
+                              {sts.toUpperCase()}
+                            </Text>
+                          </View>
+                          <Feather name="chevron-right" size={14} color="#94a3b8" />
+                        </View>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            )}
+
+            {/* Matching Partners */}
+            {searchResults.partners.length > 0 && (
+              <View>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 6, letterSpacing: 0.5 }}>
+                  MATCHING PARTNERS ({searchResults.partners.length})
+                </Text>
+                <View style={{ gap: 6 }}>
+                  {searchResults.partners.slice(0, 5).map((p, i) => (
+                    <View
+                      key={p.partner_id || `sp_${i}`}
+                      style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 8, borderRadius: 8, backgroundColor: '#f0fdf4', borderWidth: 1, borderColor: '#bbf7d0' }}
                     >
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                        <Feather name="user" size={14} color="#3b82f6" />
+                        <Feather name="briefcase" size={14} color="#10b981" />
                         <View>
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#0f172a' }}>{uName}</Text>
-                          <Text style={{ fontSize: 11, color: '#64748b' }}>Phone: {mob} • Plan: {c.package_name || c.plan || 'Internet'}</Text>
-                        </View>
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: sts === 'active' ? '#dcfce7' : (sts === 'expired' ? '#fee2e2' : '#f1f5f9') }}>
-                          <Text style={{ fontSize: 10, fontWeight: '700', color: sts === 'active' ? '#15803d' : (sts === 'expired' ? '#b91c1c' : '#475569') }}>
-                            {sts.toUpperCase()}
+                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#064e3b' }}>
+                            #{p.partner_id || p.id} - {p.partner_name || p.name}
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#047857' }}>
+                            {p.company_name} • {p.partner_mobile || 'No mobile'} • {p.partner_region || 'Region —'}
                           </Text>
                         </View>
-                        <Feather name="chevron-right" size={14} color="#94a3b8" />
                       </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-          )}
-
-          {/* Matching Partners */}
-          {searchResults.partners.length > 0 && (
-            <View>
-              <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 6, letterSpacing: 0.5 }}>
-                MATCHING PARTNERS ({searchResults.partners.length})
-              </Text>
-              <View style={{ gap: 6 }}>
-                {searchResults.partners.slice(0, 5).map((p, i) => (
-                  <View
-                    key={p.partner_id || `sp_${i}`}
-                    style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 8, borderRadius: 8, backgroundColor: '#f0fdf4', borderWidth: 1, borderColor: '#bbf7d0' }}
-                  >
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                      <Feather name="briefcase" size={14} color="#10b981" />
-                      <View>
-                        <Text style={{ fontSize: 13, fontWeight: '700', color: '#064e3b' }}>
-                          #{p.partner_id || p.id} - {p.partner_name || p.name}
-                        </Text>
-                        <Text style={{ fontSize: 11, color: '#047857' }}>
-                          {p.company_name} • {p.partner_mobile || 'No mobile'} • {p.partner_region || 'Region —'}
+                      <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4, backgroundColor: '#dcfce7' }}>
+                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#15803d' }}>
+                          {(p.account_role || p.role || 'OPERATOR').toUpperCase()}
                         </Text>
                       </View>
                     </View>
-                    <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4, backgroundColor: '#dcfce7' }}>
-                      <Text style={{ fontSize: 10, fontWeight: '700', color: '#15803d' }}>
-                        {(p.account_role || p.role || 'OPERATOR').toUpperCase()}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
+                  ))}
+                </View>
               </View>
-            </View>
-          )}
+            )}
 
-          {!isSearching && searchResults.customers.length === 0 && searchResults.partners.length === 0 && (
-            <View style={{ padding: 14, alignItems: 'center' }}>
-              <Text style={{ fontSize: 12, color: COLORS.textMuted }}>
-                No subscribers or partners found matching "{dashboardSearch.trim()}".
-              </Text>
-            </View>
-          )}
-        </View>
-      ) : null}
+            {!isSearching && searchResults.customers.length === 0 && searchResults.partners.length === 0 && (
+              <View style={{ padding: 14, alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: COLORS.textMuted }}>
+                  No subscribers or partners found matching "{dashboardSearch.trim()}".
+                </Text>
+              </View>
+            )}
+          </View>
+        ) : null}
+      </View>
 
       {/* PARTNERS / ADMINS COUNT IN SUPERADMIN DASHBOARD (ITEM 11) */}
       {(isSuperAdmin || currentRole === 'admin') && (
