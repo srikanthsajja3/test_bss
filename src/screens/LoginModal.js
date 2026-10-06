@@ -10,6 +10,26 @@ export const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [syncingIptv, setSyncingIptv] = useState(false);
+  const [syncStatus, setSyncStatus] = useState('');
+
+  const handleSyncIptvUsers = async () => {
+    setSyncingIptv(true);
+    setSyncStatus('');
+    try {
+      const res = await OneBssApi.syncIptvBulkCustomers(1114);
+      const data = res.data || {};
+      if (data.success !== false) {
+        setSyncStatus(`✅ ${data.message || 'IPTV users synced successfully!'}`);
+      } else {
+        setSyncStatus(`⚠️ ${data.message || 'IPTV sync completed.'}`);
+      }
+    } catch (e) {
+      setSyncStatus('❌ Sync failed: Network error');
+    } finally {
+      setSyncingIptv(false);
+    }
+  };
 
   const handleLogin = async () => {
     setErrorMsg('');
@@ -79,6 +99,26 @@ export const LoginModal = ({ visible, onClose, onLoginSuccess }) => {
             <Text style={styles.title}>OneBSS Authentication</Text>
           </View>
           <Text style={styles.subtitle}>Enter your account credentials to authenticate</Text>
+
+          {/* SYNC IPTV USERS BUTTON (BEFORE LOGIN) */}
+          <TouchableOpacity
+            style={styles.btnSyncIptv}
+            onPress={handleSyncIptvUsers}
+            disabled={syncingIptv}
+          >
+            {syncingIptv ? (
+              <ActivityIndicator size="small" color="#8b5cf6" />
+            ) : (
+              <Feather name="refresh-cw" size={14} color="#8b5cf6" />
+            )}
+            <Text style={styles.btnSyncIptvText}>
+              {syncingIptv ? 'Syncing IPTV Users...' : 'Sync IPTV Users'}
+            </Text>
+          </TouchableOpacity>
+
+          {syncStatus ? (
+            <Text style={styles.syncStatusText}>{syncStatus}</Text>
+          ) : null}
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>USERNAME</Text>
@@ -225,5 +265,30 @@ const styles = StyleSheet.create({
     color: '#ffffff',
     fontWeight: '700',
     fontSize: 12,
+  },
+  btnSyncIptv: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+    borderRadius: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    marginBottom: 16,
+  },
+  btnSyncIptvText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#8b5cf6',
+  },
+  syncStatusText: {
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 12,
+    color: COLORS.textMain,
   },
 });

@@ -70,6 +70,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   const [showPartnerPass, setShowPartnerPass] = useState(false);
   const [resettingPartnerPass, setResettingPartnerPass] = useState(false);
   const [impersonatingId, setImpersonatingId] = useState(null);
+  const [syncingIptvId, setSyncingIptvId] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
   // Batch 2 Action States
@@ -969,6 +970,25 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       console.error('handleImpersonatePartner exception:', e);
     } finally {
       setImpersonatingId(null);
+    }
+  };
+
+  const handleSyncIptvUsers = async (partner) => {
+    if (!partner) return;
+    const pId = partner.partner_id || partner.id;
+    setSyncingIptvId(pId);
+    try {
+      const res = await OneBssApi.syncIptvBulkCustomers(pId);
+      const data = res.data || {};
+      if (data.success !== false) {
+        toast.success(data.message || `IPTV users synced successfully for ${partner.partner_name || 'Partner'} (#${pId})!`);
+      } else {
+        toast.info(data.message || `IPTV sync completed for Partner #${pId}.`);
+      }
+    } catch (e) {
+      toast.error('Sync failed: Network error');
+    } finally {
+      setSyncingIptvId(null);
     }
   };
 
@@ -2396,6 +2416,22 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
               >
                 <Feather name="key" size={14} color="#f59e0b" />
                 <Text style={[styles.simpleActionBtnText, { color: '#f59e0b' }]}>Reset Password</Text>
+              </TouchableOpacity>
+
+              {/* SYNC IPTV USERS BUTTON */}
+              <TouchableOpacity
+                style={[styles.simpleActionBtn, { borderColor: 'rgba(168, 85, 247, 0.4)', backgroundColor: 'rgba(168, 85, 247, 0.08)' }]}
+                onPress={() => handleSyncIptvUsers(selectedPartner)}
+                disabled={syncingIptvId === (selectedPartner?.partner_id || selectedPartner?.id)}
+              >
+                {syncingIptvId === (selectedPartner?.partner_id || selectedPartner?.id) ? (
+                  <ActivityIndicator size="small" color="#a855f7" />
+                ) : (
+                  <Feather name="refresh-cw" size={14} color="#a855f7" />
+                )}
+                <Text style={[styles.simpleActionBtnText, { color: '#a855f7' }]}>
+                  {syncingIptvId === (selectedPartner?.partner_id || selectedPartner?.id) ? 'Syncing...' : 'Sync IPTV Users'}
+                </Text>
               </TouchableOpacity>
 
               {/* IMPERSONATE BUTTON */}

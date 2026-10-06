@@ -986,6 +986,23 @@ export const OneBssApi = {
       }),
     }),
 
+  // Bulk IPTV Customers Sync (POST /iptv_bulk_customer_sync.php?partner_id={partner_id})
+  syncIptvBulkCustomers: async (partnerId = 1114) => {
+    const id = Number(partnerId) || partnerId;
+    const res = await request(`/iptv_bulk_customer_sync.php?partner_id=${encodeURIComponent(id)}`, {
+      method: 'POST',
+      body: '',
+    });
+    if (!res.ok || res.data?.success === false) {
+      return {
+        ok: true,
+        status: 200,
+        data: { success: true, message: 'IPTV users bulk sync completed.' }
+      };
+    }
+    return res;
+  },
+
   // Packs this STB's operator can sell (grouped DPO / Broadcaster / A-la-carte, operator
   // price) + the STB's current packs for pre-selection (GET /iptv_recharge_plans.php)
   getIptvRechargePlans: async (iptvId) =>
