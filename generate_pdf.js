@@ -197,7 +197,7 @@ const htmlContent = `<!DOCTYPE html>
       <span class="item-badge badge-completed">Completed</span>
     </div>
     <div class="item-desc">
-      Introduced dedicated <code>Offline</code> metric card in telemetry header and added a quick filter pill chip (<code>Offline (Count)</code>) allowing operators to isolate disconnected subscribers in one click.
+      Introduced dedicated <code>Offline</code> metric card in  header and added a quick filter pill chip (<code>Offline (Count)</code>) allowing operators to isolate disconnected subscribers in one click.
     </div>
     <div class="item-files">Affected Files: src/screens/CustomerScreen.js</div>
   </div>
@@ -390,12 +390,12 @@ const htmlContent = `<!DOCTYPE html>
     <div class="item-header">
       <div>
         <span class="item-num item-num-blue">ITEM 16</span>
-        <span class="item-title">Manual Telemetry Refresh Button</span>
+        <span class="item-title">Manual  Refresh Button</span>
       </div>
       <span class="item-badge badge-completed">Completed</span>
     </div>
     <div class="item-desc">
-      Added a <code>Refresh Telemetry</code> button in the partner list control bar to force live re-fetching of online and active counts with visual feedback.
+      Added a <code>Refresh </code> button in the partner list control bar to force live re-fetching of online and active counts with visual feedback.
     </div>
     <div class="item-files">Affected Files: src/screens/PartnerScreen.js</div>
   </div>
@@ -409,7 +409,7 @@ const htmlContent = `<!DOCTYPE html>
       <span class="item-badge badge-completed">Completed</span>
     </div>
     <div class="item-desc">
-      Positioned the IPTV Telemetry metric grid (Total Users, Active STBs, Expired STBs) directly underneath the Internet subscriber metric grid in the Partner Details view.
+      Positioned the IPTV  metric grid (Total Users, Active STBs, Expired STBs) directly underneath the Internet subscriber metric grid in the Partner Details view.
     </div>
     <div class="item-files">Affected Files: src/screens/PartnerScreen.js</div>
   </div>

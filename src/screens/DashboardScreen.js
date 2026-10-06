@@ -13,7 +13,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
   const isSuperAdmin = currentRole === 'superadmin';
   const currentPartnerId = user?.partner_id;
 
-  const [telemetry, setTelemetry] = useState(null);
+  const [dashboardData, setDashboardData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [syncingInet, setSyncingInet] = useState(false);
   const [syncingIptv, setSyncingIptv] = useState(false);
@@ -56,18 +56,18 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
           setPartnerCounts({ total, admins, operators });
         }).catch(() => {});
       }
-      const res = await OneBssApi.getDashboardTelemetry(currentPartnerId);
-      const data = res.data?.data || res.data?.telemetry || res.data;
+      const res = await OneBssApi.getDashboard(currentPartnerId);
+      const data = res.data?.data || res.data;
       if (data && (data.internet || data.iptv)) {
-        setTelemetry(data);
+        setDashboardData(data);
       } else {
-        setTelemetry({
+        setDashboardData({
           internet: { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 },
           iptv: { total: 0, active: 0, expired: 0 },
         });
       }
     } catch (e) {
-      setTelemetry({
+      setDashboardData({
         internet: { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 },
         iptv: { total: 0, active: 0, expired: 0 },
       });
@@ -170,8 +170,8 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
     initOperatorSyncAndRefresh();
   }, [currentPartnerId, currentRole]);
 
-  const inet = telemetry?.internet || { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 };
-  const iptv = telemetry?.iptv || { total: 0, active: 0, expired: 0 };
+  const inet = dashboardData?.internet || { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 };
+  const iptv = dashboardData?.iptv || { total: 0, active: 0, expired: 0 };
 
   const handleCardClick = (filterKey) => {
     if (onNavigateToCustomers) {
@@ -179,7 +179,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
     }
   };
 
-  if (loading && !telemetry) {
+  if (loading && !dashboardData) {
     return (
       <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 40 }]}>
         <ActivityIndicator size="large" color={COLORS.primary} />
@@ -418,7 +418,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
         </View>
       )}
 
-      {/* INTERNET TELEMETRY GRID */}
+      {/* INTERNET  GRID */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
         <Text style={styles.sectionHeaderTitle}>Subscriber Overview (Live Dashboard API)</Text>
         <TouchableOpacity
@@ -429,7 +429,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
         >
           <Feather name="refresh-cw" size={13} color="#10b981" />
           <Text style={{ fontSize: 12, fontWeight: '700', color: '#10b981' }}>
-            {loading ? 'Refreshing...' : 'Refresh Online Counts & Telemetry'}
+            {loading ? 'Refreshing...' : 'Refresh Online Counts & '}
           </Text>
         </TouchableOpacity>
       </View>
@@ -520,12 +520,12 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
         </TouchableOpacity>
       </View>
 
-      {/* IPTV TELEMETRY DATA CARD */}
+      {/* IPTV  DATA CARD */}
       <View style={[styles.card, GLASS_CARD_INTERACTIVE]}>
         <View style={styles.cardHeader}>
           <MaterialIcons name="live-tv" size={24} color="#8b5cf6" />
           <View style={{ marginLeft: 10, flex: 1 }}>
-            <Text style={styles.cardTitle}>IPTV Telemetry</Text>
+            <Text style={styles.cardTitle}>IPTV </Text>
           </View>
         </View>
 

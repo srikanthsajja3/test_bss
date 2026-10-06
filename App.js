@@ -95,7 +95,13 @@ export default function App() {
 
   const handleNavigateToPartners = (role = '') => {
     setPartnerInitialRole(role || '');
-    setActiveTab('partners');
+    setActiveTabState('partners');
+    try {
+      if (typeof window !== 'undefined') {
+        window.location.hash = 'partners';
+        localStorage.setItem('onebss_active_tab', 'partners');
+      }
+    } catch (e) {}
   };
 
   // Initialize base URL hash on first render if missing so browser back history doesn't land on a blank hash
@@ -156,6 +162,7 @@ export default function App() {
     setCustomerInitialFilter(filter);
     setCustomerInitialRange(range || '');
     setPartnerCreateRole(null);
+    setPartnerInitialRole('');
     try {
       if (typeof window !== 'undefined') {
         const parts = [];

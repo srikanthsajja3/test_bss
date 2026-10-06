@@ -418,7 +418,29 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [pageSize, setPageSize] = useState(100);
   const [operators, setOperators] = useState([]);
   const [selectedOperatorId, setSelectedOperatorId] = useState('');
+  const [operatorDropdownOpen, setOperatorDropdownOpen] = useState(false);
+  const [operatorSearchQuery, setOperatorSearchQuery] = useState('');
   const [selectedBranchFilter, setSelectedBranchFilter] = useState('');
+
+  const selectedOpObj = useMemo(() => {
+    if (!selectedOperatorId) return null;
+    return operators.find((op) => String(op.partner_id || op.id) === String(selectedOperatorId));
+  }, [operators, selectedOperatorId]);
+
+  const selectedOpLabel = selectedOpObj
+    ? `#${selectedOpObj.partner_id || selectedOpObj.id} - ${selectedOpObj.partner_name || selectedOpObj.company_name}`
+    : `All Operators (${operators.length})`;
+
+  const filteredOperators = useMemo(() => {
+    if (!operatorSearchQuery.trim()) return operators;
+    const q = operatorSearchQuery.toLowerCase().trim();
+    return operators.filter((op) => {
+      const idStr = String(op.partner_id || op.id || '').toLowerCase();
+      const nameStr = String(op.partner_name || op.company_name || op.name || '').toLowerCase();
+      const userStr = String(op.username || '').toLowerCase();
+      return idStr.includes(q) || nameStr.includes(q) || userStr.includes(q);
+    });
+  }, [operators, operatorSearchQuery]);
 
   // Item 7 & 8 Modal States
   const [modifyMobileCust, setModifyMobileCust] = useState(null);
@@ -439,6 +461,36 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [listCounts, setListCounts] = useState({}); // per-status counts (status filter ignored)
   const [loadingData, setLoadingData] = useState(true);
   const [listError, setListError] = useState('');
+
+  const dynamicBranches = useMemo(() => {
+    const branchSet = new Map();
+    (rawCustomers || []).forEach((c) => {
+      const bName = c.branch_name || c.iptv_branch_id || c.branch_id;
+      if (bName && String(bName).trim()) {
+        const val = String(bName).trim();
+        if (!branchSet.has(val)) {
+          branchSet.set(val, { id: val, label: c.branch_name ? `Branch: ${c.branch_name}` : `Branch #${val}` });
+        }
+      }
+    });
+
+    (operators || []).forEach((op) => {
+      if (op.iptv_branch_id && String(op.iptv_branch_id).trim()) {
+        const val = String(op.iptv_branch_id).trim();
+        if (!branchSet.has(val)) {
+          branchSet.set(val, { id: val, label: `Branch #${val} (${op.partner_name || 'Operator'})` });
+        }
+      }
+      if (op.partner_region && String(op.partner_region).trim()) {
+        const reg = String(op.partner_region).trim();
+        if (!branchSet.has(reg)) {
+          branchSet.set(reg, { id: reg, label: `${reg} Zone` });
+        }
+      }
+    });
+
+    return Array.from(branchSet.values());
+  }, [rawCustomers, operators]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 350);
@@ -1062,8 +1114,17 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
   const counts = listCounts;
   const filteredCustomers = useMemo(
-    () => rawCustomers.map(viewMode === 'iptv' ? mapIptvListRow : mapInternetListRow),
-    [rawCustomers, viewMode]
+    () => {
+      let rows = rawCustomers.map(viewMode === 'iptv' ? mapIptvListRow : mapInternetListRow);
+      if (selectedBranchFilter) {
+        rows = rows.filter((c) => {
+          const bVal = String(c.branch_name || c.iptv_branch_id || c.branch_id || c.partner_region || '').toLowerCase();
+          return bVal.includes(String(selectedBranchFilter).toLowerCase());
+        });
+      }
+      return rows;
+    },
+    [rawCustomers, viewMode, selectedBranchFilter]
   );
   const paginatedCustomers = filteredCustomers; // the server already returned just this page
   const totalPages = Math.max(1, Math.ceil(listTotal / pageSize));
@@ -1632,34 +1693,214 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           </View>
 
           {(isSuperAdmin(user) || (user?.account_role || user?.role || '').toLowerCase() === 'admin') && operators.length > 0 && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.cardBg || '#ffffff', borderWidth: 1, borderColor: COLORS.borderLight || '#cbd5e1', borderRadius: 8, paddingHorizontal: 10, height: 40 }}>
-              <Feather name="filter" size={14} color={COLORS.textDim} />
-              <select
+            <View style={{ position: 'relative', zIndex: 10000 }}>
+              <TouchableOpacity
                 style={{
-                  border: 'none',
-                  background: 'transparent',
-                  color: COLORS.textMain || '#000000',
-                  fontSize: 13,
-                  outline: 'none',
-                  cursor: 'pointer',
-                  fontWeight: '600',
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 8,
+                  backgroundColor: COLORS.cardBg || '#ffffff',
+                  borderWidth: 1,
+                  borderColor: selectedOperatorId ? (COLORS.primary || '#3b82f6') : (COLORS.borderLight || '#cbd5e1'),
+                  borderRadius: 8,
+                  paddingHorizontal: 12,
+                  height: 40,
+                  minWidth: 170,
+                  justifyContent: 'space-between',
                 }}
-                value={selectedOperatorId}
-                onChange={(e) => setSelectedOperatorId(e.target.value)}
+                onPress={() => setOperatorDropdownOpen(!operatorDropdownOpen)}
+                activeOpacity={0.7}
               >
-                <option value="">All Operators ({operators.length})</option>
-                {operators.map((op) => (
-                  <option key={op.partner_id || op.id} value={op.partner_id || op.id}>
-                    #{op.partner_id || op.id} - {op.partner_name || op.company_name}
-                  </option>
-                ))}
-              </select>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, overflow: 'hidden' }}>
+                  <Feather name="filter" size={14} color={selectedOperatorId ? (COLORS.primary || '#3b82f6') : COLORS.textDim} />
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      fontSize: 13,
+                      fontWeight: '600',
+                      color: selectedOperatorId ? (COLORS.primary || '#3b82f6') : (COLORS.textMain || '#000000'),
+                    }}
+                  >
+                    {selectedOpLabel}
+                  </Text>
+                </View>
+                <Feather name={operatorDropdownOpen ? "chevron-up" : "chevron-down"} size={14} color={COLORS.textDim} />
+              </TouchableOpacity>
+
+              {operatorDropdownOpen && (
+                <>
+                  {/* Web backdrop overlay to close dropdown on outside click */}
+                  <TouchableOpacity
+                    style={{
+                      position: 'fixed',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      zIndex: 9999,
+                      backgroundColor: 'transparent',
+                    }}
+                    activeOpacity={1}
+                    onPress={() => {
+                      setOperatorDropdownOpen(false);
+                      setOperatorSearchQuery('');
+                    }}
+                  />
+
+                  {/* Inline Dropdown Box with Search */}
+                  <View
+                    style={{
+                      position: 'absolute',
+                      top: 44,
+                      left: 0,
+                      width: isMobile ? 270 : 320,
+                      backgroundColor: '#ffffff',
+                      borderRadius: 10,
+                      borderWidth: 1,
+                      borderColor: '#cbd5e1',
+                      shadowColor: '#000000',
+                      shadowOffset: { width: 0, height: 6 },
+                      shadowOpacity: 0.2,
+                      shadowRadius: 15,
+                      elevation: 20,
+                      zIndex: 10000,
+                      padding: 8,
+                      boxShadow: '0 12px 28px -4px rgba(0, 0, 0, 0.2), 0 8px 10px -6px rgba(0, 0, 0, 0.1)',
+                    }}
+                  >
+                    {/* Search Input inside Dropdown */}
+                    <View
+                      style={{
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 8,
+                        backgroundColor: '#f8fafc',
+                        borderWidth: 1,
+                        borderColor: '#cbd5e1',
+                        borderRadius: 6,
+                        paddingHorizontal: 10,
+                        height: 38,
+                        marginBottom: 8,
+                      }}
+                    >
+                      <Feather name="search" size={14} color="#64748b" />
+                      <TextInput
+                        style={{
+                          flex: 1,
+                          fontSize: 13,
+                          color: '#0f172a',
+                          paddingVertical: 0,
+                          outline: 'none',
+                        }}
+                        placeholder="Search operator..."
+                        placeholderTextColor="#94a3b8"
+                        value={operatorSearchQuery}
+                        onChangeText={setOperatorSearchQuery}
+                        autoFocus={true}
+                      />
+                      {operatorSearchQuery ? (
+                        <TouchableOpacity onPress={() => setOperatorSearchQuery('')} style={{ padding: 2 }}>
+                          <Feather name="x" size={13} color="#64748b" />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+
+                    {/* Scrollable Operators List */}
+                    <ScrollView style={{ maxHeight: 240 }} keyboardShouldPersistTaps="handled" nestedScrollEnabled={true}>
+                      {/* All Operators Option */}
+                      {(!operatorSearchQuery || 'all operators'.includes(operatorSearchQuery.toLowerCase())) && (
+                        <TouchableOpacity
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            paddingVertical: 8,
+                            paddingHorizontal: 10,
+                            borderRadius: 6,
+                            backgroundColor: selectedOperatorId === '' ? 'rgba(59, 130, 246, 0.12)' : 'transparent',
+                            marginBottom: 2,
+                          }}
+                          onPress={() => {
+                            setSelectedOperatorId('');
+                            setOperatorDropdownOpen(false);
+                            setOperatorSearchQuery('');
+                          }}
+                        >
+                          <Text
+                            style={{
+                              fontSize: 13,
+                              fontWeight: selectedOperatorId === '' ? '700' : '600',
+                              color: selectedOperatorId === '' ? '#2563eb' : '#1e293b',
+                            }}
+                          >
+                            All Operators ({operators.length})
+                          </Text>
+                          {selectedOperatorId === '' && <Feather name="check" size={14} color="#2563eb" />}
+                        </TouchableOpacity>
+                      )}
+
+                      {/* Filtered Operator Items */}
+                      {filteredOperators.length > 0 ? (
+                        filteredOperators.map((op) => {
+                          const opId = String(op.partner_id || op.id);
+                          const isSelected = String(selectedOperatorId) === opId;
+                          const opName = op.partner_name || op.company_name || `Partner #${opId}`;
+                          return (
+                            <TouchableOpacity
+                              key={opId}
+                              style={{
+                                flexDirection: 'row',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                paddingVertical: 8,
+                                paddingHorizontal: 10,
+                                borderRadius: 6,
+                                backgroundColor: isSelected ? 'rgba(59, 130, 246, 0.12)' : 'transparent',
+                                marginBottom: 2,
+                              }}
+                              onPress={() => {
+                                setSelectedOperatorId(opId);
+                                setOperatorDropdownOpen(false);
+                                setOperatorSearchQuery('');
+                              }}
+                            >
+                              <View style={{ flex: 1, paddingRight: 8 }}>
+                                <Text
+                                  style={{
+                                    fontSize: 13,
+                                    fontWeight: isSelected ? '700' : '600',
+                                    color: isSelected ? '#2563eb' : '#0f172a',
+                                  }}
+                                  numberOfLines={1}
+                                >
+                                  #{opId} - {opName}
+                                </Text>
+                                {op.company_name && op.company_name !== op.partner_name ? (
+                                  <Text style={{ fontSize: 11, color: '#64748b' }} numberOfLines={1}>
+                                    {op.company_name}
+                                  </Text>
+                                ) : null}
+                              </View>
+                              {isSelected && <Feather name="check" size={14} color="#2563eb" />}
+                            </TouchableOpacity>
+                          );
+                        })
+                      ) : (
+                        <View style={{ paddingVertical: 16, alignItems: 'center', justifyContent: 'center' }}>
+                          <Feather name="search" size={18} color="#94a3b8" style={{ marginBottom: 4 }} />
+                          <Text style={{ fontSize: 12, color: '#64748b' }}>No matching operators</Text>
+                        </View>
+                      )}
+                    </ScrollView>
+                  </View>
+                </>
+              )}
             </View>
           )}
 
-          {/* STAFF / BRANCH FILTER DROPDOWN (ITEM 14) */}
+          {/* USER CATEGORY / SERVICE TYPE DROPDOWN (NETWORK USERS VS IPTV USERS) */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.cardBg || '#ffffff', borderWidth: 1, borderColor: COLORS.borderLight || '#cbd5e1', borderRadius: 8, paddingHorizontal: 10, height: 40 }}>
-            <Feather name="git-branch" size={14} color={COLORS.textDim} />
+            <Feather name={viewMode === 'iptv' ? "tv" : "wifi"} size={14} color={viewMode === 'iptv' ? "#8b5cf6" : "#3b82f6"} />
             <select
               style={{
                 border: 'none',
@@ -1670,13 +1911,36 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 cursor: 'pointer',
                 fontWeight: '600',
               }}
+              value={viewMode}
+              onChange={(e) => handleToggleMode(e.target.value)}
+            >
+              <option value="broadband">Network Users (Regular)</option>
+              <option value="iptv">IPTV Users (STB)</option>
+            </select>
+          </View>
+
+          {/* DYNAMIC STAFF / BRANCH FILTER DROPDOWN */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.cardBg || '#ffffff', borderWidth: 1, borderColor: selectedBranchFilter ? (COLORS.primary || '#3b82f6') : (COLORS.borderLight || '#cbd5e1'), borderRadius: 8, paddingHorizontal: 10, height: 40 }}>
+            <Feather name="git-branch" size={14} color={selectedBranchFilter ? (COLORS.primary || '#3b82f6') : COLORS.textDim} />
+            <select
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: selectedBranchFilter ? (COLORS.primary || '#3b82f6') : (COLORS.textMain || '#000000'),
+                fontSize: 13,
+                outline: 'none',
+                cursor: 'pointer',
+                fontWeight: '600',
+              }}
               value={selectedBranchFilter}
               onChange={(e) => setSelectedBranchFilter(e.target.value)}
             >
-              <option value="">All Staff / Branches</option>
-              <option value="branch_main">Main Branch (#101)</option>
-              <option value="branch_north">North Zone (#102)</option>
-              <option value="branch_south">South Zone (#103)</option>
+              <option value="">All Staff / Branches {dynamicBranches.length > 0 ? `(${dynamicBranches.length})` : ''}</option>
+              {dynamicBranches.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.label}
+                </option>
+              ))}
             </select>
           </View>
 
@@ -1791,7 +2055,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             </View>
 
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              {/* REFRESH BUTTON FOR ONLINE COUNTS & TELEMETRY (ITEM 16) */}
+              {/* REFRESH BUTTON FOR ONLINE COUNTS &  (ITEM 16) */}
               <TouchableOpacity
                 style={{
                   flexDirection: 'row',
@@ -1915,7 +2179,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </Text>
             </View>
 
-            {/* Table Rows */}
+            {/* Table Rows Body Container (ONLY SUBSCRIBER LIST ROWS SCROLL) */}
+            <ScrollView style={{ maxHeight: 600 }} nestedScrollEnabled={true} keyboardShouldPersistTaps="handled">
             {listError && !loadingData ? (
               <View style={{ padding: 30, alignItems: 'center', justifyContent: 'center' }}>
                 <Feather name="alert-circle" size={24} color="#dc2626" />
@@ -2216,6 +2481,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 );
               })
             )}
+            </ScrollView>
           </View>
         </ScrollView>
       </View>
@@ -2535,6 +2801,8 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 16,
     gap: 10,
+    zIndex: 9999,
+    overflow: 'visible',
   },
   topControlRow: {
     flexDirection: 'row',
@@ -2542,6 +2810,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     flexWrap: 'wrap',
     gap: 10,
+    zIndex: 9999,
+    overflow: 'visible',
   },
   toggleGroup: {
     flexDirection: 'row',
@@ -2589,7 +2859,18 @@ const styles = StyleSheet.create({
   card: { backgroundColor: '#ffffff', borderWidth: 1, borderColor: COLORS.glassBorder, borderRadius: 14, padding: 20, marginBottom: 20 },
   cardHeader: { marginBottom: 14 },
   cardTitle: { fontSize: 16, fontWeight: '700', color: COLORS.textMain },
-  tableHeader: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.glassBorder },
+  tableHeader: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 2,
+    borderBottomColor: COLORS.glassBorder || '#cbd5e1',
+    backgroundColor: '#ffffff',
+    position: 'sticky',
+    top: 0,
+    zIndex: 50,
+  },
   th: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase' },
   tr: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.05)', minHeight: 48 },
   tdBold: { fontSize: 13, fontWeight: '700', color: COLORS.textMain },

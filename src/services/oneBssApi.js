@@ -834,7 +834,7 @@ export const OneBssApi = {
     return res;
   },
 
-  // Module 8: Partner Telemetry & KYC Provider Mapping
+  // Module 8: Partner  & KYC Provider Mapping
   getKycProviderMapping: async (partnerId = 1116) => {
     const id = Number(partnerId) || partnerId;
     if (!id || id === 'undefined') {
@@ -1011,7 +1011,7 @@ export const OneBssApi = {
     return request(`/recharge_history.php?page=${page}&limit=${limit}`, { method: 'GET' });
   },
 
-  getDashboardTelemetry: async (partnerId = 1112) => {
+  getDashboard: async (partnerId = 1112) => {
     let targetId = partnerId;
     try {
       let res = await request(`/dashboard.php?partner_id=${targetId}`, { method: 'GET' });

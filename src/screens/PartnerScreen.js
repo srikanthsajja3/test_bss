@@ -24,9 +24,13 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
   const [selectedRole, setSelectedRole] = useState(initialRoleFilter || '');
+
+  React.useEffect(() => {
+    setSelectedRole(initialRoleFilter || '');
+  }, [initialRoleFilter]);
   const [selectedPartner, setSelectedPartner] = useState(null);
-  const [partnerTelemetry, setPartnerTelemetry] = useState(null);
-  const [loadingPartnerTelemetry, setLoadingPartnerTelemetry] = useState(false);
+  const [partner, setPartner] = useState(null);
+  const [loadingPartner, setLoadingPartner] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createRole, setCreateRole] = useState('admin');
 
@@ -71,11 +75,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   // Batch 2 Action States
   const [walletAction, setWalletAction] = useState('credit'); // 'credit' | 'debit'
   const [confirmStatusPartner, setConfirmStatusPartner] = useState(null);
-  const [refreshingTelemetry, setRefreshingTelemetry] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [kycPartner, setKycPartner] = useState(null);
   const [assignedKycProviders, setAssignedKycProviders] = useState(['digilocker', 'scoreme', 'manual']);
   const [loadingKycProviders, setLoadingKycProviders] = useState(false);
   const [savingKycProviders, setSavingKycProviders] = useState(false);
+  const [customProviderInput, setCustomProviderInput] = useState('');
 
   useEffect(() => {
     if (selectedPartner?.partner_id) {
@@ -87,14 +92,14 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         })
         .catch(() => {});
 
-      setLoadingPartnerTelemetry(true);
-      OneBssApi.getDashboardTelemetry(selectedPartner.partner_id)
+      setLoadingPartner(true);
+      OneBssApi.getDashboard(selectedPartner.partner_id)
         .then((res) => {
-          const data = res.data?.data || res.data?.telemetry || res.data;
+          const data = res.data?.data || res.data;
           if (data) {
             const internetData = data.internet || (data.total !== undefined ? data : null);
             const iptvData = data.iptv || null;
-            setPartnerTelemetry({
+            setPartner({
               ...data,
               internet: internetData || { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 },
               iptv: iptvData || { total: 0, active: 0, expired: 0 },
@@ -107,15 +112,15 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
               new: internetData?.new ?? data.new,
             });
           } else {
-            setPartnerTelemetry(null);
+            setPartner(null);
           }
         })
         .catch(() => {
-          setPartnerTelemetry(null);
+          setPartner(null);
         })
-        .finally(() => setLoadingPartnerTelemetry(false));
+        .finally(() => setLoadingPartner(false));
     } else {
-      setPartnerTelemetry(null);
+      setPartner(null);
     }
   }, [selectedPartner?.partner_id]);
 
@@ -942,17 +947,16 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     const pId = partner.partner_id || partner.id;
     setKycPartner(partner);
     setLoadingKycProviders(true);
+    setCustomProviderInput('');
     try {
       const res = await OneBssApi.kycProviders(pId);
       const data = res.data || {};
-      const list = Array.isArray(data.providers) ? data.providers : (Array.isArray(data.data?.providers) ? data.data.providers : null);
-      if (list && list.length > 0) {
-        setAssignedKycProviders(list.map((p) => String(p).toLowerCase()));
-      } else {
-        setAssignedKycProviders(['digilocker', 'scoreme', 'manual']);
-      }
+      const list = Array.isArray(data.providers)
+        ? data.providers
+        : (Array.isArray(data.data?.providers) ? data.data.providers : []);
+      setAssignedKycProviders(list.map((p) => String(p).toLowerCase()));
     } catch (e) {
-      setAssignedKycProviders(['digilocker', 'scoreme', 'manual']);
+      setAssignedKycProviders([]);
     } finally {
       setLoadingKycProviders(false);
     }
@@ -1011,10 +1015,6 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
               </TouchableOpacity>
             </View>
 
-            <Text style={{ fontSize: 13, color: COLORS.textMuted || '#94a3b8', marginBottom: 16 }}>
-              Select which Aadhaar KYC verification methods this operator is authorized to offer to their subscribers during onboarding:
-            </Text>
-
             {loadingKycProviders ? (
               <ActivityIndicator size="small" color="#f65cf4" style={{ marginVertical: 20 }} />
             ) : (
@@ -1052,6 +1052,33 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                     </TouchableOpacity>
                   );
                 })}
+
+                {/* Custom Provider Entry */}
+                <View style={{ marginTop: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.06)' }}>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 6 }}>Custom Provider Name:</Text>
+                  <View style={{ flexDirection: 'row', gap: 8 }}>
+                    <TextInput
+                      style={{ flex: 1, height: 38, backgroundColor: 'rgba(0,0,0,0.03)', borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)', borderRadius: 8, paddingHorizontal: 10, fontSize: 12, color: COLORS.textMain }}
+                      placeholder="e.g. aadhaar_xml or voter_id..."
+                      placeholderTextColor={COLORS.textDim}
+                      value={customProviderInput}
+                      onChangeText={setCustomProviderInput}
+                    />
+                    <TouchableOpacity
+                      style={{ backgroundColor: '#f65cf4', paddingHorizontal: 14, height: 38, borderRadius: 8, justifyContent: 'center', alignItems: 'center' }}
+                      onPress={() => {
+                        const p = customProviderInput.trim().toLowerCase();
+                        if (p && !assignedKycProviders.includes(p)) {
+                          setAssignedKycProviders((prev) => [...prev, p]);
+                          setCustomProviderInput('');
+                          toast.info(`Added "${p}" to KYC providers list.`);
+                        }
+                      }}
+                    >
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#ffffff' }}>Add</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
               </View>
             )}
 
@@ -2124,7 +2151,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
           <View style={{ marginBottom: 20 }}>
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
               <Text style={styles.sectionHeaderTitle}>Internet Subscriber Overview</Text>
-              {loadingPartnerTelemetry && (
+              {loadingPartner && (
                 <ActivityIndicator size="small" color={COLORS.primary} style={{ marginLeft: 8 }} />
               )}
             </View>
@@ -2140,7 +2167,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   <Feather name="arrow-up-right" size={13} color={COLORS.primary} />
                 </View>
                 <Text style={styles.statValueMetric}>
-                  {partnerTelemetry?.internet?.total ?? partnerTelemetry?.total ?? selectedPartner?.total_internet_accounts ?? selectedPartner?.total_users ?? 0}
+                  {partner?.internet?.total ?? partner?.total ?? selectedPartner?.total_internet_accounts ?? selectedPartner?.total_users ?? 0}
                 </Text>
               </View>
 
@@ -2154,7 +2181,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   <Feather name="arrow-up-right" size={13} color={COLORS.accentEmerald} />
                 </View>
                 <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>
-                  {partnerTelemetry?.internet?.active ?? partnerTelemetry?.active ?? selectedPartner?.active_internet_accounts ?? selectedPartner?.active_users ?? 0}
+                  {partner?.internet?.active ?? partner?.active ?? selectedPartner?.active_internet_accounts ?? selectedPartner?.active_users ?? 0}
                 </Text>
               </View>
 
@@ -2168,7 +2195,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   <Feather name="arrow-up-right" size={13} color="#3b82f6" />
                 </View>
                 <Text style={[styles.statValueMetric, { color: '#3b82f6' }]}>
-                  {partnerTelemetry?.internet?.online ?? partnerTelemetry?.online ?? selectedPartner?.online_internet_accounts ?? selectedPartner?.online_users ?? 0}
+                  {partner?.internet?.online ?? partner?.online ?? selectedPartner?.online_internet_accounts ?? selectedPartner?.online_users ?? 0}
                 </Text>
               </View>
 
@@ -2182,7 +2209,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   <Feather name="arrow-up-right" size={13} color={COLORS.accentRose} />
                 </View>
                 <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>
-                  {partnerTelemetry?.internet?.expired ?? partnerTelemetry?.expired ?? selectedPartner?.expired_internet_accounts ?? 0}
+                  {partner?.internet?.expired ?? partner?.expired ?? selectedPartner?.expired_internet_accounts ?? 0}
                 </Text>
               </View>
 
@@ -2196,7 +2223,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   <Feather name="arrow-up-right" size={13} color={COLORS.accentAmber} />
                 </View>
                 <Text style={[styles.statValueMetric, { color: COLORS.accentAmber }]}>
-                  {partnerTelemetry?.internet?.suspend ?? partnerTelemetry?.internet?.suspended ?? partnerTelemetry?.suspend ?? partnerTelemetry?.suspended ?? 0}
+                  {partner?.internet?.suspend ?? partner?.internet?.suspended ?? partner?.suspend ?? partner?.suspended ?? 0}
                 </Text>
               </View>
 
@@ -2210,7 +2237,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   <Feather name="arrow-up-right" size={13} color="#64748b" />
                 </View>
                 <Text style={[styles.statValueMetric, { color: '#64748b' }]}>
-                  {partnerTelemetry?.internet?.disabled ?? partnerTelemetry?.disabled ?? 0}
+                  {partner?.internet?.disabled ?? partner?.disabled ?? 0}
                 </Text>
               </View>
 
@@ -2224,15 +2251,15 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   <Feather name="arrow-up-right" size={13} color="#8b5cf6" />
                 </View>
                 <Text style={[styles.statValueMetric, { color: '#8b5cf6' }]}>
-                  {partnerTelemetry?.internet?.new ?? partnerTelemetry?.new ?? 0}
+                  {partner?.internet?.new ?? partner?.new ?? 0}
                 </Text>
               </View>
             </View>
 
-            {/* IPTV SUBSCRIBER TELEMETRY (PLACED DIRECTLY BELOW INTERNET OVERVIEW - ITEM 17) */}
+            {/* IPTV SUBSCRIBER  (PLACED DIRECTLY BELOW INTERNET OVERVIEW - ITEM 17) */}
             <View style={{ marginTop: 16 }}>
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-                <Text style={[styles.sectionHeaderTitle, { color: '#8b5cf6' }]}>IPTV Subscriber Overview (STB Telemetry)</Text>
+                <Text style={[styles.sectionHeaderTitle, { color: '#8b5cf6' }]}>IPTV Subscriber Overview (STB )</Text>
               </View>
 
               <View style={styles.statsGrid7}>
@@ -2246,7 +2273,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                     <Feather name="arrow-up-right" size={13} color="#8b5cf6" />
                   </View>
                   <Text style={[styles.statValueMetric, { color: '#8b5cf6' }]}>
-                    {partnerTelemetry?.iptv?.total ?? selectedPartner?.iptv_total_users ?? selectedPartner?.active_iptv_accounts ?? 0}
+                    {partner?.iptv?.total ?? selectedPartner?.iptv_total_users ?? selectedPartner?.active_iptv_accounts ?? 0}
                   </Text>
                 </View>
 
@@ -2260,7 +2287,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                     <Feather name="arrow-up-right" size={13} color={COLORS.accentEmerald} />
                   </View>
                   <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>
-                    {partnerTelemetry?.iptv?.active ?? selectedPartner?.active_iptv_accounts ?? 0}
+                    {partner?.iptv?.active ?? selectedPartner?.active_iptv_accounts ?? 0}
                   </Text>
                 </View>
 
@@ -2274,7 +2301,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                     <Feather name="arrow-up-right" size={13} color={COLORS.accentRose} />
                   </View>
                   <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>
-                    {partnerTelemetry?.iptv?.expired ?? selectedPartner?.expired_iptv_accounts ?? 0}
+                    {partner?.iptv?.expired ?? selectedPartner?.expired_iptv_accounts ?? 0}
                   </Text>
                 </View>
               </View>
@@ -2478,23 +2505,23 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 <Text style={{ fontSize: 12, fontWeight: '700', color: '#ffffff' }}>Add Operator</Text>
               </TouchableOpacity>
 
-              {/* MANUAL REFRESH TELEMETRY BUTTON (ITEM 16) */}
+              {/* MANUAL REFRESH  BUTTON (ITEM 16) */}
               <TouchableOpacity
                 style={[
                   { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.3)' },
                   isMobile && { flex: 1, justifyContent: 'center' }
                 ]}
                 onPress={async () => {
-                  setRefreshingTelemetry(true);
+                  setRefreshing(true);
                   await fetchPartners();
-                  setRefreshingTelemetry(false);
-                  toast.success('Partner telemetry active & online counts refreshed!');
+                  setRefreshing(false);
+                  toast.success('Partner  active & online counts refreshed!');
                 }}
-                disabled={refreshingTelemetry}
+                disabled={refreshing}
               >
                 <Feather name="refresh-cw" size={14} color="#3b82f6" />
                 <Text style={{ fontSize: 12, fontWeight: '700', color: '#3b82f6' }}>
-                  {refreshingTelemetry ? 'Refreshing...' : 'Refresh Telemetry'}
+                  {refreshing ? 'Refreshing...' : 'Refresh '}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -2588,7 +2615,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                           </Text>
                         </View>
 
-                        {/* TELEMETRY COUNTS & IPTV ACTIVE BADGE (ITEM 13) */}
+                        {/*  COUNTS & IPTV ACTIVE BADGE (ITEM 13) */}
                         <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
                           <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5 }}>
                             <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>
@@ -2727,7 +2754,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                         </TouchableOpacity>
                       </View>
 
-                      {/* TELEMETRY COUNTS & IPTV ACTIVE BADGE (ITEM 13) */}
+                      {/*  COUNTS & IPTV ACTIVE BADGE (ITEM 13) */}
                       <View style={[{ flex: 2.0 }, styles.td]}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                           <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5 }}>
@@ -2743,7 +2770,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                         </View>
                       </View>
 
-                      {/* TELEMETRY COUNTS & IPTV ACTIVE BADGE (ITEM 13) */}
+                      {/*  COUNTS & IPTV ACTIVE BADGE (ITEM 13) */}
                       <View style={[{ flex: 2.0 }, styles.td]}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
                           <View style={{ backgroundColor: 'rgba(139, 92, 246, 0.12)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5 }}>
