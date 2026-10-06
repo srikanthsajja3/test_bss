@@ -418,20 +418,9 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
         </View>
       )}
 
-      {/* INTERNET  GRID */}
+      {/* INTERNET GRID */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
         <Text style={styles.sectionHeaderTitle}>Subscriber Overview (Live Dashboard API)</Text>
-        <TouchableOpacity
-          style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(16, 185, 129, 0.12)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.3)', paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8 }}
-          onPress={refreshData}
-          disabled={loading}
-          title="Refresh active & online subscriber counts"
-        >
-          <Feather name="refresh-cw" size={13} color="#10b981" />
-          <Text style={{ fontSize: 12, fontWeight: '700', color: '#10b981' }}>
-            {loading ? 'Refreshing...' : 'Refresh Online Counts & '}
-          </Text>
-        </TouchableOpacity>
       </View>
 
       <View style={styles.statsGrid7}>

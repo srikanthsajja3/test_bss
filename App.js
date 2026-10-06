@@ -315,9 +315,9 @@ export default function App() {
       case 'partners':
         return { title: 'Partners', subtitle: 'Gateway Bindings & Hierarchy' };
       case 'customers':
-        return { title: 'Subscribers', subtitle: 'Internet & IPTV Accounts' };
+        return { title: 'Internet Subscribers'};
       case 'iptv_customers':
-        return { title: 'IPTV Subscribers', subtitle: 'STB Accounts & Packages' };
+        return { title: 'IPTV Subscribers'};
       default:
         return { title: 'OneBSS Platform', subtitle: 'Management Portal' };
     }

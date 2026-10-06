@@ -1673,7 +1673,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       <View style={styles.unifiedControlCard}>
         {/* Search Bar, Operator Filter & Add Customer Button */}
         <View style={[styles.topControlRow, { gap: 10, flexWrap: 'wrap', alignItems: 'center' }]}>
-          <View style={[styles.searchBox, { width: isMobile ? '100%' : 380, maxWidth: '100%' }]}>
+          <View style={[styles.searchBox, { width: isMobile ? '100%' : 260, maxWidth: '100%' }]}>
             <Feather name="search" size={15} color={COLORS.textDim} />
             <TextInput
               style={styles.searchInput}
@@ -1752,8 +1752,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                     style={{
                       position: 'absolute',
                       top: 44,
-                      left: 0,
-                      width: isMobile ? 270 : 320,
+                      left: isMobile ? 0 : undefined,
+                      right: isMobile ? undefined : 0,
+                      width: isMobile ? 260 : 280,
                       backgroundColor: '#ffffff',
                       borderRadius: 10,
                       borderWidth: 1,
@@ -1898,85 +1899,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             </View>
           )}
 
-          {/* USER CATEGORY / SERVICE TYPE DROPDOWN (NETWORK USERS VS IPTV USERS) */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.cardBg || '#ffffff', borderWidth: 1, borderColor: COLORS.borderLight || '#cbd5e1', borderRadius: 8, paddingHorizontal: 10, height: 40 }}>
-            <Feather name={viewMode === 'iptv' ? "tv" : "wifi"} size={14} color={viewMode === 'iptv' ? "#8b5cf6" : "#3b82f6"} />
-            <select
-              style={{
-                border: 'none',
-                background: 'transparent',
-                color: COLORS.textMain || '#000000',
-                fontSize: 13,
-                outline: 'none',
-                cursor: 'pointer',
-                fontWeight: '600',
-              }}
-              value={viewMode}
-              onChange={(e) => handleToggleMode(e.target.value)}
-            >
-              <option value="broadband">Network Users (Regular)</option>
-              <option value="iptv">IPTV Users (STB)</option>
-            </select>
-          </View>
 
-          {/* DYNAMIC STAFF / BRANCH FILTER DROPDOWN */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: COLORS.cardBg || '#ffffff', borderWidth: 1, borderColor: selectedBranchFilter ? (COLORS.primary || '#3b82f6') : (COLORS.borderLight || '#cbd5e1'), borderRadius: 8, paddingHorizontal: 10, height: 40 }}>
-            <Feather name="git-branch" size={14} color={selectedBranchFilter ? (COLORS.primary || '#3b82f6') : COLORS.textDim} />
-            <select
-              style={{
-                border: 'none',
-                background: 'transparent',
-                color: selectedBranchFilter ? (COLORS.primary || '#3b82f6') : (COLORS.textMain || '#000000'),
-                fontSize: 13,
-                outline: 'none',
-                cursor: 'pointer',
-                fontWeight: '600',
-              }}
-              value={selectedBranchFilter}
-              onChange={(e) => setSelectedBranchFilter(e.target.value)}
-            >
-              <option value="">All Staff / Branches {dynamicBranches.length > 0 ? `(${dynamicBranches.length})` : ''}</option>
-              {dynamicBranches.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.label}
-                </option>
-              ))}
-            </select>
-          </View>
 
-          {/* ADD IPTV CUSTOMER (UNREGISTERED USER) (ITEM 1) */}
-          {viewMode === 'iptv' && (
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#8b5cf6', paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8 }}
-              onPress={() => setShowUnregisteredIptvModal(true)}
-            >
-              <Feather name="tv" size={14} color="#ffffff" />
-              <Text style={{ fontSize: 12, fontWeight: '700', color: '#ffffff' }}>Add IPTV Customer</Text>
-            </TouchableOpacity>
-          )}
-
-          {/* REFRESH BUTTON (UPDATES ONLINE COUNTS & SUBSCRIBER LIST) */}
-          <TouchableOpacity
-            style={{
-              flexDirection: 'row',
-              alignItems: 'center',
-              gap: 6,
-              backgroundColor: 'rgba(59, 130, 246, 0.1)',
-              borderWidth: 1,
-              borderColor: 'rgba(59, 130, 246, 0.3)',
-              paddingHorizontal: 12,
-              height: 40,
-              borderRadius: 8,
-            }}
-            onPress={loadCustomerDataFromApi}
-            disabled={loadingData}
-            title="Refresh subscriber accounts & live online status"
-          >
-            <Feather name="refresh-cw" size={14} color="#2563eb" />
-            <Text style={{ fontSize: 12, fontWeight: '700', color: '#2563eb' }}>
-              {loadingData ? 'Refreshing...' : 'Refresh'}
-            </Text>
-          </TouchableOpacity>
 
           {((user?.role || user?.account_role || '').toLowerCase() === 'operator') && (
             <TouchableOpacity style={styles.addCustomerHeaderBtn} onPress={() => setShowAddCustomer(true)}>
@@ -2055,28 +1979,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             </View>
 
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-              {/* REFRESH BUTTON FOR ONLINE COUNTS &  (ITEM 16) */}
-              <TouchableOpacity
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 6,
-                  paddingHorizontal: 12,
-                  paddingVertical: 6,
-                  borderRadius: 6,
-                  backgroundColor: 'rgba(37, 99, 235, 0.1)',
-                  borderWidth: 1,
-                  borderColor: 'rgba(37, 99, 235, 0.3)',
-                }}
-                onPress={() => loadCustomerDataFromApi()}
-                disabled={loadingData}
-                title="Refresh subscriber accounts & live online status"
-              >
-                <Feather name="refresh-cw" size={13} color="#2563eb" />
-                <Text style={{ fontSize: 12, fontWeight: '700', color: '#2563eb' }}>
-                  {loadingData ? 'Refreshing...' : 'Refresh Online Counts'}
-                </Text>
-              </TouchableOpacity>
 
               {/* Items Per Page Selector */}
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>

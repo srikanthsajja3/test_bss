@@ -136,8 +136,9 @@ export const Header = ({
         )}
 
         {onRefresh ? (
-          <TouchableOpacity style={styles.iconBtn} onPress={onRefresh} title="Refresh">
-            <Feather name="refresh-cw" size={16} color={COLORS.textMain} />
+          <TouchableOpacity style={styles.btnHeaderRefresh} onPress={onRefresh} title="Refresh data">
+            <Feather name="refresh-cw" size={14} color="#2563eb" />
+            <Text style={styles.btnHeaderRefreshText}>Refresh</Text>
           </TouchableOpacity>
         ) : null}
 
@@ -230,6 +231,22 @@ const styles = StyleSheet.create({
     padding: 10,
     borderRadius: 10,
     backgroundColor: 'rgba(0,0,0,0.05)',
+  },
+  btnHeaderRefresh: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: 'rgba(37, 99, 235, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(37, 99, 235, 0.25)',
+  },
+  btnHeaderRefreshText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#2563eb',
   },
   btnAdmin: {
     flexDirection: 'row',

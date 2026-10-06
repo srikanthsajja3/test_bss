@@ -2505,25 +2505,6 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 <Text style={{ fontSize: 12, fontWeight: '700', color: '#ffffff' }}>Add Operator</Text>
               </TouchableOpacity>
 
-              {/* MANUAL REFRESH  BUTTON (ITEM 16) */}
-              <TouchableOpacity
-                style={[
-                  { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.3)' },
-                  isMobile && { flex: 1, justifyContent: 'center' }
-                ]}
-                onPress={async () => {
-                  setRefreshing(true);
-                  await fetchPartners();
-                  setRefreshing(false);
-                  toast.success('Partner  active & online counts refreshed!');
-                }}
-                disabled={refreshing}
-              >
-                <Feather name="refresh-cw" size={14} color="#3b82f6" />
-                <Text style={{ fontSize: 12, fontWeight: '700', color: '#3b82f6' }}>
-                  {refreshing ? 'Refreshing...' : 'Refresh '}
-                </Text>
-              </TouchableOpacity>
             </View>
 
             <View style={[styles.roleFilters, isMobile && { width: '100%', justifyContent: 'space-between', marginTop: 4 }]}>

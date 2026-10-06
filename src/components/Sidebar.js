@@ -41,29 +41,82 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
       {/* Navigation Links */}
       <View style={styles.menuList}>
         {menuItems.map((item) => {
-          const isActive = activeTab === item.id;
+          const isActive = item.id === 'customers'
+            ? (activeTab === 'customers' || activeTab === 'iptv_customers')
+            : activeTab === item.id;
           return (
-            <TouchableOpacity
-              key={item.id}
-              style={[
-                styles.menuItem,
-                isCollapsed && styles.menuItemCollapsed,
-                isActive && styles.menuItemActive,
-              ]}
-              onPress={() => onSelectTab(item.id)}
-              title={item.label}
-            >
-              <Feather
-                name={item.icon}
-                size={18}
-                color={isActive ? '#ffffff' : COLORS.textMuted}
-              />
-              {!isCollapsed && (
-                <Text style={[styles.menuText, isActive && styles.menuTextActive]}>
-                  {item.label}
-                </Text>
+            <React.Fragment key={item.id}>
+              <TouchableOpacity
+                style={[
+                  styles.menuItem,
+                  isCollapsed && styles.menuItemCollapsed,
+                  isActive && styles.menuItemActive,
+                ]}
+                onPress={() => onSelectTab(item.id)}
+                title={item.label}
+              >
+                <Feather
+                  name={item.icon}
+                  size={18}
+                  color={isActive ? '#ffffff' : COLORS.textMuted}
+                />
+                {!isCollapsed && (
+                  <Text style={[styles.menuText, isActive && styles.menuTextActive]}>
+                    {item.label}
+                  </Text>
+                )}
+              </TouchableOpacity>
+
+              {item.id === 'customers' && !isCollapsed && (
+                <View style={styles.treeContainer}>
+                  {/* Tree branch 1: Network Users (Regular) */}
+                  <TouchableOpacity
+                    style={[
+                      styles.treeSubItem,
+                      activeTab === 'customers' && styles.treeSubItemActiveBroadband,
+                    ]}
+                    onPress={() => onSelectTab('customers')}
+                  >
+                    <Feather
+                      name="wifi"
+                      size={13}
+                      color={activeTab === 'customers' ? '#2563eb' : COLORS.textMuted}
+                    />
+                    <Text
+                      style={[
+                        styles.treeSubText,
+                        activeTab === 'customers' && styles.treeSubTextActiveBroadband,
+                      ]}
+                    >
+                      Internet Users
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* Tree branch 2: IPTV Users (STB) */}
+                  <TouchableOpacity
+                    style={[
+                      styles.treeSubItem,
+                      activeTab === 'iptv_customers' && styles.treeSubItemActiveIPTV,
+                    ]}
+                    onPress={() => onSelectTab('iptv_customers')}
+                  >
+                    <Feather
+                      name="tv"
+                      size={13}
+                      color={activeTab === 'iptv_customers' ? '#8b5cf6' : COLORS.textMuted}
+                    />
+                    <Text
+                      style={[
+                        styles.treeSubText,
+                        activeTab === 'iptv_customers' && styles.treeSubTextActiveIPTV,
+                      ]}
+                    >
+                      IPTV Users
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               )}
-            </TouchableOpacity>
+            </React.Fragment>
           );
         })}
       </View>
@@ -168,6 +221,42 @@ const styles = StyleSheet.create({
   menuTextActive: {
     color: '#ffffff',
     fontWeight: '600',
+  },
+  treeContainer: {
+    paddingLeft: 10,
+    marginTop: 4,
+    marginBottom: 6,
+    borderLeftWidth: 2,
+    borderLeftColor: '#cbd5e1',
+    marginLeft: 22,
+    gap: 4,
+  },
+  treeSubItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 7,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+  },
+  treeSubItemActiveBroadband: {
+    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+  },
+  treeSubItemActiveIPTV: {
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+  },
+  treeSubText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: COLORS.textMuted,
+  },
+  treeSubTextActiveBroadband: {
+    color: '#2563eb',
+    fontWeight: '700',
+  },
+  treeSubTextActiveIPTV: {
+    color: '#8b5cf6',
+    fontWeight: '700',
   },
   footerSection: {
     paddingTop: 14,
