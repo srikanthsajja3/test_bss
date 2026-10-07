@@ -1127,6 +1127,250 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       <SessionHistoryModal visible={!!sessionReq} internetId={sessionReq?.internet_id} username={sessionReq?.username} onClose={() => setSessionReq(null)} />
       {canSeeDocuments ? <DocumentsModal visible={documentsOpen} customer={activeCustomer} onClose={() => setDocumentsOpen(false)} /> : null}
       <IptvRechargeModal visible={!!iptvRechargeReq} account={iptvRechargeReq} onClose={() => setIptvRechargeReq(null)} onConfirm={confirmIptvRecharge} />
+
+      {/* EDIT SUBSCRIBER DETAILS MODAL */}
+      <Modal visible={!!editingCustomer} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <Feather name="edit" size={18} color={COLORS.primary} />
+                <Text style={styles.modalTitle}>
+                  {viewMode === 'iptv' ? 'Edit Pioneer STB Record' : 'Edit Subscriber Details'}
+                </Text>
+              </View>
+              <TouchableOpacity onPress={() => setEditingCustomer(null)}>
+                <Feather name="x" size={20} color={COLORS.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalSub}>
+              Update profile fields directly in the OneBSS engine via <Text style={{ fontWeight: '700' }}>update_internet_customer.php</Text> or <Text style={{ fontWeight: '700' }}>update_iptv_stb.php</Text>
+            </Text>
+
+            <View style={styles.formGrid}>
+              <View style={styles.fieldItem}>
+                <Text style={styles.fieldLabel}>SUBSCRIBER FULL NAME</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={editForm.name}
+                  onChangeText={(val) => setEditForm((p) => ({ ...p, name: val }))}
+                />
+              </View>
+
+              <View style={styles.fieldItem}>
+                <Text style={styles.fieldLabel}>MOBILE NUMBER</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={editForm.mobile}
+                  onChangeText={(val) => setEditForm((p) => ({ ...p, mobile: val }))}
+                  keyboardType="phone-pad"
+                />
+              </View>
+
+              <View style={styles.fieldItem}>
+                <Text style={styles.fieldLabel}>{viewMode === 'iptv' ? 'IPTV CHANNEL PACKAGE' : 'BROADBAND PLAN'}</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={editForm.plan}
+                  onChangeText={(val) => setEditForm((p) => ({ ...p, plan: val }))}
+                />
+              </View>
+
+              {viewMode === 'iptv' && (
+                <>
+                  <View style={styles.fieldItem}>
+                    <Text style={styles.fieldLabel}>STB SERIAL ID</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      value={editForm.stb_id}
+                      onChangeText={(val) => setEditForm((p) => ({ ...p, stb_id: val }))}
+                    />
+                  </View>
+                  <View style={styles.fieldItem}>
+                    <Text style={styles.fieldLabel}>STB MAC ADDRESS</Text>
+                    <TextInput
+                      style={styles.formInput}
+                      value={editForm.stb_mac}
+                      onChangeText={(val) => setEditForm((p) => ({ ...p, stb_mac: val }))}
+                    />
+                  </View>
+                </>
+              )}
+
+              <View style={styles.fieldItem}>
+                <Text style={styles.fieldLabel}>ACCOUNT STATUS</Text>
+                <View style={styles.statusChipPicker}>
+                  {['active', 'expired', 'suspend'].map((st) => (
+                    <TouchableOpacity
+                      key={st}
+                      style={[
+                        styles.statusPickerChip,
+                        editForm.status === st && styles.statusPickerChipActive,
+                      ]}
+                      onPress={() => setEditForm((p) => ({ ...p, status: st }))}
+                    >
+                      <Text
+                        style={[
+                          styles.statusPickerText,
+                          editForm.status === st && styles.statusPickerTextActive,
+                        ]}
+                      >
+                        {st.toUpperCase()}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+            </View>
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => setEditingCustomer(null)}
+              >
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.saveBtn}
+                onPress={handleSaveEdit}
+                disabled={saving}
+              >
+                <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save & Sync API'}</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* MODIFY MOBILE NUMBER MODAL (ITEM 7) */}
+      {modifyMobileCust && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setModifyMobileCust(null)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Modify Mobile Number</Text>
+                <TouchableOpacity onPress={() => setModifyMobileCust(null)}>
+                  <Feather name="x" size={18} color={COLORS.textDim} />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.modalSub}>Update subscriber contact mobile number for #{modifyMobileCust.cust_id || modifyMobileCust.id}</Text>
+              <View style={{ marginBottom: 16 }}>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 6 }}>PRIMARY MOBILE NUMBER *</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={newMobileVal}
+                  onChangeText={setNewMobileVal}
+                  placeholder="Enter 10-digit mobile number"
+                  keyboardType="phone-pad"
+                />
+              </View>
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={() => setModifyMobileCust(null)}>
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.saveBtn}
+                  disabled={savingMobile}
+                  onPress={async () => {
+                    if (newMobileVal.trim().length < 10) return toast.info('Please enter a valid 10-digit mobile number');
+                    setSavingMobile(true);
+                    try {
+                      toast.success(`Mobile number updated to ${newMobileVal.trim()}!`);
+                      setModifyMobileCust(null);
+                      loadCustomerDataFromApi();
+                    } catch (e) {
+                      toast.error('Failed to update mobile number.');
+                    } finally {
+                      setSavingMobile(false);
+                    }
+                  }}
+                >
+                  <Text style={styles.saveBtnText}>{savingMobile ? 'Updating...' : 'Save Mobile Number'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* AADHAAR VERIFY MODAL FOR EXISTING CUSTOMERS (ITEM 5 & ITEM 8) */}
+      {verifyAadhaarCust && (
+        <VerifyCustomerModal
+          visible={!!verifyAadhaarCust}
+          onClose={() => setVerifyAadhaarCust(null)}
+          internetId={verifyAadhaarCust.internet_id || verifyAadhaarCust.id}
+          username={verifyAadhaarCust.username}
+          customerName={verifyAadhaarCust.full_name || verifyAadhaarCust.name}
+          onVerified={async () => {
+            toast.success(`Aadhaar verification completed for ${verifyAadhaarCust.full_name || verifyAadhaarCust.username}!`);
+            setVerifyAadhaarCust(null);
+            loadCustomerDataFromApi();
+          }}
+        />
+      )}
+
+      {/* ADD IPTV UNREGISTERED CUSTOMER MODAL (ITEM 1) */}
+      {showUnregisteredIptvModal && (
+        <Modal visible transparent animationType="fade" onRequestClose={() => setShowUnregisteredIptvModal(false)}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Add IPTV Subscriber (Unregistered User)</Text>
+                <TouchableOpacity onPress={() => setShowUnregisteredIptvModal(false)}>
+                  <Feather name="x" size={18} color={COLORS.textDim} />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.modalSub}>Add an IPTV customer directly even if not yet registered in the core database.</Text>
+              
+              <View style={{ gap: 12, marginBottom: 20 }}>
+                <View>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 4 }}>SUBSCRIBER FULL NAME *</Text>
+                  <TextInput style={styles.formInput} placeholder="Enter full name" value={unregisteredIptvName} onChangeText={setUnregisteredIptvName} />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 4 }}>MOBILE NUMBER *</Text>
+                  <TextInput style={styles.formInput} placeholder="10-digit mobile number" value={unregisteredIptvMobile} onChangeText={setUnregisteredIptvMobile} keyboardType="phone-pad" />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 4 }}>IPTV STB BOX / MAC ADDRESS *</Text>
+                  <TextInput style={styles.formInput} placeholder="e.g. 00:1A:79:45:67:89 or STB-99482" value={unregisteredIptvMac} onChangeText={setUnregisteredIptvMac} />
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
+                <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowUnregisteredIptvModal(false)}>
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.saveBtn, { backgroundColor: '#8b5cf6' }]}
+                  disabled={submittingIptvAdd}
+                  onPress={async () => {
+                    if (!unregisteredIptvMobile.trim()) return toast.info('Mobile number is required');
+                    setSubmittingIptvAdd(true);
+                    try {
+                      await OneBssApi.syncIptvCustomers(unregisteredIptvMobile.trim());
+                      toast.success('Unregistered IPTV subscriber registered and synchronized via Gateway API!');
+                      setShowUnregisteredIptvModal(false);
+                      setUnregisteredIptvName('');
+                      setUnregisteredIptvMobile('');
+                      setUnregisteredIptvMac('');
+                      loadCustomerDataFromApi();
+                    } catch (e) {
+                      toast.error('Failed to register IPTV subscriber.');
+                    } finally {
+                      setSubmittingIptvAdd(false);
+                    }
+                  }}
+                >
+                  <Text style={styles.saveBtnText}>{submittingIptvAdd ? 'Registering...' : 'Register & Sync IPTV'}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
     </>
   );
 
@@ -2594,249 +2838,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         </ScrollView>
       </View>
     </View>
-
-      {/* EDIT SUBSCRIBER DETAILS MODAL */}
-      <Modal visible={!!editingCustomer} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                <Feather name="edit" size={18} color={COLORS.primary} />
-                <Text style={styles.modalTitle}>
-                  {viewMode === 'iptv' ? 'Edit Pioneer STB Record' : 'Edit Subscriber Details'}
-                </Text>
-              </View>
-              <TouchableOpacity onPress={() => setEditingCustomer(null)}>
-                <Feather name="x" size={20} color={COLORS.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.modalSub}>
-              Update profile fields directly in the OneBSS engine via <Text style={{ fontWeight: '700' }}>update_internet_customer.php</Text> or <Text style={{ fontWeight: '700' }}>update_iptv_stb.php</Text>
-            </Text>
-
-            <View style={styles.formGrid}>
-              <View style={styles.fieldItem}>
-                <Text style={styles.fieldLabel}>SUBSCRIBER FULL NAME</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={editForm.name}
-                  onChangeText={(val) => setEditForm((p) => ({ ...p, name: val }))}
-                />
-              </View>
-
-              <View style={styles.fieldItem}>
-                <Text style={styles.fieldLabel}>MOBILE NUMBER</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={editForm.mobile}
-                  onChangeText={(val) => setEditForm((p) => ({ ...p, mobile: val }))}
-                  keyboardType="phone-pad"
-                />
-              </View>
-
-              <View style={styles.fieldItem}>
-                <Text style={styles.fieldLabel}>{viewMode === 'iptv' ? 'IPTV CHANNEL PACKAGE' : 'BROADBAND PLAN'}</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={editForm.plan}
-                  onChangeText={(val) => setEditForm((p) => ({ ...p, plan: val }))}
-                />
-              </View>
-
-              {viewMode === 'iptv' && (
-                <>
-                  <View style={styles.fieldItem}>
-                    <Text style={styles.fieldLabel}>STB SERIAL ID</Text>
-                    <TextInput
-                      style={styles.formInput}
-                      value={editForm.stb_id}
-                      onChangeText={(val) => setEditForm((p) => ({ ...p, stb_id: val }))}
-                    />
-                  </View>
-                  <View style={styles.fieldItem}>
-                    <Text style={styles.fieldLabel}>STB MAC ADDRESS</Text>
-                    <TextInput
-                      style={styles.formInput}
-                      value={editForm.stb_mac}
-                      onChangeText={(val) => setEditForm((p) => ({ ...p, stb_mac: val }))}
-                    />
-                  </View>
-                </>
-              )}
-
-              <View style={styles.fieldItem}>
-                <Text style={styles.fieldLabel}>ACCOUNT STATUS</Text>
-                <View style={styles.statusChipPicker}>
-                  {['active', 'expired', 'suspend'].map((st) => (
-                    <TouchableOpacity
-                      key={st}
-                      style={[
-                        styles.statusPickerChip,
-                        editForm.status === st && styles.statusPickerChipActive,
-                      ]}
-                      onPress={() => setEditForm((p) => ({ ...p, status: st }))}
-                    >
-                      <Text
-                        style={[
-                          styles.statusPickerText,
-                          editForm.status === st && styles.statusPickerTextActive,
-                        ]}
-                      >
-                        {st.toUpperCase()}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={styles.cancelBtn}
-                onPress={() => setEditingCustomer(null)}
-              >
-                <Text style={styles.cancelBtnText}>Cancel</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.saveBtn}
-                onPress={handleSaveEdit}
-                disabled={saving}
-              >
-                <Text style={styles.saveBtnText}>{saving ? 'Saving...' : 'Save & Sync API'}</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-      {/* MODIFY MOBILE NUMBER MODAL (ITEM 7) */}
-      {modifyMobileCust && (
-        <Modal visible transparent animationType="fade" onRequestClose={() => setModifyMobileCust(null)}>
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Modify Mobile Number</Text>
-                <TouchableOpacity onPress={() => setModifyMobileCust(null)}>
-                  <Feather name="x" size={18} color={COLORS.textDim} />
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.modalSub}>Update subscriber contact mobile number for #{modifyMobileCust.cust_id || modifyMobileCust.id}</Text>
-              <View style={{ marginBottom: 16 }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 6 }}>PRIMARY MOBILE NUMBER *</Text>
-                <TextInput
-                  style={styles.formInput}
-                  value={newMobileVal}
-                  onChangeText={setNewMobileVal}
-                  placeholder="Enter 10-digit mobile number"
-                  keyboardType="phone-pad"
-                />
-              </View>
-              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
-                <TouchableOpacity style={styles.cancelBtn} onPress={() => setModifyMobileCust(null)}>
-                  <Text style={styles.cancelBtnText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.saveBtn}
-                  disabled={savingMobile}
-                  onPress={async () => {
-                    if (newMobileVal.trim().length < 10) return toast.info('Please enter a valid 10-digit mobile number');
-                    setSavingMobile(true);
-                    try {
-                      toast.success(`Mobile number updated to ${newMobileVal.trim()}!`);
-                      setModifyMobileCust(null);
-                      loadCustomerDataFromApi();
-                    } catch (e) {
-                      toast.error('Failed to update mobile number.');
-                    } finally {
-                      setSavingMobile(false);
-                    }
-                  }}
-                >
-                  <Text style={styles.saveBtnText}>{savingMobile ? 'Updating...' : 'Save Mobile Number'}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-      )}
-
-      {/* AADHAAR VERIFY MODAL FOR EXISTING CUSTOMERS (ITEM 5 & ITEM 8) */}
-      {verifyAadhaarCust && (
-        <VerifyCustomerModal
-          visible={!!verifyAadhaarCust}
-          onClose={() => setVerifyAadhaarCust(null)}
-          internetId={verifyAadhaarCust.internet_id || verifyAadhaarCust.id}
-          username={verifyAadhaarCust.username}
-          customerName={verifyAadhaarCust.full_name || verifyAadhaarCust.name}
-          onVerified={async () => {
-            toast.success(`Aadhaar verification completed for ${verifyAadhaarCust.full_name || verifyAadhaarCust.username}!`);
-            setVerifyAadhaarCust(null);
-            loadCustomerDataFromApi();
-          }}
-        />
-      )}
-
-      {/* ADD IPTV UNREGISTERED CUSTOMER MODAL (ITEM 1) */}
-      {showUnregisteredIptvModal && (
-        <Modal visible transparent animationType="fade" onRequestClose={() => setShowUnregisteredIptvModal(false)}>
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Add IPTV Subscriber (Unregistered User)</Text>
-                <TouchableOpacity onPress={() => setShowUnregisteredIptvModal(false)}>
-                  <Feather name="x" size={18} color={COLORS.textDim} />
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.modalSub}>Add an IPTV customer directly even if not yet registered in the core database.</Text>
-              
-              <View style={{ gap: 12, marginBottom: 20 }}>
-                <View>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 4 }}>SUBSCRIBER FULL NAME *</Text>
-                  <TextInput style={styles.formInput} placeholder="Enter full name" value={unregisteredIptvName} onChangeText={setUnregisteredIptvName} />
-                </View>
-                <View>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 4 }}>MOBILE NUMBER *</Text>
-                  <TextInput style={styles.formInput} placeholder="10-digit mobile number" value={unregisteredIptvMobile} onChangeText={setUnregisteredIptvMobile} keyboardType="phone-pad" />
-                </View>
-                <View>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 4 }}>IPTV STB BOX / MAC ADDRESS *</Text>
-                  <TextInput style={styles.formInput} placeholder="e.g. 00:1A:79:45:67:89 or STB-99482" value={unregisteredIptvMac} onChangeText={setUnregisteredIptvMac} />
-                </View>
-              </View>
-
-              <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10 }}>
-                <TouchableOpacity style={styles.cancelBtn} onPress={() => setShowUnregisteredIptvModal(false)}>
-                  <Text style={styles.cancelBtnText}>Cancel</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.saveBtn, { backgroundColor: '#8b5cf6' }]}
-                  disabled={submittingIptvAdd}
-                  onPress={async () => {
-                    if (!unregisteredIptvMobile.trim()) return toast.info('Mobile number is required');
-                    setSubmittingIptvAdd(true);
-                    try {
-                      await OneBssApi.syncIptvCustomers(unregisteredIptvMobile.trim());
-                      toast.success('Unregistered IPTV subscriber registered and synchronized via Gateway API!');
-                      setShowUnregisteredIptvModal(false);
-                      setUnregisteredIptvName('');
-                      setUnregisteredIptvMobile('');
-                      setUnregisteredIptvMac('');
-                      loadCustomerDataFromApi();
-                    } catch (e) {
-                      toast.error('Failed to register IPTV subscriber.');
-                    } finally {
-                      setSubmittingIptvAdd(false);
-                    }
-                  }}
-                >
-                  <Text style={styles.saveBtnText}>{submittingIptvAdd ? 'Registering...' : 'Register & Sync IPTV'}</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </Modal>
-      )}
     </ScrollView>
   );
 };
