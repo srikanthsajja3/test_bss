@@ -240,6 +240,44 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
 
   const isOperator = currentRole === 'operator';
 
+  const handleSearchNavigate = (filterKey = 'all', range = '', searchVal = '') => {
+    const term = searchVal || dashboardSearch.trim();
+    setDashboardSearch('');
+    if (onNavigateToCustomers) {
+      onNavigateToCustomers(filterKey, range, term);
+    }
+  };
+
+  const handleCustomerClick = (c) => {
+    setDashboardSearch('');
+    const custId = c.cust_id || c.id || c.customer_id;
+    const isIptv = Boolean(c.account_type === 'iptv' || c.type === 'iptv' || c.is_iptv);
+    const tabName = isIptv ? 'iptv_customers' : 'customers';
+
+    if (onNavigateToCustomers) {
+      onNavigateToCustomers(isIptv ? 'iptv_all' : 'all', '', '');
+    }
+
+    if (typeof window !== 'undefined' && custId) {
+      setTimeout(() => {
+        window.location.hash = `${tabName}?sub_id=${encodeURIComponent(custId)}`;
+      }, 50);
+    }
+  };
+
+  const handlePartnerClick = (p) => {
+    setDashboardSearch('');
+    const pId = p.partner_id || p.id;
+    if (onNavigateToPartners) {
+      onNavigateToPartners();
+    }
+    if (typeof window !== 'undefined' && pId) {
+      setTimeout(() => {
+        window.location.hash = `partners?partner_id=${encodeURIComponent(pId)}`;
+      }, 50);
+    }
+  };
+
   // SUPER ADMIN, ADMIN & OPERATOR DASHBOARDS
   return (
     <ScrollView
@@ -268,7 +306,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
             placeholder="Search dashboard metrics, subscribers, partners, mobile..."
             value={dashboardSearch}
             onChangeText={setDashboardSearch}
-            onSubmitEditing={() => onNavigateToCustomers && onNavigateToCustomers('all', '', dashboardSearch.trim())}
+            onSubmitEditing={() => handleSearchNavigate('all', '', dashboardSearch.trim())}
             placeholderTextColor="#9ca3af"
           />
           {dashboardSearch ? (
@@ -291,7 +329,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
               </View>
               <TouchableOpacity
                 style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(59, 130, 246, 0.1)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 }}
-                onPress={() => onNavigateToCustomers && onNavigateToCustomers('all', '', dashboardSearch.trim())}
+                onPress={() => handleSearchNavigate('all', '', dashboardSearch.trim())}
               >
                 <Text style={{ fontSize: 12, fontWeight: '700', color: '#2563eb' }}>View all in Subscribers</Text>
                 <Feather name="arrow-right" size={13} color="#2563eb" />
@@ -313,7 +351,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
                       <TouchableOpacity
                         key={c.id || `sc_${i}`}
                         style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 8, borderRadius: 8, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0' }}
-                        onPress={() => onNavigateToCustomers && onNavigateToCustomers('all', '', c.username || c.mobile || dashboardSearch.trim())}
+                        onPress={() => handleCustomerClick(c)}
                       >
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
                           <Feather name="user" size={14} color="#3b82f6" />
@@ -345,9 +383,10 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
                 </Text>
                 <View style={{ gap: 6 }}>
                   {searchResults.partners.slice(0, 5).map((p, i) => (
-                    <View
+                    <TouchableOpacity
                       key={p.partner_id || `sp_${i}`}
                       style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 8, borderRadius: 8, backgroundColor: '#f0fdf4', borderWidth: 1, borderColor: '#bbf7d0' }}
+                      onPress={() => handlePartnerClick(p)}
                     >
                       <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
                         <Feather name="briefcase" size={14} color="#10b981" />
@@ -365,7 +404,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
                           {(p.account_role || p.role || 'OPERATOR').toUpperCase()}
                         </Text>
                       </View>
-                    </View>
+                    </TouchableOpacity>
                   ))}
                 </View>
               </View>

@@ -157,10 +157,11 @@ export default function App() {
   };
 
   // Wrapper to update active tab and sync storage/hash
-  const setActiveTab = (tab, filter = 'all', range = '') => {
+  const setActiveTab = (tab, filter = 'all', range = '', search = '') => {
     setActiveTabState(tab);
     setCustomerInitialFilter(filter);
     setCustomerInitialRange(range || '');
+    setCustomerInitialSearch(search || '');
     setPartnerCreateRole(null);
     setPartnerInitialRole('');
     try {
