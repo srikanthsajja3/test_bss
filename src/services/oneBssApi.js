@@ -8,11 +8,16 @@ let AUTH_TOKEN = '';
 export const getApiConfig = () => ({ baseUrl: BASE_URL, authToken: AUTH_TOKEN });
 export const setApiConfig = (url, token) => {
   if (url) BASE_URL = url;
-  if (token) {
-    AUTH_TOKEN = token;
+  if (token !== undefined) {
+    AUTH_TOKEN = token || '';
     try {
       if (typeof window !== 'undefined') {
-        localStorage.setItem('onebss_token', token);
+        if (token) {
+          localStorage.setItem('onebss_token', token);
+        } else {
+          localStorage.removeItem('onebss_token');
+          localStorage.removeItem('onebss_impersonate_token');
+        }
       }
     } catch (e) {}
   }
@@ -33,6 +38,8 @@ export const notifyUnauthorized = (reason = 'Session expired. Please log in agai
     if (typeof window !== 'undefined') {
       localStorage.removeItem('onebss_token');
       localStorage.removeItem('onebss_user');
+      localStorage.removeItem('onebss_impersonate_token');
+      localStorage.removeItem('onebss_super_admin_session');
     }
   } catch (e) {}
   unauthorizedListeners.forEach((cb) => {
@@ -102,9 +109,10 @@ const request = async (endpoint, options = {}) => {
   }
 
   const url = `${targetBaseUrl.replace(/\/$/, '')}/${endpoint.replace(/^\//, '')}`;
-  const activeToken = getActiveToken();
+  const isLoginEndpoint = endpoint.includes('login.php') || endpoint.includes('login');
+  const activeToken = isLoginEndpoint ? '' : getActiveToken();
 
-  if (activeToken && isJwtExpired(activeToken)) {
+  if (!isLoginEndpoint && activeToken && isJwtExpired(activeToken)) {
     notifyUnauthorized('Session expired. Please log in again.');
     return {
       ok: false,

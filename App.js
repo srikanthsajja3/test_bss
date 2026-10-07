@@ -149,9 +149,13 @@ export default function App() {
       if (typeof window !== 'undefined') {
         localStorage.removeItem('onebss_user');
         localStorage.removeItem('onebss_token');
+        localStorage.removeItem('onebss_impersonate_token');
+        localStorage.removeItem('onebss_super_admin_session');
         localStorage.removeItem('onebss_active_tab');
+        localStorage.removeItem('onebss_filter');
       }
     } catch (e) {}
+    setApiConfig(undefined, '');
     setUserState(null);
     setActiveTabState('login');
   };
