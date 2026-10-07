@@ -455,6 +455,12 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [unregisteredIptvMac, setUnregisteredIptvMac] = useState('');
   const [submittingIptvAdd, setSubmittingIptvAdd] = useState(false);
 
+  // Edit Modal State
+  const [editingCustomer, setEditingCustomer] = useState(null);
+  const [editForm, setEditForm] = useState({ name: '', mobile: '', plan: '', status: 'active', stb_id: '', stb_mac: '' });
+  const [saving, setSaving] = useState(false);
+  const [toastMsg, setToastMsg] = useState('');
+
   // ---- Subscriber list: one page of customers_list.php rows ----
   // Status filter, search, operator filter, sorting and paging all run on the server, so the
   // counts and results cover every account (not just the rows loaded into the browser).
@@ -1102,6 +1108,62 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     });
   };
 
+  const handleOpenEdit = (cust) => {
+    setEditingCustomer(cust);
+    setEditForm({
+      name: cust.name || '',
+      mobile: cust.mobile || '',
+      plan: cust.plan || '',
+      status: cust.status || 'active',
+      stb_id: cust.stb_id || '',
+      stb_mac: cust.stb_mac || '',
+    });
+  };
+
+  // Save Edit Details via API
+  const handleSaveEdit = async () => {
+    if (!editingCustomer) return;
+    setSaving(true);
+    try {
+      if (viewMode === 'iptv') {
+        await OneBssApi.updateIptvStbDetails({
+          stb_id: editForm.stb_id,
+          stb_mac: editForm.stb_mac,
+          name: editForm.name,
+          mobile: editForm.mobile,
+          plan: editForm.plan,
+          status: editForm.status,
+        });
+
+        loadCustomerDataFromApi();
+      } else {
+        await OneBssApi.updateInternetCustomer({
+          id: editingCustomer.id,
+          name: editForm.name,
+          mobile: editForm.mobile,
+          plan: editForm.plan,
+          status: editForm.status,
+        });
+
+        loadCustomerDataFromApi();
+      }
+
+      if (activeSubProfile && activeSubProfile.id === editingCustomer.id) {
+        setActiveSubProfile((prev) => ({ ...prev, ...editForm }));
+      }
+
+      setToastMsg(`✅ Subscriber profile updated for ${editForm.name}!`);
+      setTimeout(() => setToastMsg(''), 4000);
+      setEditingCustomer(null);
+    } catch (e) {
+      setToastMsg(`✅ Subscriber profile updated!`);
+      setTimeout(() => setToastMsg(''), 4000);
+      setEditingCustomer(null);
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const currentInternetAccount =
     activeAccountSel?.kind === 'internet' ? activeCustomer?.internet_accounts?.[activeAccountSel.index] || null : null;
 
@@ -1486,11 +1548,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
   };
 
-  // Edit Modal State
-  const [editingCustomer, setEditingCustomer] = useState(null);
-  const [editForm, setEditForm] = useState({ name: '', mobile: '', plan: '', status: 'active', stb_id: '', stb_mac: '' });
-  const [saving, setSaving] = useState(false);
-  const [toastMsg, setToastMsg] = useState('');
 
   useEffect(() => {
     setViewMode(isIptvMode ? 'iptv' : 'broadband');
@@ -1660,61 +1717,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
   };
 
-  const handleOpenEdit = (cust) => {
-    setEditingCustomer(cust);
-    setEditForm({
-      name: cust.name || '',
-      mobile: cust.mobile || '',
-      plan: cust.plan || '',
-      status: cust.status || 'active',
-      stb_id: cust.stb_id || '',
-      stb_mac: cust.stb_mac || '',
-    });
-  };
-
-  // Save Edit Details via API
-  const handleSaveEdit = async () => {
-    if (!editingCustomer) return;
-    setSaving(true);
-    try {
-      if (viewMode === 'iptv') {
-        await OneBssApi.updateIptvStbDetails({
-          stb_id: editForm.stb_id,
-          stb_mac: editForm.stb_mac,
-          name: editForm.name,
-          mobile: editForm.mobile,
-          plan: editForm.plan,
-          status: editForm.status,
-        });
-
-        loadCustomerDataFromApi();
-      } else {
-        await OneBssApi.updateInternetCustomer({
-          id: editingCustomer.id,
-          name: editForm.name,
-          mobile: editForm.mobile,
-          plan: editForm.plan,
-          status: editForm.status,
-        });
-
-        loadCustomerDataFromApi();
-      }
-
-      if (activeSubProfile && activeSubProfile.id === editingCustomer.id) {
-        setActiveSubProfile((prev) => ({ ...prev, ...editForm }));
-      }
-
-      setToastMsg(`✅ Subscriber profile updated for ${editForm.name}!`);
-      setTimeout(() => setToastMsg(''), 4000);
-      setEditingCustomer(null);
-    } catch (e) {
-      setToastMsg(`✅ Subscriber profile updated!`);
-      setTimeout(() => setToastMsg(''), 4000);
-      setEditingCustomer(null);
-    } finally {
-      setSaving(false);
-    }
-  };
 
   if (showAddCustomer) {
     return (
