@@ -11,6 +11,7 @@ import { PasswordModal, MacBindingsModal, SessionHistoryModal, VerifyCustomerMod
 import { CustomerPhoto, isSuperAdmin, isAccountVerified } from '../components/internet/shared';
 import { IptvRechargeModal } from '../components/iptv/IptvRechargeModal';
 import { CustomerAccountsOverview, defaultRechargeType, formatApiDate, normaliseInternetAccount, normaliseIptvAccount } from '../components/CustomerAccountsOverview';
+import { CustomerLocationModal } from '../components/CustomerLocationModal';
 
 const calculateBalanceDays = (expiryDateStr) => {
   if (!expiryDateStr || expiryDateStr === '—' || expiryDateStr === 'N/A') {
@@ -454,6 +455,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [unregisteredIptvMobile, setUnregisteredIptvMobile] = useState('');
   const [unregisteredIptvMac, setUnregisteredIptvMac] = useState('');
   const [submittingIptvAdd, setSubmittingIptvAdd] = useState(false);
+  const [selectedLocationCustomer, setSelectedLocationCustomer] = useState(null);
 
   // Edit Modal State
   const [editingCustomer, setEditingCustomer] = useState(null);
@@ -2744,13 +2746,21 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       {registeredCell}
 
                       {/* Action */}
-                      <View style={{ flex: 1.0, minWidth: 80, alignItems: 'center' }}>
+                      <View style={{ flex: 1.4, minWidth: 125, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <TouchableOpacity
                           onPress={() => handleOpenSubscriberScreen(cust)}
-                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.3)' }}
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.3)' }}
                         >
                           <Feather name="eye" size={12} color="#7c3aed" />
                           <Text style={{ fontSize: 11, fontWeight: '700', color: '#7c3aed' }}>Open</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => setSelectedLocationCustomer(cust)}
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.25)' }}
+                          title="View & Pin Map Location"
+                        >
+                          <Feather name="map-pin" size={12} color="#2563eb" />
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#2563eb' }}>Map</Text>
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -2870,7 +2880,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                           alignSelf: 'flex-start',
                         }}
                         onPress={() => {
-                          toast.info(`Map navigation for ${cust.username || 'subscriber'} will be added here.`);
+                          setSelectedLocationCustomer(cust);
                         }}
                       >
                         <Feather name="map-pin" size={13} color="#2563eb" />
@@ -2886,6 +2896,15 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         </ScrollView>
       </View>
     </View>
+      {/* CUSTOMER LOCATION MAP MODAL */}
+      <CustomerLocationModal
+        visible={!!selectedLocationCustomer}
+        onClose={() => setSelectedLocationCustomer(null)}
+        customer={selectedLocationCustomer}
+        onLocationSaved={() => {
+          loadCustomerDataFromApi();
+        }}
+      />
     </ScrollView>
   );
 };

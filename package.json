@@ -15,6 +15,7 @@
     "expo": "~57.0.24",
     "expo-asset": "^57.0.18",
     "expo-status-bar": "~57.0.1",
+    "leaflet": "^1.9.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",

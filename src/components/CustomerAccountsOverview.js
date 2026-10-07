@@ -5,6 +5,7 @@ import { COLORS } from '../constants/theme';
 import { CustomerPhoto, isAccountVerified } from './internet/shared';
 import { OneBssApi } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
+import { CustomerLocationMap } from './CustomerLocationMap';
 
 // ---------- helpers ----------
 
@@ -619,6 +620,17 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
       >
         {renderCards(iptv)}
       </Section>
+
+      {/* GEOGRAPHIC LOCATION & INSTALLATION MAP */}
+      <CustomerLocationMap
+        key={`overview_map_${customer.cust_id}_${clean(customer.mobile || customer.MobileNumber || '')}`}
+        mobile={clean(customer.mobile || customer.MobileNumber || (customer.internet_accounts?.[0]?.mobile) || '')}
+        customerName={name}
+        customerAddress={clean(customer.installation_address || customer.address || customer.billing_address || '')}
+        customerZipcode={clean(customer.zipcode || '')}
+        custId={customer.cust_id}
+        isCard={true}
+      />
 
       {/* Select IPTV Branch Modal (Shown when operator has multiple branches) */}
       <Modal visible={branchModalVisible} transparent animationType="fade" onRequestClose={() => setBranchModalVisible(false)}>

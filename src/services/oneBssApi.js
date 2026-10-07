@@ -1078,6 +1078,27 @@ export const OneBssApi = {
     return request(`/recharge_history.php?page=${page}&limit=${limit}`, { method: 'GET' });
   },
 
+  // Customer Location APIs (GET /customer_location.php?mobile=... & POST /customer_location.php)
+  getCustomerLocation: async (mobile) => {
+    const cleanMobile = String(mobile || '').replace(/\D/g, '').slice(-10);
+    if (!cleanMobile) return { ok: false, data: { success: false, message: 'Invalid mobile number' } };
+    return request(`/customer_location.php?mobile=${encodeURIComponent(cleanMobile)}`, { method: 'GET' });
+  },
+
+  saveCustomerLocation: async (mobile, latitude, longitude) => {
+    const cleanMobile = String(mobile || '').replace(/\D/g, '').slice(-10);
+    if (!cleanMobile) return { ok: false, data: { success: false, message: 'Invalid mobile number' } };
+    return request('/customer_location.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        mobile: cleanMobile,
+        latitude: Number(latitude),
+        longitude: Number(longitude),
+      }),
+    });
+  },
+
   getDashboard: async (partnerId = 1112) => {
     let targetId = partnerId;
     try {
