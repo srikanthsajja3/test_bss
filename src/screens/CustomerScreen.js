@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Modal, ActivityIndicator, useWindowDimensions, Linking, Platform } from 'react-native';
-import { Feather, MaterialCommunityIcons, Ionicons } from '@expo/vector-icons';
+import { Feather, MaterialCommunityIcons, Ionicons, FontAwesome } from '@expo/vector-icons';
 import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi, setApiConfig } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
@@ -1104,8 +1104,40 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       kind: 'iptv',
       id: acc.id,
       subPlanIds,
-      label: acc.pioneer_stb_id ? `STB ${acc.pioneer_stb_id}` : `IPTV #${acc.id}`,
     });
+  };
+
+  const openWhatsApp = (cust) => {
+    const rawNum = cust?.mobile || cust?.phone || '';
+    const num = String(rawNum).replace(/[^\d]/g, '');
+    if (!num || num.length < 10) {
+      toast.info('No valid mobile number available for WhatsApp messaging.');
+      return;
+    }
+    const phone = num.length === 10 ? `91${num}` : num;
+    const name = cust.full_name || cust.name || cust.username || 'Subscriber';
+    const plan = cust.package_name || cust.plan || cust.package || 'Internet Plan';
+    const expDate = cust.expiration || cust.expiryDate || cust.expiry;
+    const formattedExp = expDate ? formatApiDate(expDate) : '';
+
+    let message = `Dear ${name},\n\nYour broadband subscription (${plan}) `;
+    if (formattedExp) {
+      message += `is expiring/expired on ${formattedExp}. `;
+    } else {
+      message += `is expiring soon. `;
+    }
+    message += `Please recharge your account to enjoy uninterrupted service.\n\nThank you!`;
+
+    const waUrl = `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+    try {
+      if (typeof window !== 'undefined') {
+        window.open(waUrl, '_blank');
+      } else {
+        Linking.openURL(waUrl);
+      }
+    } catch (e) {
+      toast.error('Could not open WhatsApp window.');
+    }
   };
 
   const handleOpenEdit = (cust) => {
@@ -2636,11 +2668,29 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 const expiryCell = (flex, minWidth = 140) => (
                   <View style={{ flex, minWidth }}>
                     <Text style={styles.tdText}>{cust.expiration ? formatApiDate(cust.expiration) : '—'}</Text>
-                    {balInfo.status !== 'unknown' ? (
-                      <View style={{ backgroundColor: balInfo.status === 'active' ? '#dcfce7' : (balInfo.status === 'warning' ? '#fef3c7' : '#ffe4e6'), paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, alignSelf: 'flex-start', marginTop: 3 }}>
-                        <Text style={{ fontSize: 10, fontWeight: '700', color: balInfo.status === 'active' ? '#15803d' : (balInfo.status === 'warning' ? '#b45309' : '#be123c') }}>{balInfo.text}</Text>
-                      </View>
-                    ) : null}
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                      {balInfo.status !== 'unknown' ? (
+                        <View style={{ backgroundColor: balInfo.status === 'active' ? '#dcfce7' : (balInfo.status === 'warning' ? '#fef3c7' : '#ffe4e6'), paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: balInfo.status === 'active' ? '#15803d' : (balInfo.status === 'warning' ? '#b45309' : '#be123c') }}>{balInfo.text}</Text>
+                        </View>
+                      ) : null}
+                      <TouchableOpacity
+                        style={{
+                          paddingHorizontal: 5,
+                          paddingVertical: 3,
+                          borderRadius: 4,
+                          backgroundColor: 'rgba(37, 211, 102, 0.12)',
+                          borderWidth: 1,
+                          borderColor: 'rgba(37, 211, 102, 0.3)',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                        onPress={() => openWhatsApp(cust)}
+                        title="Send WhatsApp Expiry Reminder"
+                      >
+                        <FontAwesome name="whatsapp" size={13} color="#25D366" />
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 );
 
