@@ -3008,153 +3008,151 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
               )}
             </View>
           ) : (
-            <View style={{ width: '100%' }}>
-              <View style={styles.tableHeader}>
-                <Text style={[styles.th, { flex: 0.8 }]}>ID</Text>
-                <Text style={[styles.th, { flex: 1.8 }]}>Partner & Company Name</Text>
-                <Text style={[styles.th, { flex: 1.4 }]}>Region / Location</Text>
-                <Text style={[styles.th, { flex: 1.6 }]}>Contact Info</Text>
-                <Text style={[styles.th, { flex: 1.1 }]}>Wallet (₹)</Text>
-                <Text style={[styles.th, { flex: 2.0 }]}>Active / Online</Text>
-                <Text style={[styles.th, { flex: 2.0 }]}>IPTV Active</Text>
-                <Text style={[styles.th, { flex: 0.9 }]}>Role</Text>
-                <Text style={[styles.th, { flex: 1.0 }]}>Status</Text>
-                <Text style={[styles.th, { flex: 1.8 }]}>Actions</Text>
-              </View>
-
-              {filteredPartners.length === 0 ? (
-                <View style={styles.emptyContainer}>
-                  <Feather name="info" size={24} color={COLORS.textMuted} />
-                  <Text style={styles.emptyText}>No partner records matched your filter criteria.</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: 1350, width: '100%' }}>
+              <View style={{ width: '100%' }}>
+                <View style={styles.tableHeader}>
+                  <Text style={[styles.th, { flex: 0.8, minWidth: 60 }]}>ID</Text>
+                  <Text style={[styles.th, { flex: 1.8, minWidth: 160 }]}>Partner & Company Name</Text>
+                  <Text style={[styles.th, { flex: 1.4, minWidth: 120 }]}>Region / Location</Text>
+                  <Text style={[styles.th, { flex: 1.6, minWidth: 130 }]}>Contact Info</Text>
+                  <Text style={[styles.th, { flex: 1.1, minWidth: 100 }]}>Wallet (₹)</Text>
+                  <Text style={[styles.th, { flex: 2.0, minWidth: 140 }]}>Active / Online</Text>
+                  <Text style={[styles.th, { flex: 2.0, minWidth: 110 }]}>IPTV Active</Text>
+                  <Text style={[styles.th, { flex: 0.9, minWidth: 80 }]}>Role</Text>
+                  <Text style={[styles.th, { flex: 1.0, minWidth: 90 }]}>Status</Text>
+                  <Text style={[styles.th, { flex: 2.0, minWidth: 180 }]}>Actions</Text>
                 </View>
-              ) : (
-                filteredPartners.map((item) => {
-                  const isEnabled = item.status === 'enabled';
-                  const iptvActive = item.active_iptv_accounts !== undefined && item.active_iptv_accounts !== null ? item.active_iptv_accounts : (item.iptv_active_count ?? 0);
-                  return (
-                    <View key={item.partner_id} style={styles.tr}>
-                      <View style={[{ flex: 0.8 }, styles.td]}>
-                        <View style={styles.idBadge}>
-                          <Text style={styles.idText}>#{item.partner_id}</Text>
-                        </View>
-                      </View>
 
-                      <View style={[{ flex: 1.8 }, styles.td]}>
-                        <TouchableOpacity onPress={() => handleSelectPartner(item)}>
-                          <Text style={styles.partnerNameText}>{item.partner_name}</Text>
-                          <Text style={styles.companyNameText}>{item.company_name}</Text>
-                        </TouchableOpacity>
-                      </View>
-
-                      {/* REGION / LOCATION COLUMN (ITEM 15) */}
-                      <View style={[{ flex: 1.4 }, styles.td]}>
-                        <View style={styles.contactRow}>
-                          <Feather name="map-pin" size={12} color={COLORS.textMuted} />
-                          <Text style={styles.contactText}>{item.partner_region || '—'}</Text>
-                        </View>
-                      </View>
-
-                      <View style={[{ flex: 1.6 }, styles.td]}>
-                        <View style={styles.contactRow}>
-                          <Feather name="phone" size={12} color={COLORS.textMuted} />
-                          <Text style={styles.contactText}>{item.partner_mobile || 'N/A'}</Text>
-                        </View>
-                        {/* <View style={styles.contactRow}>
-                          <Feather name="mail" size={12} color={COLORS.textMuted} />
-                          <Text style={styles.contactText}>{item.partner_email || 'N/A'}</Text>
-                        </View> */}
-                      </View>
-
-                      <View style={[{ flex: 1.1 }, styles.td]}>
-                        <TouchableOpacity onPress={() => handleOpenWallet(item)}>
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#10b981' }}>
-                            ₹{(item.wallet_balance !== undefined && item.wallet_balance !== null ? item.wallet_balance : 0).toLocaleString('en-IN')}
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-
-                      {/*  COUNTS & IPTV ACTIVE BADGE (ITEM 13) */}
-                      <View style={[{ flex: 2.0 }, styles.td]}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                          <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5 }}>
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>
-                              {item.active_internet_accounts !== undefined && item.active_internet_accounts !== null ? item.active_internet_accounts : 0} Active
-                            </Text>
-                          </View>
-                          <View style={{ backgroundColor: 'rgba(59, 130, 246, 0.12)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5 }}>
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6' }}>
-                              {item.online_internet_accounts !== undefined && item.online_internet_accounts !== null ? item.online_internet_accounts : 0} Online
-                            </Text>
+                {filteredPartners.length === 0 ? (
+                  <View style={styles.emptyContainer}>
+                    <Feather name="info" size={24} color={COLORS.textMuted} />
+                    <Text style={styles.emptyText}>No partner records matched your filter criteria.</Text>
+                  </View>
+                ) : (
+                  filteredPartners.map((item) => {
+                    const isEnabled = item.status === 'enabled';
+                    const iptvActive = item.active_iptv_accounts !== undefined && item.active_iptv_accounts !== null ? item.active_iptv_accounts : (item.iptv_active_count ?? 0);
+                    return (
+                      <View key={item.partner_id} style={styles.tr}>
+                        <View style={[{ flex: 0.8, minWidth: 60 }, styles.td]}>
+                          <View style={styles.idBadge}>
+                            <Text style={styles.idText}>#{item.partner_id}</Text>
                           </View>
                         </View>
-                      </View>
 
-                      {/*  COUNTS & IPTV ACTIVE BADGE (ITEM 13) */}
-                      <View style={[{ flex: 2.0 }, styles.td]}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                          <View style={{ backgroundColor: 'rgba(139, 92, 246, 0.12)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5 }}>
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#8b5cf6' }}>
-                              {iptvActive} IPTV
-                            </Text>
+                        <View style={[{ flex: 1.8, minWidth: 160 }, styles.td]}>
+                          <TouchableOpacity onPress={() => handleSelectPartner(item)}>
+                            <Text style={styles.partnerNameText}>{item.partner_name}</Text>
+                            <Text style={styles.companyNameText}>{item.company_name}</Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        {/* REGION / LOCATION COLUMN (ITEM 15) */}
+                        <View style={[{ flex: 1.4, minWidth: 120 }, styles.td]}>
+                          <View style={styles.contactRow}>
+                            <Feather name="map-pin" size={12} color={COLORS.textMuted} />
+                            <Text style={styles.contactText}>{item.partner_region || '—'}</Text>
                           </View>
                         </View>
-                      </View>
 
-                      <View style={[{ flex: 0.9 }, styles.td]}>
-                        <View
-                          style={[
-                            styles.roleBadge,
-                            item.account_role === 'admin' ? styles.roleBadgeAdmin : styles.roleBadgeOperator,
-                          ]}
-                        >
-                          <Text
+                        <View style={[{ flex: 1.6, minWidth: 130 }, styles.td]}>
+                          <View style={styles.contactRow}>
+                            <Feather name="phone" size={12} color={COLORS.textMuted} />
+                            <Text style={styles.contactText}>{item.partner_mobile || 'N/A'}</Text>
+                          </View>
+                        </View>
+
+                        <View style={[{ flex: 1.1, minWidth: 100 }, styles.td]}>
+                          <TouchableOpacity onPress={() => handleOpenWallet(item)}>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: '#10b981' }}>
+                              ₹{(item.wallet_balance !== undefined && item.wallet_balance !== null ? item.wallet_balance : 0).toLocaleString('en-IN')}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+
+                        {/*  COUNTS & IPTV ACTIVE BADGE (ITEM 13) */}
+                        <View style={[{ flex: 2.0, minWidth: 140 }, styles.td]}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                            <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5 }}>
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>
+                                {item.active_internet_accounts !== undefined && item.active_internet_accounts !== null ? item.active_internet_accounts : 0} Active
+                              </Text>
+                            </View>
+                            <View style={{ backgroundColor: 'rgba(59, 130, 246, 0.12)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5 }}>
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6' }}>
+                                {item.online_internet_accounts !== undefined && item.online_internet_accounts !== null ? item.online_internet_accounts : 0} Online
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+
+                        {/*  COUNTS & IPTV ACTIVE BADGE (ITEM 13) */}
+                        <View style={[{ flex: 2.0, minWidth: 110 }, styles.td]}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+                            <View style={{ backgroundColor: 'rgba(139, 92, 246, 0.12)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5 }}>
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#8b5cf6' }}>
+                                {iptvActive} IPTV
+                              </Text>
+                            </View>
+                          </View>
+                        </View>
+
+                        <View style={[{ flex: 0.9, minWidth: 80 }, styles.td]}>
+                          <View
                             style={[
-                              styles.roleBadgeText,
-                              item.account_role === 'admin' ? styles.roleBadgeTextAdmin : styles.roleBadgeTextOperator,
+                              styles.roleBadge,
+                              item.account_role === 'admin' ? styles.roleBadgeAdmin : styles.roleBadgeOperator,
                             ]}
                           >
-                            {(item.account_role || 'operator').toUpperCase()}
-                          </Text>
-                        </View>
-                      </View>
-
-                      {/* ENABLE / DISABLE STATUS TOGGLE WITH ALERT CONFIRMATION (ITEM 14) */}
-                      <View style={[{ flex: 1.0 }, styles.td]}>
-                        <TouchableOpacity onPress={() => setConfirmStatusPartner(item)}>
-                          <View style={[styles.statusTag, isEnabled ? styles.tagEnabled : styles.tagDisabled]}>
-                            <View style={[styles.statusDot, isEnabled ? styles.dotEnabled : styles.dotDisabled]} />
-                            <Text style={[styles.tagText, isEnabled ? styles.tagTextEnabled : styles.tagTextDisabled]}>
-                              {isEnabled ? 'ENABLED' : 'DISABLED'}
+                            <Text
+                              style={[
+                                styles.roleBadgeText,
+                                item.account_role === 'admin' ? styles.roleBadgeTextAdmin : styles.roleBadgeTextOperator,
+                              ]}
+                            >
+                              {(item.account_role || 'operator').toUpperCase()}
                             </Text>
                           </View>
-                        </TouchableOpacity>
-                      </View>
+                        </View>
 
-                      <View style={[{ flex: 2.0, flexDirection: 'row', gap: 6, alignItems: 'center' }, styles.td]}>
-                        <TouchableOpacity
-                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' }}
-                          onPress={() => handleOpenPartnerResetPass(item)}
-                        >
-                          <Feather name="key" size={12} color="#f59e0b" />
-                          <Text style={{ fontSize: 11, fontWeight: '600', color: '#f59e0b' }}>Reset Pass</Text>
-                        </TouchableOpacity>
+                        {/* ENABLE / DISABLE STATUS TOGGLE WITH ALERT CONFIRMATION (ITEM 14) */}
+                        <View style={[{ flex: 1.0, minWidth: 90 }, styles.td]}>
+                          <TouchableOpacity onPress={() => setConfirmStatusPartner(item)}>
+                            <View style={[styles.statusTag, isEnabled ? styles.tagEnabled : styles.tagDisabled]}>
+                              <View style={[styles.statusDot, isEnabled ? styles.dotEnabled : styles.dotDisabled]} />
+                              <Text style={[styles.tagText, isEnabled ? styles.tagTextEnabled : styles.tagTextDisabled]}>
+                                {isEnabled ? 'ENABLED' : 'DISABLED'}
+                              </Text>
+                            </View>
+                          </TouchableOpacity>
+                        </View>
 
-                        <TouchableOpacity
-                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, backgroundColor: 'rgba(236, 72, 153, 0.1)', borderWidth: 1, borderColor: 'rgba(236, 72, 153, 0.3)' }}
-                          onPress={() => handleImpersonatePartner(item)}
-                          disabled={impersonatingId === item.partner_id}
-                        >
-                          <Feather name="log-in" size={12} color="#ec4899" />
-                          <Text style={{ fontSize: 11, fontWeight: '600', color: '#ec4899' }}>
-                            {impersonatingId === item.partner_id ? 'Wait...' : 'Login'}
-                          </Text>
-                        </TouchableOpacity>
+                        <View style={[{ flex: 2.0, minWidth: 180, flexDirection: 'row', gap: 6, alignItems: 'center' }, styles.td]}>
+                          <TouchableOpacity
+                            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' }}
+                            onPress={() => handleOpenPartnerResetPass(item)}
+                          >
+                            <Feather name="key" size={12} color="#f59e0b" />
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: '#f59e0b' }}>Reset Pass</Text>
+                          </TouchableOpacity>
+
+                          <TouchableOpacity
+                            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, backgroundColor: 'rgba(236, 72, 153, 0.1)', borderWidth: 1, borderColor: 'rgba(236, 72, 153, 0.3)' }}
+                            onPress={() => handleImpersonatePartner(item)}
+                            disabled={impersonatingId === item.partner_id}
+                          >
+                            <Feather name="log-in" size={12} color="#ec4899" />
+                            <Text style={{ fontSize: 11, fontWeight: '600', color: '#ec4899' }}>
+                              {impersonatingId === item.partner_id ? 'Wait...' : 'Login'}
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
                       </View>
-                    </View>
-                  );
-                })
-              )}
-            </View>
+                    );
+                  })
+                )}
+              </View>
+            </ScrollView>
           )}
         </View>
 
