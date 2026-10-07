@@ -14,7 +14,72 @@ import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { OneBssApi, setApiConfig, decodeJwt } from '../services/oneBssApi';
 import { CreateAccountModal } from '../components/CreateAccountModal';
+import { Dropdown } from '../components/internet/shared';
 import { toast } from 'react-toastify';
+
+const flattenComboOptions = (options) => {
+  const inetList = [];
+  if (options?.internet && Array.isArray(options.internet)) {
+    options.internet.forEach((p) => {
+      const planName = p.plan_name || `Plan #${p.plan_id}`;
+      if (Array.isArray(p.subplans) && p.subplans.length > 0) {
+        p.subplans.forEach((s) => {
+          const subName = s.sub_plan_name || s.name || '';
+          const validity = s.validity || s.validity_days || 30;
+          inetList.push({
+            sub_plan_id: s.sub_plan_id || s.id,
+            display_name: `${planName}${subName ? ' - ' + subName : ''} (${validity} Days) - ₹${s.price || 0}`,
+            plan_name: planName,
+            sub_plan_name: subName,
+            price: Number(s.price || 0),
+            validity: validity,
+          });
+        });
+      } else {
+        inetList.push({
+          sub_plan_id: p.sub_plan_id || p.plan_id || p.id,
+          display_name: `${planName} - ₹${p.price || 0}`,
+          plan_name: planName,
+          sub_plan_name: '',
+          price: Number(p.price || 0),
+          validity: p.validity || 30,
+        });
+      }
+    });
+  }
+
+  const iptvList = [];
+  if (options?.iptv && Array.isArray(options.iptv)) {
+    options.iptv.forEach((p) => {
+      const planName = p.plan_name || `IPTV Pack #${p.plan_id}`;
+      if (Array.isArray(p.subplans) && p.subplans.length > 0) {
+        p.subplans.forEach((s) => {
+          const subName = s.sub_plan_name || s.name || '';
+          const validity = s.validity_days || s.validity || 30;
+          iptvList.push({
+            sub_plan_id: s.sub_plan_id || s.id,
+            display_name: `${planName}${subName ? ' - ' + subName : ''} (${validity} Days) - ₹${s.price || 0}`,
+            plan_name: planName,
+            sub_plan_name: subName,
+            price: Number(s.price || 0),
+            validity: validity,
+          });
+        });
+      } else {
+        iptvList.push({
+          sub_plan_id: p.sub_plan_id || p.plan_id || p.id,
+          display_name: `${planName} - ₹${p.price || 0}`,
+          plan_name: planName,
+          sub_plan_name: '',
+          price: Number(p.price || 0),
+          validity: p.validity || 30,
+        });
+      }
+    });
+  }
+
+  return { inetList, iptvList };
+};
 
 export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRoleFilter }) => {
   const { width } = useWindowDimensions();
@@ -94,6 +159,25 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   const [syncingBranches, setSyncingBranches] = useState(false);
   const [pioneerKey, setPioneerKey] = useState('');
 
+  // Combo Plans States
+  const [comboPlansPartner, setComboPlansPartner] = useState(null);
+  const [comboPlans, setComboPlans] = useState([]);
+  const [loadingComboPlans, setLoadingComboPlans] = useState(false);
+  const [searchComboPlan, setSearchComboPlan] = useState('');
+  const [isComboModalOpen, setIsComboModalOpen] = useState(false);
+  const [editingComboPlan, setEditingComboPlan] = useState(null);
+  const [comboPlanOptions, setComboPlanOptions] = useState({ internet: [], iptv: [] });
+  const [loadingComboOptions, setLoadingComboOptions] = useState(false);
+  const [comboForm, setComboForm] = useState({
+    combo_name: '',
+    isub_plan_id: '',
+    iptvsub_plan_id: '',
+    price: '',
+    is_active: true,
+  });
+  const [savingCombo, setSavingCombo] = useState(false);
+  const [deletingComboId, setDeletingComboId] = useState(null);
+
   useEffect(() => {
     if (selectedPartner?.partner_id) {
       OneBssApi.getWallet(selectedPartner.partner_id)
@@ -140,7 +224,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     const handleSubHashChange = () => {
       if (typeof window !== 'undefined') {
         const hash = window.location.hash;
-        const hasPartnerContext = hash.includes('partner_id=') || hash.includes('edit=') || hash.includes('wallet=') || hash.includes('internet=') || hash.includes('iptv=');
+        const hasPartnerContext = hash.includes('partner_id=') || hash.includes('edit=') || hash.includes('wallet=') || hash.includes('internet=') || hash.includes('iptv=') || hash.includes('combo=');
         
         if (!hasPartnerContext) {
           setSelectedPartner(null);
@@ -156,6 +240,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         }
         if (!hash.includes('iptv=')) {
           setIptvPlansPartner(null);
+        }
+        if (!hash.includes('combo=')) {
+          setComboPlansPartner(null);
         }
         if (!hash.includes('action=create') && !hash.includes('create=')) {
           setIsCreateOpen(false);
@@ -292,7 +379,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         return null;
       };
 
-      const detailPartner = getPartnerFromHash('partner_id') || getPartnerFromHash('edit') || getPartnerFromHash('wallet') || getPartnerFromHash('internet') || getPartnerFromHash('iptv');
+      const detailPartner = getPartnerFromHash('partner_id') || getPartnerFromHash('edit') || getPartnerFromHash('wallet') || getPartnerFromHash('internet') || getPartnerFromHash('iptv') || getPartnerFromHash('combo');
       if (detailPartner && (!selectedPartner || String(selectedPartner.partner_id) !== String(detailPartner.partner_id))) {
         setSelectedPartner(detailPartner);
       }
@@ -315,6 +402,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       const iptvP = getPartnerFromHash('iptv');
       if (iptvP && (!iptvPlansPartner || String(iptvPlansPartner.partner_id) !== String(iptvP.partner_id))) {
         handleOpenIptvPlans(iptvP);
+      }
+
+      const comboP = getPartnerFromHash('combo');
+      if (comboP && (!comboPlansPartner || String(comboPlansPartner.partner_id) !== String(comboP.partner_id))) {
+        handleOpenComboPlans(comboP);
       }
     }
   }, [partners]);
@@ -874,6 +966,198 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
   };
 
+  // 5. COMBO PLANS HANDLERS
+  const handleOpenComboPlans = async (partner) => {
+    if (!partner) return;
+    setComboPlansPartner(partner);
+    if (!selectedPartner || String(selectedPartner.partner_id) === String(partner.partner_id || partner.id)) {
+      setSelectedPartner(partner);
+    }
+    if (typeof window !== 'undefined') {
+      const pId = partner.partner_id || partner.id;
+      window.location.hash = `partners?partner_id=${pId}&combo=${pId}`;
+    }
+    setSearchComboPlan('');
+    setLoadingComboPlans(true);
+    try {
+      const res = await OneBssApi.getComboPlans(partner.partner_id || partner.id);
+      const arr = Array.isArray(res.data)
+        ? res.data
+        : (res.data?.data && Array.isArray(res.data.data) ? res.data.data : []);
+      setComboPlans(arr);
+    } catch (e) {
+      setComboPlans([]);
+    } finally {
+      setLoadingComboPlans(false);
+    }
+  };
+
+  const handleCloseComboPlans = () => {
+    setComboPlansPartner(null);
+    if (typeof window !== 'undefined' && selectedPartner) {
+      window.location.hash = `partners?partner_id=${selectedPartner.partner_id || selectedPartner.id}`;
+    }
+  };
+
+  const fetchComboOptions = async (partnerId) => {
+    setLoadingComboOptions(true);
+    try {
+      const res = await OneBssApi.getComboPlanOptions(partnerId);
+      const opts = res.data?.data || res.data || { internet: [], iptv: [] };
+      setComboPlanOptions(opts);
+      return opts;
+    } catch (e) {
+      setComboPlanOptions({ internet: [], iptv: [] });
+      return { internet: [], iptv: [] };
+    } finally {
+      setLoadingComboOptions(false);
+    }
+  };
+
+  const handleOpenCreateCombo = async () => {
+    if (!comboPlansPartner) return;
+    setEditingComboPlan(null);
+    setComboForm({
+      combo_name: '',
+      isub_plan_id: '',
+      iptvsub_plan_id: '',
+      price: '',
+      is_active: true,
+      _autoName: false,
+      _autoPrice: false,
+    });
+    setIsComboModalOpen(true);
+    await fetchComboOptions(comboPlansPartner.partner_id || comboPlansPartner.id);
+  };
+
+  const handleOpenEditCombo = async (comboItem) => {
+    if (!comboPlansPartner) return;
+    setEditingComboPlan(comboItem);
+    setComboForm({
+      combo_name: comboItem.combo_name || '',
+      isub_plan_id: String(comboItem.isub_plan_id || ''),
+      iptvsub_plan_id: String(comboItem.iptvsub_plan_id || ''),
+      price: String(comboItem.price !== undefined ? comboItem.price : ''),
+      is_active: comboItem.is_active !== false && comboItem.is_active !== 0 && comboItem.is_active !== '0',
+      _autoName: false,
+      _autoPrice: false,
+    });
+    setIsComboModalOpen(true);
+    await fetchComboOptions(comboPlansPartner.partner_id || comboPlansPartner.id);
+  };
+
+  const handleSelectSubPlanInComboForm = (field, val, inetList, iptvList) => {
+    const newInetId = field === 'isub_plan_id' ? val : comboForm.isub_plan_id;
+    const newIptvId = field === 'iptvsub_plan_id' ? val : comboForm.iptvsub_plan_id;
+    const selInet = inetList.find((i) => String(i.sub_plan_id) === String(newInetId));
+    const selIptv = iptvList.find((i) => String(i.sub_plan_id) === String(newIptvId));
+
+    setComboForm((prev) => {
+      const updated = { ...prev, [field]: val };
+      if (selInet && selIptv) {
+        if (!prev.combo_name || prev._autoName) {
+          updated.combo_name = `${selInet.plan_name} + ${selIptv.plan_name}`;
+          updated._autoName = true;
+        }
+        if (!prev.price || prev._autoPrice) {
+          const sumPrice = Number(selInet.price || 0) + Number(selIptv.price || 0);
+          updated.price = String(sumPrice);
+          updated._autoPrice = true;
+        }
+      }
+      return updated;
+    });
+  };
+
+  const handleSaveCombo = async () => {
+    if (!comboPlansPartner) return;
+    if (!comboForm.combo_name.trim()) {
+      toast.error('Please enter a combo plan name.');
+      return;
+    }
+    if (!comboForm.isub_plan_id) {
+      toast.error('Please select an Internet broadband subplan.');
+      return;
+    }
+    if (!comboForm.iptvsub_plan_id) {
+      toast.error('Please select an IPTV subplan.');
+      return;
+    }
+    if (!comboForm.price || isNaN(Number(comboForm.price))) {
+      toast.error('Please enter a valid combo price.');
+      return;
+    }
+
+    setSavingCombo(true);
+    try {
+      const pId = comboPlansPartner.partner_id || comboPlansPartner.id;
+      const payload = {
+        partner_id: Number(pId),
+        combo_name: comboForm.combo_name.trim(),
+        isub_plan_id: Number(comboForm.isub_plan_id),
+        iptvsub_plan_id: Number(comboForm.iptvsub_plan_id),
+        price: Number(comboForm.price),
+        is_active: comboForm.is_active ? 1 : 0,
+      };
+
+      let res;
+      if (editingComboPlan) {
+        payload.combo_id = Number(editingComboPlan.combo_id || editingComboPlan.id);
+        res = await OneBssApi.updateComboPlan(payload);
+      } else {
+        res = await OneBssApi.createComboPlan(payload);
+      }
+
+      if (res.data?.success !== false) {
+        toast.success(editingComboPlan ? 'Combo plan updated successfully!' : 'Combo plan created successfully!');
+        setIsComboModalOpen(false);
+        handleOpenComboPlans(comboPlansPartner);
+      } else {
+        toast.error(res.data?.message || 'Failed to save combo plan.');
+      }
+    } catch (e) {
+      toast.error('An error occurred while saving combo plan.');
+    } finally {
+      setSavingCombo(false);
+    }
+  };
+
+  const handleToggleComboStatus = async (comboItem) => {
+    try {
+      const curStatus = comboItem.is_active === 1 || comboItem.is_active === true || comboItem.is_active === '1';
+      const newStatus = curStatus ? 0 : 1;
+      const res = await OneBssApi.updateComboPlan({
+        combo_id: Number(comboItem.combo_id || comboItem.id),
+        is_active: newStatus,
+      });
+      if (res.data?.success !== false) {
+        toast.success(`Combo plan ${newStatus ? 'activated' : 'deactivated'} successfully!`);
+        handleOpenComboPlans(comboPlansPartner);
+      } else {
+        toast.error(res.data?.message || 'Failed to update status.');
+      }
+    } catch (e) {
+      toast.error('Failed to update combo plan status.');
+    }
+  };
+
+  const handleDeleteCombo = async (comboId) => {
+    setDeletingComboId(comboId);
+    try {
+      const res = await OneBssApi.deleteComboPlan(comboId);
+      if (res.data?.success !== false) {
+        toast.success('Combo plan deleted successfully!');
+        handleOpenComboPlans(comboPlansPartner);
+      } else {
+        toast.error(res.data?.message || 'Failed to delete combo plan.');
+      }
+    } catch (e) {
+      toast.error('Error deleting combo plan.');
+    } finally {
+      setDeletingComboId(null);
+    }
+  };
+
   // Partner Reset Password & Impersonate Handlers
   const handleOpenPartnerResetPass = (partner) => {
     setResetPartnerModal(partner);
@@ -1397,6 +1681,176 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   <>
                     <Feather name="check" size={14} color="#fff" />
                     <Text style={styles.btnPrimaryText}>Save Branch Mapping</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  };
+
+  const renderComboModal = () => {
+    if (!isComboModalOpen) return null;
+    const { inetList, iptvList } = flattenComboOptions(comboPlanOptions);
+    const inetDropdownOpts = inetList.map((i) => ({ value: String(i.sub_plan_id), label: i.display_name }));
+    const iptvDropdownOpts = iptvList.map((i) => ({ value: String(i.sub_plan_id), label: i.display_name }));
+
+    return (
+      <Modal
+        visible={isComboModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !savingCombo && setIsComboModalOpen(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
+          <View style={{ width: '100%', maxWidth: 540, backgroundColor: COLORS.bgSecondary || '#1e293b', borderRadius: 16, padding: 24, borderWidth: 1, borderColor: COLORS.border || '#334155' }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <View style={{ width: 38, height: 38, borderRadius: 10, backgroundColor: 'rgba(236, 72, 153, 0.15)', justifyContent: 'center', alignItems: 'center' }}>
+                  <Feather name="layers" size={20} color="#ec4899" />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 17, fontWeight: '700', color: COLORS.textMain || '#ffffff' }}>
+                    {editingComboPlan ? 'Edit Combo Plan' : 'Create New Combo Plan'}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: COLORS.textMuted || '#94a3b8' }}>
+                    Partner #{comboPlansPartner?.partner_id} ({comboPlansPartner?.partner_name})
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={() => !savingCombo && setIsComboModalOpen(false)}>
+                <Feather name="x" size={20} color={COLORS.textMuted || '#94a3b8'} />
+              </TouchableOpacity>
+            </View>
+
+            {loadingComboOptions ? (
+              <View style={{ padding: 40, alignItems: 'center' }}>
+                <ActivityIndicator size="large" color="#ec4899" />
+                <Text style={{ fontSize: 13, color: COLORS.textMuted || '#94a3b8', marginTop: 10 }}>Loading plan options...</Text>
+              </View>
+            ) : (
+              <ScrollView style={{ maxHeight: 440 }} contentContainerStyle={{ gap: 14 }}>
+                {/* Broadband Subplan Picker */}
+                <View>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMuted || '#94a3b8', marginBottom: 6 }}>
+                    SELECT INTERNET BROADBAND SUBPLAN *
+                  </Text>
+                  <Dropdown
+                    value={comboForm.isub_plan_id}
+                    options={inetDropdownOpts}
+                    onChange={(val) => handleSelectSubPlanInComboForm('isub_plan_id', val, inetList, iptvList)}
+                    placeholder="Choose Broadband Plan & Subplan…"
+                  />
+                </View>
+
+                {/* IPTV Subplan Picker */}
+                <View>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMuted || '#94a3b8', marginBottom: 6 }}>
+                    SELECT IPTV PACK / SUBPLAN *
+                  </Text>
+                  <Dropdown
+                    value={comboForm.iptvsub_plan_id}
+                    options={iptvDropdownOpts}
+                    onChange={(val) => handleSelectSubPlanInComboForm('iptvsub_plan_id', val, inetList, iptvList)}
+                    placeholder="Choose IPTV Pack & Subplan…"
+                  />
+                </View>
+
+                {/* Combo Plan Name */}
+                <View>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMuted || '#94a3b8', marginBottom: 6 }}>
+                    COMBO PLAN NAME *
+                  </Text>
+                  <TextInput
+                    style={{
+                      height: 42,
+                      backgroundColor: COLORS.bgPrimary || '#0f172a',
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: COLORS.border || '#334155',
+                      paddingHorizontal: 12,
+                      color: COLORS.textMain || '#ffffff',
+                      fontSize: 14,
+                    }}
+                    value={comboForm.combo_name}
+                    onChangeText={(text) => setComboForm((prev) => ({ ...prev, combo_name: text, _autoName: false }))}
+                    placeholder="e.g. Fibre 100 + Telugu Elite"
+                    placeholderTextColor={COLORS.textMuted || '#64748b'}
+                  />
+                </View>
+
+                {/* Combo Price */}
+                <View>
+                  <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMuted || '#94a3b8', marginBottom: 6 }}>
+                    COMBO PRICE (₹) *
+                  </Text>
+                  <TextInput
+                    style={{
+                      height: 42,
+                      backgroundColor: COLORS.bgPrimary || '#0f172a',
+                      borderRadius: 8,
+                      borderWidth: 1,
+                      borderColor: COLORS.border || '#334155',
+                      paddingHorizontal: 12,
+                      color: COLORS.textMain || '#ffffff',
+                      fontSize: 14,
+                    }}
+                    value={comboForm.price}
+                    onChangeText={(text) => setComboForm((prev) => ({ ...prev, price: text, _autoPrice: false }))}
+                    placeholder="e.g. 749"
+                    keyboardType="numeric"
+                    placeholderTextColor={COLORS.textMuted || '#64748b'}
+                  />
+                </View>
+
+                {/* Active Toggle */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
+                  <View>
+                    <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textMain || '#ffffff' }}>Active Status</Text>
+                    <Text style={{ fontSize: 11, color: COLORS.textMuted || '#94a3b8' }}>Make this combo available for customer recharges</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={{
+                      width: 48,
+                      height: 26,
+                      borderRadius: 13,
+                      backgroundColor: comboForm.is_active ? '#ec4899' : '#475569',
+                      padding: 3,
+                      justifyContent: 'center',
+                      alignItems: comboForm.is_active ? 'flex-end' : 'flex-start',
+                    }}
+                    onPress={() => setComboForm((prev) => ({ ...prev, is_active: !prev.is_active }))}
+                  >
+                    <View style={{ width: 20, height: 20, borderRadius: 10, backgroundColor: '#ffffff' }} />
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            )}
+
+            <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 10, marginTop: 20 }}>
+              <TouchableOpacity
+                style={{ paddingVertical: 10, paddingHorizontal: 16, borderRadius: 8, backgroundColor: 'rgba(255,255,255,0.05)', borderWidth: 1, borderColor: COLORS.border || '#334155' }}
+                onPress={() => setIsComboModalOpen(false)}
+                disabled={savingCombo}
+              >
+                <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textMuted || '#94a3b8' }}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={{ paddingVertical: 10, paddingHorizontal: 20, borderRadius: 8, backgroundColor: '#ec4899', flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                onPress={handleSaveCombo}
+                disabled={savingCombo || loadingComboOptions}
+              >
+                {savingCombo ? (
+                  <ActivityIndicator size="small" color="#ffffff" />
+                ) : (
+                  <>
+                    <Feather name="check" size={14} color="#ffffff" />
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>
+                      {editingComboPlan ? 'Update Combo' : 'Create Combo'}
+                    </Text>
                   </>
                 )}
               </TouchableOpacity>
@@ -2357,6 +2811,234 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     );
   }
 
+  // 5.5 FULL SCREEN COMBO PLANS CATALOG VIEW
+  if (comboPlansPartner) {
+    const filteredComboPlans = comboPlans.filter((item) => {
+      const q = searchComboPlan.toLowerCase().trim();
+      if (!q) return true;
+      return (
+        item.combo_name?.toLowerCase().includes(q) ||
+        item.internet_plan_name?.toLowerCase().includes(q) ||
+        item.iptv_plan_name?.toLowerCase().includes(q) ||
+        String(item.combo_id || item.id || '').includes(q)
+      );
+    });
+
+    return (
+      <View style={{ flex: 1, backgroundColor: COLORS.bgPrimary }}>
+        <ScrollView contentContainerStyle={{ padding: isMobile ? 14 : 24, width: '100%' }}>
+          <View style={styles.detailsHeaderRow}>
+            <TouchableOpacity style={styles.backBtn} onPress={handleCloseComboPlans}>
+              <Feather name="arrow-left" size={18} color={COLORS.textMain} />
+              <Text style={styles.backBtnText}>Back to Partners List</Text>
+            </TouchableOpacity>
+          </View>
+
+          <View style={{ marginVertical: 16 }}>
+            {/* Header Title Section */}
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(236, 72, 153, 0.12)', alignItems: 'center', justifyContent: 'center' }}>
+                  <Feather name="layers" size={22} color="#ec4899" />
+                </View>
+                <View>
+                  <Text style={{ fontSize: 22, fontWeight: '700', color: COLORS.textMain }}>Combo Plans Catalog</Text>
+                  <Text style={{ fontSize: 14, color: COLORS.textMuted }}>
+                    Broadband + IPTV Bundling - Partner #{comboPlansPartner.partner_id} ({comboPlansPartner.partner_name})
+                  </Text>
+                </View>
+              </View>
+
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <View style={[styles.searchBox, { minWidth: 220, height: 42 }]}>
+                  <Feather name="search" size={14} color={COLORS.textDim} />
+                  <TextInput
+                    style={[styles.searchInput, { fontSize: 13 }]}
+                    placeholder="Search combo plans..."
+                    value={searchComboPlan}
+                    onChangeText={setSearchComboPlan}
+                    placeholderTextColor={COLORS.textDim}
+                  />
+                </View>
+
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: '#ec4899',
+                    paddingHorizontal: 16,
+                    paddingVertical: 10,
+                    borderRadius: 8,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                  onPress={handleOpenCreateCombo}
+                >
+                  <Feather name="plus" size={16} color="#ffffff" />
+                  <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: '700' }}>Create Combo Plan</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* COMBO PLANS CARDS GRID */}
+            {loadingComboPlans ? (
+              <View style={{ padding: 40, alignItems: 'center' }}>
+                <ActivityIndicator size="large" color="#ec4899" />
+                <Text style={{ color: COLORS.textMuted, marginTop: 12, fontSize: 14 }}>Loading combo plans...</Text>
+              </View>
+            ) : filteredComboPlans.length === 0 ? (
+              <View style={{ backgroundColor: COLORS.cardBg || '#1e293b', borderRadius: 12, padding: 36, alignItems: 'center', borderWidth: 1, borderColor: '#afb1b5' }}>
+                <Feather name="layers" size={40} color={COLORS.textMuted} style={{ marginBottom: 12, opacity: 0.5 }} />
+                <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.textMain, marginBottom: 4 }}>No Combo Plans Found</Text>
+                <Text style={{ fontSize: 13, color: COLORS.textMuted, textAlign: 'center', marginBottom: 16 }}>
+                  {searchComboPlan ? 'No combo plans match your search query.' : 'No combo plans created for this partner yet.'}
+                </Text>
+                <TouchableOpacity
+                  style={{ backgroundColor: '#ec4899', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
+                  onPress={handleOpenCreateCombo}
+                >
+                  <Feather name="plus" size={14} color="#ffffff" />
+                  <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: '700' }}>Create First Combo Plan</Text>
+                </TouchableOpacity>
+              </View>
+            ) : (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
+                {filteredComboPlans.map((item) => {
+                  const comboId = item.combo_id || item.id;
+                  const isActive = item.is_active === 1 || item.is_active === true || item.is_active === '1';
+                  const inetPrice = Number(item.internet_price || 0);
+                  const iptvPrice = Number(item.iptv_price || 0);
+                  const sumPrice = inetPrice + iptvPrice;
+                  const comboPrice = Number(item.price || 0);
+                  const discount = sumPrice > comboPrice ? sumPrice - comboPrice : 0;
+
+                  return (
+                    <View
+                      key={comboId}
+                      style={{
+                        width: isMobile ? '100%' : 'calc(50% - 8px)',
+                        minWidth: 300,
+                        backgroundColor: COLORS.cardBg || '#1e293b',
+                        borderRadius: 12,
+                        borderWidth: 1,
+                        borderColor: isActive ? 'rgba(236, 72, 153, 0.4)' : '#334155',
+                        padding: 16,
+                      }}
+                    >
+                      {/* CARD HEADER */}
+                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                        <View style={{ flex: 1, paddingRight: 8 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                            <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.textMain }}>{item.combo_name}</Text>
+                            <View style={{ backgroundColor: 'rgba(255,255,255,0.08)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                              <Text style={{ fontSize: 11, color: COLORS.textMuted }}>#{comboId}</Text>
+                            </View>
+                          </View>
+                        </View>
+
+                        <TouchableOpacity onPress={() => handleToggleComboStatus(item)}>
+                          <View style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 4,
+                            backgroundColor: isActive ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
+                            paddingHorizontal: 8,
+                            paddingVertical: 4,
+                            borderRadius: 12,
+                          }}>
+                            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isActive ? '#10b981' : '#ef4444' }} />
+                            <Text style={{ fontSize: 11, fontWeight: '700', color: isActive ? '#10b981' : '#ef4444' }}>
+                              {isActive ? 'ACTIVE' : 'INACTIVE'}
+                            </Text>
+                          </View>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* PRICE TAG */}
+                      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 14, backgroundColor: 'rgba(236, 72, 153, 0.06)', padding: 10, borderRadius: 8 }}>
+                        <Text style={{ fontSize: 22, fontWeight: '800', color: '#ec4899' }}>₹{comboPrice.toFixed(2)}</Text>
+                        {discount > 0 && (
+                          <>
+                            <Text style={{ fontSize: 13, color: COLORS.textMuted, textDecorationLine: 'line-through' }}>₹{sumPrice.toFixed(2)}</Text>
+                            <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
+                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>SAVE ₹{discount.toFixed(0)}</Text>
+                            </View>
+                          </>
+                        )}
+                      </View>
+
+                      {/* INCLUDED SERVICES */}
+                      <View style={{ gap: 8, marginBottom: 14 }}>
+                        {/* Internet Subplan Row */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(6, 182, 212, 0.06)', padding: 10, borderRadius: 8 }}>
+                          <Feather name="wifi" size={16} color="#06b6d4" />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMain }}>
+                              {item.internet_plan_name || `Broadband Subplan #${item.isub_plan_id}`}
+                            </Text>
+                            <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
+                              {item.internet_sub_plan_name ? `${item.internet_sub_plan_name} • ` : ''}
+                              {item.internet_validity ? `${item.internet_validity} Days Validity` : 'Broadband Service'}
+                            </Text>
+                          </View>
+                          {inetPrice > 0 && (
+                            <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMuted }}>₹{inetPrice.toFixed(2)}</Text>
+                          )}
+                        </View>
+
+                        {/* IPTV Subplan Row */}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(139, 92, 246, 0.06)', padding: 10, borderRadius: 8 }}>
+                          <Feather name="tv" size={16} color="#8b5cf6" />
+                          <View style={{ flex: 1 }}>
+                            <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMain }}>
+                              {item.iptv_plan_name || `IPTV Subplan #${item.iptvsub_plan_id}`}
+                            </Text>
+                            <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
+                              {item.iptv_validity_days ? `${item.iptv_validity_days} Days Validity` : 'IPTV Service'}
+                            </Text>
+                          </View>
+                          {iptvPrice > 0 && (
+                            <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMuted }}>₹{iptvPrice.toFixed(2)}</Text>
+                          )}
+                        </View>
+                      </View>
+
+                      {/* CARD FOOTER ACTIONS */}
+                      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, paddingTop: 10, borderTopWidth: 1, borderTopColor: COLORS.borderLight || 'rgba(255,255,255,0.06)' }}>
+                        <TouchableOpacity
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.05)' }}
+                          onPress={() => handleOpenEditCombo(item)}
+                        >
+                          <Feather name="edit-2" size={13} color={COLORS.textMain} />
+                          <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMain }}>Edit</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(239, 68, 68, 0.1)' }}
+                          onPress={() => handleDeleteCombo(comboId)}
+                          disabled={deletingComboId === comboId}
+                        >
+                          {deletingComboId === comboId ? (
+                            <ActivityIndicator size="small" color="#ef4444" />
+                          ) : (
+                            <>
+                              <Feather name="trash-2" size={13} color="#ef4444" />
+                              <Text style={{ fontSize: 12, fontWeight: '600', color: '#ef4444' }}>Delete</Text>
+                            </>
+                          )}
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+        </ScrollView>
+        {renderComboModal()}
+      </View>
+    );
+  }
+
   // 6. FULL SCREEN PARTNER DETAILS VIEW (WHEN ROW CLICKED)
   if (selectedPartner) {
     const isEnabled = selectedPartner.status === 'enabled';
@@ -2663,6 +3345,15 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 <Text style={[styles.simpleActionBtnText, { color: '#8b5cf6' }]}>IPTV Plans</Text>
               </TouchableOpacity>
 
+              {/* COMBO PLANS BUTTON */}
+              <TouchableOpacity
+                style={[styles.simpleActionBtn, { borderColor: 'rgba(236, 72, 153, 0.4)', backgroundColor: 'rgba(236, 72, 153, 0.08)' }]}
+                onPress={() => handleOpenComboPlans(selectedPartner)}
+              >
+                <Feather name="layers" size={14} color="#ec4899" />
+                <Text style={[styles.simpleActionBtnText, { color: '#ec4899' }]}>Combo Plans</Text>
+              </TouchableOpacity>
+
               {/* KYC PROVIDERS BUTTON */}  
               <TouchableOpacity
                 style={[styles.simpleActionBtn, { borderColor: 'rgba(246, 92, 241, 0.4)', backgroundColor: 'rgba(246, 92, 241, 0.08)' }]}
@@ -2787,6 +3478,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         {renderConfirmStatusModal()}
         {renderKycProvidersModal()}
         {renderAssignBranchesModal()}
+        {renderComboModal()}
       </View>
     );
   }
@@ -3160,6 +3852,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         {renderConfirmStatusModal()}
         {renderKycProvidersModal()}
         {renderAssignBranchesModal()}
+        {renderComboModal()}
       </ScrollView>
     </View>
   );

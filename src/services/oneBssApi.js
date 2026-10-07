@@ -599,6 +599,49 @@ export const OneBssApi = {
   },
 
   // -------------------------------------------------------------
+  // Combo Plans & Combo Plan Options APIs
+  // -------------------------------------------------------------
+  // GET /combo_plan_options.php?partner_id=5[&validity=30]
+  getComboPlanOptions: async (partnerId, validity = '') => {
+    let url = `/combo_plan_options.php?partner_id=${partnerId}`;
+    if (validity) url += `&validity=${encodeURIComponent(validity)}`;
+    return request(url, { method: 'GET' });
+  },
+
+  // GET /combo_plans.php?partner_id=5[&active_only=1]
+  getComboPlans: async (partnerId, activeOnly = false) => {
+    let url = `/combo_plans.php?partner_id=${partnerId}`;
+    if (activeOnly) url += `&active_only=1`;
+    return request(url, { method: 'GET' });
+  },
+
+  // GET /combo_plans.php?combo_id=12
+  getComboPlanDetail: async (comboId) => {
+    return request(`/combo_plans.php?combo_id=${encodeURIComponent(comboId)}`, { method: 'GET' });
+  },
+
+  // POST /combo_plans.php
+  createComboPlan: async (payload) => {
+    return request('/combo_plans.php', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  // PUT /combo_plans.php
+  updateComboPlan: async (payload) => {
+    return request('/combo_plans.php', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  },
+
+  // DELETE /combo_plans.php?combo_id=12
+  deleteComboPlan: async (comboId) => {
+    return request(`/combo_plans.php?combo_id=${encodeURIComponent(comboId)}`, { method: 'DELETE' });
+  },
+
+  // -------------------------------------------------------------
   // Module 6: Aadhaar KYC Verification (4 APIs)
   // -------------------------------------------------------------
 

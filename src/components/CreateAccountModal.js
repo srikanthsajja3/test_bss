@@ -41,7 +41,8 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
 
   // 4. IPTV Mapping Block
-  const [iptvBaseUrl, setIptvBaseUrl] = useState('');
+  const DEFAULT_IPTV_BASE_URL = 'https://admin.pioneerdigitaltv.in/api/t4b6lNZu0nWCuC8G/';
+  const [iptvBaseUrl, setIptvBaseUrl] = useState(DEFAULT_IPTV_BASE_URL);
   const [iptvKey, setIptvKey] = useState('');
   const [iptvOperatorId, setIptvOperatorId] = useState('');
   const [iptvBranchId, setIptvBranchId] = useState('');
@@ -71,7 +72,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       setBranchList([]);
       setApiError('');
       setManualMode(false);
-      setIptvBaseUrl('');
+      setIptvBaseUrl(DEFAULT_IPTV_BASE_URL);
       setIptvKey('');
       setIptvOperatorId('');
       setIptvBranchId('');
