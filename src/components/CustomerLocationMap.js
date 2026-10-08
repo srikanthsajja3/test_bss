@@ -12,6 +12,7 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
+import { CustomerDevicesModal } from './CustomerDevicesModal';
 
 // Ensures Leaflet JS is available in the browser window
 const ensureLeaflet = async () => {
@@ -63,6 +64,7 @@ export const CustomerLocationMap = ({
   customerName = 'Subscriber',
   custId = '',
   onLocationSaved,
+  onOpenDevices,
   isCard = false,
 }) => {
   const { width } = useWindowDimensions();
@@ -76,6 +78,7 @@ export const CustomerLocationMap = ({
   const [savingLocation, setSavingLocation] = useState(false);
   const [addressSearch, setAddressSearch] = useState('');
   const [searchingPlace, setSearchingPlace] = useState(false);
+  const [devicesModalOpen, setDevicesModalOpen] = useState(false);
 
   const mapContainerId = useRef(`map-container-${custId || mobile || Math.floor(Math.random() * 100000)}`);
   const mapRef = useRef(null);
@@ -372,6 +375,21 @@ export const CustomerLocationMap = ({
             <Feather name="external-link" size={13} color="#475569" />
             <Text style={styles.btnExternalText}>Google Maps</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.btnDevices}
+            onPress={() => {
+              if (onOpenDevices) {
+                onOpenDevices();
+              } else {
+                setDevicesModalOpen(true);
+              }
+            }}
+            title="View Connected Devices"
+          >
+            <Feather name="hard-drive" size={13} color="#0284c7" />
+            <Text style={styles.btnDevicesText}>Devices</Text>
+          </TouchableOpacity>
         </View>
       </View>
 
@@ -451,6 +469,17 @@ export const CustomerLocationMap = ({
           </Text>
         </View>
       </View>
+
+      {/* Devices Modal */}
+      <CustomerDevicesModal
+        visible={devicesModalOpen}
+        onClose={() => setDevicesModalOpen(false)}
+        customer={{
+          cust_id: custId,
+          name: customerName,
+          mobile: cleanMobile,
+        }}
+      />
     </View>
   );
 };
@@ -556,6 +585,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     color: '#475569',
+  },
+  btnDevices: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(14, 165, 233, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(14, 165, 233, 0.3)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  btnDevicesText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#0284c7',
   },
   controlsRow: {
     gap: 12,

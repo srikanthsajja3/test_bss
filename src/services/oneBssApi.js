@@ -1141,6 +1141,46 @@ export const OneBssApi = {
       }),
     });
   },
+  // -------------------------------------------------------------
+  // Module: OLT / NMS Device Management
+  // -------------------------------------------------------------
+  getOnuDetails: async (internetId) => {
+    const id = internetId || 42;
+    let res = await request(`/olt/internet_get_onu_details.php?internet_id=${encodeURIComponent(id)}`, { method: 'GET' });
+    if (!res.ok || res.status === 404) {
+      res = await request(`/internet_get_onu_details.php?internet_id=${encodeURIComponent(id)}`, { method: 'GET' });
+    }
+    return res;
+  },
+
+  getNmsDevices: async (operatorPhone = '9125253535') => {
+    const cleanPhone = String(operatorPhone || '').replace(/\D/g, '').slice(-10) || '9125253535';
+    return request(`/olt/nms_get_devices.php?operator_phone=${encodeURIComponent(cleanPhone)}`, { method: 'GET' });
+  },
+
+  syncNmsDevice: async (deviceId = 3, force = false) => {
+    return request('/olt/nms_device_sync.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: Number(deviceId), force: Boolean(force) }),
+    });
+  },
+
+  getNmsDeviceTerminal: async (deviceId = 3) => {
+    return request('/olt/nms_device_terminal.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: Number(deviceId) }),
+    });
+  },
+
+  getNmsDeviceWebUrl: async (deviceId = 1) => {
+    return request('/olt/nms_device_web_url.php', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ device_id: Number(deviceId) }),
+    });
+  },
 
   getDashboard: async (partnerId = 1112) => {
     let targetId = partnerId;

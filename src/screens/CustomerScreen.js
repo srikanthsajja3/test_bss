@@ -12,6 +12,7 @@ import { CustomerPhoto, isSuperAdmin, isAccountVerified } from '../components/in
 import { IptvRechargeModal } from '../components/iptv/IptvRechargeModal';
 import { CustomerAccountsOverview, defaultRechargeType, formatApiDate, normaliseInternetAccount, normaliseIptvAccount } from '../components/CustomerAccountsOverview';
 import { CustomerLocationModal } from '../components/CustomerLocationModal';
+import { CustomerDevicesModal } from '../components/CustomerDevicesModal';
 
 const calculateBalanceDays = (expiryDateStr) => {
   if (!expiryDateStr || expiryDateStr === '—' || expiryDateStr === 'N/A') {
@@ -456,6 +457,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [unregisteredIptvMac, setUnregisteredIptvMac] = useState('');
   const [submittingIptvAdd, setSubmittingIptvAdd] = useState(false);
   const [selectedLocationCustomer, setSelectedLocationCustomer] = useState(null);
+  const [selectedDevicesCustomer, setSelectedDevicesCustomer] = useState(null);
 
   // Edit Modal State
   const [editingCustomer, setEditingCustomer] = useState(null);
@@ -1467,6 +1469,11 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           </View>
         </Modal>
       )}
+      <CustomerDevicesModal
+        visible={!!selectedDevicesCustomer}
+        onClose={() => setSelectedDevicesCustomer(null)}
+        customer={selectedDevicesCustomer}
+      />
     </>
   );
 
@@ -2556,8 +2563,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 />
               </TouchableOpacity>
               {showRegisteredCol ? <Text style={[styles.th, { flex: 1.3, minWidth: 110 }]}>Registered On</Text> : null}
-              <Text style={[styles.th, { flex: viewMode === 'iptv' ? 1 : 1.1, minWidth: 80, textAlign: viewMode === 'iptv' ? 'center' : 'left' }]}>
-                {viewMode === 'iptv' ? 'Action' : 'Navigation'}
+              <Text style={[styles.th, { flex: 1.8, minWidth: 160, textAlign: 'left' }]}>
+                Actions
               </Text>
             </View>
 
@@ -2745,22 +2752,45 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       {expiryCell(2.0, 140)}
                       {registeredCell}
 
-                      {/* Action */}
-                      <View style={{ flex: 1.4, minWidth: 125, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <TouchableOpacity
-                          onPress={() => handleOpenSubscriberScreen(cust)}
-                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.3)' }}
-                        >
-                          <Feather name="eye" size={12} color="#7c3aed" />
-                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#7c3aed' }}>Open</Text>
-                        </TouchableOpacity>
+                      {/* Actions: Map & Devices */}
+                      <View style={{ flex: 1.8, minWidth: 160, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                         <TouchableOpacity
                           onPress={() => setSelectedLocationCustomer(cust)}
-                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, backgroundColor: 'rgba(59, 130, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.25)' }}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 5,
+                            paddingHorizontal: 8,
+                            paddingVertical: 4,
+                            borderRadius: 6,
+                            backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                            borderWidth: 1,
+                            borderColor: 'rgba(59, 130, 246, 0.25)',
+                            alignSelf: 'flex-start',
+                          }}
                           title="View & Pin Map Location"
                         >
-                          <Feather name="map-pin" size={12} color="#2563eb" />
+                          <Feather name="map-pin" size={13} color="#2563eb" />
                           <Text style={{ fontSize: 11, fontWeight: '700', color: '#2563eb' }}>Map</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => setSelectedDevicesCustomer(cust)}
+                          style={{
+                            flexDirection: 'row',
+                            alignItems: 'center',
+                            gap: 5,
+                            paddingHorizontal: 8,
+                            paddingVertical: 4,
+                            borderRadius: 6,
+                            backgroundColor: 'rgba(14, 165, 233, 0.1)',
+                            borderWidth: 1,
+                            borderColor: 'rgba(14, 165, 233, 0.3)',
+                            alignSelf: 'flex-start',
+                          }}
+                          title="View Connected Devices"
+                        >
+                          <Feather name="hard-drive" size={13} color="#0284c7" />
+                          <Text style={{ fontSize: 11, fontWeight: '700', color: '#0284c7' }}>Devices</Text>
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -2864,8 +2894,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                     {expiryCell(2.2, 140)}
                     {registeredCell}
 
-                    {/* Navigation / Map Button */}
-                    <View style={{ flex: 1.1, minWidth: 80 }}>
+                    {/* Navigation / Actions: Map & Devices */}
+                    <View style={{ flex: 1.8, minWidth: 160, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                       <TouchableOpacity
                         style={{
                           flexDirection: 'row',
@@ -2882,9 +2912,31 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                         onPress={() => {
                           setSelectedLocationCustomer(cust);
                         }}
+                        title="View & Pin Map Location"
                       >
                         <Feather name="map-pin" size={13} color="#2563eb" />
                         <Text style={{ fontSize: 11, fontWeight: '700', color: '#2563eb' }}>Map</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={{
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 5,
+                          paddingHorizontal: 8,
+                          paddingVertical: 4,
+                          borderRadius: 6,
+                          backgroundColor: 'rgba(14, 165, 233, 0.1)',
+                          borderWidth: 1,
+                          borderColor: 'rgba(14, 165, 233, 0.3)',
+                          alignSelf: 'flex-start',
+                        }}
+                        onPress={() => {
+                          setSelectedDevicesCustomer(cust);
+                        }}
+                        title="View Connected Devices"
+                      >
+                        <Feather name="hard-drive" size={13} color="#0284c7" />
+                        <Text style={{ fontSize: 11, fontWeight: '700', color: '#0284c7' }}>Devices</Text>
                       </TouchableOpacity>
                     </View>
                   </View>
@@ -2904,6 +2956,12 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         onLocationSaved={() => {
           loadCustomerDataFromApi();
         }}
+      />
+      {/* CUSTOMER DEVICES & ONU NMS MODAL */}
+      <CustomerDevicesModal
+        visible={!!selectedDevicesCustomer}
+        onClose={() => setSelectedDevicesCustomer(null)}
+        customer={selectedDevicesCustomer}
       />
     </ScrollView>
   );
