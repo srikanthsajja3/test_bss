@@ -1469,11 +1469,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           </View>
         </Modal>
       )}
-      <CustomerDevicesModal
-        visible={!!selectedDevicesCustomer}
-        onClose={() => setSelectedDevicesCustomer(null)}
-        customer={selectedDevicesCustomer}
-      />
     </>
   );
 
@@ -2774,7 +2769,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                           <Text style={{ fontSize: 11, fontWeight: '700', color: '#2563eb' }}>Map</Text>
                         </TouchableOpacity>
                         <TouchableOpacity
-                          onPress={() => setSelectedDevicesCustomer(cust)}
+                          onPress={() => setSelectedDevicesCustomer({ ...cust, account_type: 'iptv' })}
                           style={{
                             flexDirection: 'row',
                             alignItems: 'center',
@@ -2931,7 +2926,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                           alignSelf: 'flex-start',
                         }}
                         onPress={() => {
-                          setSelectedDevicesCustomer(cust);
+                          setSelectedDevicesCustomer({ ...cust, account_type: 'internet' });
                         }}
                         title="View Connected Devices"
                       >
