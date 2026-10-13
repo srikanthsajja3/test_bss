@@ -106,7 +106,7 @@ export const CustomerDevicesModal = ({ visible, onClose, customer }) => {
       return;
     }
     try {
-      const res = await OneBssApi.getNmsDeviceWebUrl(devId);
+      const res = await OneBssApi.getNmsDeviceWebUrl(devId, mobile || '9125253535');
       if (res && res.ok && (res.data?.url || res.data?.web_url)) {
         window.open(res.data.url || res.data.web_url, '_blank');
       } else {

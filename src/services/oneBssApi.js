@@ -1167,12 +1167,17 @@ export const OneBssApi = {
     });
   },
 
-  getNmsDeviceWebUrl: async (deviceId) => {
+  getNmsDeviceWebUrl: async (deviceId, operatorPhone = '9125253535') => {
     if (!deviceId) return { ok: false, error: 'device_id is required' };
+    const payload = { device_id: Number(deviceId) };
+    const cleanPhone = String(operatorPhone || '').replace(/\D/g, '').slice(-10);
+    if (cleanPhone) {
+      payload.operator_phone = cleanPhone;
+    }
     return request('/olt/nms_device_web_url.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ device_id: Number(deviceId) }),
+      body: JSON.stringify(payload),
     });
   },
 
