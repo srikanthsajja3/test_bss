@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, useWindowDimensions, Modal, TextInput } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, useWindowDimensions, Modal, TextInput, Linking } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { CustomerPhoto, isAccountVerified } from './internet/shared';
 import { OneBssApi } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
-import { CustomerLocationMap } from './CustomerLocationMap';
+import { CustomerLocationModal } from './CustomerLocationModal';
 
 // ---------- helpers ----------
 
@@ -277,6 +277,7 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
   const [selectedBranchCode, setSelectedBranchCode] = useState('');
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
   const [iptvSyncStatus, setIptvSyncStatus] = useState(customer?.iptv_sync_status || null);
+  const [locationModalVisible, setLocationModalVisible] = useState(false);
 
   useEffect(() => {
     setIptvSyncStatus(customer?.iptv_sync_status || null);
@@ -555,12 +556,79 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
               <View style={styles.metaItem}><Feather name="mail" size={12} color="#64748b" /><Text style={styles.metaText}>{clean(customer.email) || '—'}</Text></View>
               <View style={styles.metaItem}><Feather name="calendar" size={12} color="#64748b" /><Text style={styles.metaText}>Since {formatApiDate(customer.registered_date, false)}</Text></View>
             </View>
-            {clean(customer.installation_address || customer.address) ? (
-              <View style={[styles.metaItem, { marginTop: 4 }]}>
-                <Feather name="map-pin" size={12} color="#64748b" />
-                <Text style={styles.metaText} numberOfLines={1}>{clean(customer.installation_address || customer.address).replace(/\s+/g, ' ')}</Text>
-              </View>
-            ) : null}
+            <View style={[styles.metaItem, { marginTop: 4, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }]}>
+              <Feather name="map-pin" size={12} color="#64748b" />
+              <Text style={styles.metaText} numberOfLines={1}>
+                {clean(customer.installation_address || customer.address)
+                  ? clean(customer.installation_address || customer.address).replace(/\s+/g, ' ')
+                  : 'No address set'}
+              </Text>
+              <TouchableOpacity
+                onPress={async () => {
+                  const cleanMob = String(customer.mobile || customer.MobileNumber || '').replace(/\D/g, '').slice(-10);
+                  let dest = '';
+                  if (cleanMob && cleanMob.length === 10) {
+                    try {
+                      const locRes = await OneBssApi.getCustomerLocation(cleanMob);
+                      const locData = locRes?.data?.data || locRes?.data || [];
+                      const locRec = Array.isArray(locData) ? locData[0] : (typeof locData === 'object' ? locData : null);
+                      if (locRec && locRec.latitude && locRec.longitude) {
+                        dest = `${locRec.latitude},${locRec.longitude}`;
+                      }
+                    } catch (e) {}
+                  }
+                  if (!dest) {
+                    dest = encodeURIComponent(clean(customer.installation_address || customer.address));
+                  }
+                  if (!dest) {
+                    toast.warn('Please edit location or set address first.');
+                    return;
+                  }
+                  const url = `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+                  if (typeof window !== 'undefined') {
+                    window.open(url, '_blank', 'noopener,noreferrer');
+                  } else {
+                    Linking.openURL(url).catch(() => {});
+                  }
+                }}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  backgroundColor: 'rgba(37, 99, 235, 0.08)',
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 4,
+                  borderWidth: 1,
+                  borderColor: 'rgba(37, 99, 235, 0.25)',
+                  marginLeft: 4,
+                }}
+                title="Open Google Maps Directions"
+              >
+                <Feather name="navigation" size={11} color="#2563eb" />
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#2563eb' }}>Google Maps</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setLocationModalVisible(true)}
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  backgroundColor: 'rgba(139, 92, 246, 0.08)',
+                  paddingHorizontal: 8,
+                  paddingVertical: 3,
+                  borderRadius: 4,
+                  borderWidth: 1,
+                  borderColor: 'rgba(139, 92, 246, 0.25)',
+                  marginLeft: 2,
+                }}
+                title="Edit Location & Pin GPS"
+              >
+                <Feather name="edit-2" size={11} color="#8b5cf6" />
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#8b5cf6' }}>Edit Location</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
 
@@ -621,15 +689,14 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
         {renderCards(iptv)}
       </Section>
 
-      {/* GEOGRAPHIC LOCATION & INSTALLATION MAP */}
-      <CustomerLocationMap
-        key={`overview_map_${customer.cust_id}_${clean(customer.mobile || customer.MobileNumber || '')}`}
-        mobile={clean(customer.mobile || customer.MobileNumber || (customer.internet_accounts?.[0]?.mobile) || '')}
-        customerName={name}
-        customerAddress={clean(customer.installation_address || customer.address || customer.billing_address || '')}
-        customerZipcode={clean(customer.zipcode || '')}
-        custId={customer.cust_id}
-        isCard={true}
+      {/* Edit Customer Location Popup Modal */}
+      <CustomerLocationModal
+        visible={locationModalVisible}
+        onClose={() => setLocationModalVisible(false)}
+        customer={customer}
+        onLocationSaved={() => {
+          if (onRefresh) onRefresh();
+        }}
       />
 
       {/* Select IPTV Branch Modal (Shown when operator has multiple branches) */}

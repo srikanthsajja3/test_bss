@@ -42,6 +42,13 @@ const API_ENDPOINTS = [
   { id: '7.4', name: 'POST /internet_customer_detail_sync.php?internet_id=3', method: 'POST', module: '7. Customer Management', payload: '', action: () => OneBssApi.syncInternetCustomerDetail(3) },
   { id: '7.5', name: 'POST /iptv_customer_sync.php', method: 'POST', module: '7. Customer Management', payload: JSON.stringify({ mobile: '9125253535' }, null, 2), action: (p) => { const body = p ? JSON.parse(p) : {}; return OneBssApi.syncIptvCustomers(body.mobile); } },
   { id: '7.6', name: 'GET /customer_lookup.php?mobile=9125253535', method: 'GET', module: '7. Customer Management', payload: '', action: () => OneBssApi.customerLookup('9125253535') },
+
+  // 8. OLT & NMS Device Management (5 APIs)
+  { id: '8.1', name: 'GET /olt/internet_get_onu_details.php?internet_id=205', method: 'GET', module: '8. OLT & NMS Device Management', payload: '', action: () => OneBssApi.getOnuDetails(205) },
+  { id: '8.2', name: 'GET /olt/nms_get_devices.php', method: 'GET', module: '8. OLT & NMS Device Management', payload: '', action: () => OneBssApi.getNmsDevices() },
+  { id: '8.3', name: 'POST /olt/nms_device_sync.php', method: 'POST', module: '8. OLT & NMS Device Management', payload: JSON.stringify({ device_id: 3, force: false }, null, 2), action: (p) => { const body = p ? JSON.parse(p) : {}; return OneBssApi.syncNmsDevice(body.device_id, body.force); } },
+  { id: '8.4', name: 'POST /olt/nms_device_terminal.php', method: 'POST', module: '8. OLT & NMS Device Management', payload: JSON.stringify({ device_id: 3 }, null, 2), action: (p) => { const body = p ? JSON.parse(p) : {}; return OneBssApi.getNmsDeviceTerminal(body.device_id); } },
+  { id: '8.5', name: 'POST /olt/nms_device_web_url.php', method: 'POST', module: '8. OLT & NMS Device Management', payload: JSON.stringify({ device_id: 1 }, null, 2), action: (p) => { const body = p ? JSON.parse(p) : {}; return OneBssApi.getNmsDeviceWebUrl(body.device_id); } },
 ];
 
 export const ApiConsoleScreen = () => {

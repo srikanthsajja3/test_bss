@@ -14,136 +14,65 @@ import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
 
-// Fast stable hash for distinct identifiers
-const hashStr = (str) => {
-  let hash = 0;
-  const s = String(str || 'onebss');
-  for (let i = 0; i < s.length; i++) {
-    hash = (hash << 5) - hash + s.charCodeAt(i);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-};
-
-// Deterministic unique MAC formatter based on unique identifier when missing from DB
-const formatMacFromKey = (str) => {
-  if (!str) return '—';
-  const h = hashStr(str);
-  const hex = (h.toString(16).padStart(8, '0') + ((h * 13) % 0xffff).toString(16).padStart(4, '0')).slice(-12).toUpperCase();
-  return hex.match(/.{1,2}/g).join(':');
-};
-
-// Deterministic unique IP address generator per subscriber
-const generateSubscriberIp = (key, type = 'internet') => {
-  const h = hashStr(key);
-  if (type === 'iptv') {
-    const o3 = (h % 20) + 1;
-    const o4 = ((h >> 4) % 240) + 10;
-    return `192.168.${o3}.${o4}`;
-  } else {
-    const o2 = 64 + (h % 60);
-    const o3 = ((h >> 4) % 250) + 2;
-    const o4 = ((h >> 10) % 250) + 2;
-    return `100.${o2}.${o3}.${o4} / 192.168.1.1`;
-  }
-};
-
-const clean = (v) => (v === null || v === undefined || v === 'null' ? '' : String(v).trim());
-
 export const CustomerDevicesModal = ({ visible, onClose, customer }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
-  const isInitiallyIptv =
-    customer?.account_type === 'iptv' ||
-    customer?.device_type === 'iptv' ||
-    Boolean(customer?.iptv_id) ||
-    Boolean(customer?.stb_box) ||
-    Boolean(customer?.pioneer_stb_id);
-
-  const [activeTab, setActiveTab] = useState(isInitiallyIptv ? 'iptv' : 'internet');
   const [loading, setLoading] = useState(false);
-  const [lookupDetails, setLookupDetails] = useState(null);
   const [onuData, setOnuData] = useState(null);
   const [syncing, setSyncing] = useState(false);
 
-  useEffect(() => {
-    if (visible && customer) {
-      setActiveTab(isInitiallyIptv ? 'iptv' : 'internet');
-      loadDeviceData();
-    } else {
-      setLookupDetails(null);
-      setOnuData(null);
-    }
-  }, [visible, customer]);
+  const clean = (v) => (v === null || v === undefined || v === 'null' ? '' : String(v));
 
-  const mobile = clean(customer?.mobile || customer?.MobileNumber || '');
+  const internetId =
+    customer?.internet_id ||
+    customer?.internet_accounts?.[0]?.internet_id ||
+    customer?.cust_id ||
+    customer?.id;
+
   const customerName =
-    customer?.full_name || customer?.name || customer?.username || 'Subscriber';
+    customer?.full_name || customer?.name || customer?.username || (internetId ? `Subscriber #${internetId}` : 'Subscriber');
+  const mobile = clean(customer?.mobile || customer?.MobileNumber || '');
 
-  const loadDeviceData = async () => {
-    if (!customer) return;
+  // Fetch only the device ONU details
+  const fetchDeviceData = async () => {
+    if (!visible || !internetId) return;
     setLoading(true);
     try {
-      // 1. Fetch full customer lookup record if mobile is available
-      if (mobile) {
-        const lookupRes = await OneBssApi.customerLookup(mobile);
-        const dataArr = lookupRes?.data?.data || lookupRes?.data;
-        if (Array.isArray(dataArr) && dataArr.length > 0) {
-          setLookupDetails(dataArr[0]);
-        } else if (dataArr && typeof dataArr === 'object') {
-          setLookupDetails(dataArr);
-        }
-      }
-
-      // 2. If it has internet account, attempt to load ONU details if available
-      const intId =
-        customer?.internet_id ||
-        customer?.internet_accounts?.[0]?.internet_id;
-      if (intId) {
-        try {
-          const onuRes = await OneBssApi.getOnuDetails(intId);
-          if (onuRes?.ok && onuRes?.data && onuRes.data.success !== false) {
-            setOnuData(onuRes.data);
-          }
-        } catch (e) {
-          setOnuData(null);
-        }
+      const res = await OneBssApi.getOnuDetails(internetId);
+      if (res && res.ok && res.data) {
+        setOnuData(res.data);
+      } else {
+        setOnuData(null);
       }
     } catch (err) {
-      // Graceful fallback to table customer row
+      setOnuData(null);
     } finally {
       setLoading(false);
     }
   };
 
-  // Find linked IPTV account from lookup or row
-  const linkedIptv =
-    (lookupDetails?.iptv_accounts && lookupDetails.iptv_accounts.length > 0
-      ? lookupDetails.iptv_accounts[0]
-      : null) || (isInitiallyIptv ? customer : null);
+  useEffect(() => {
+    if (visible && internetId) {
+      fetchDeviceData();
+    }
+  }, [visible, internetId]);
 
-  // Find linked Internet account from lookup or row
-  const linkedInternet =
-    (lookupDetails?.internet_accounts && lookupDetails.internet_accounts.length > 0
-      ? lookupDetails.internet_accounts[0]
-      : null) || (!isInitiallyIptv ? customer : null);
-
-  const hasBothAccounts = Boolean(linkedIptv && linkedInternet && (linkedIptv !== linkedInternet));
-
-  // Handle Synchronize Device
+  // Clean sync button
   const handleSync = async () => {
+    const devId = onuData?.switch?.device_id || onuData?.olt?.id || onuData?.data?.device_id || onuData?.device_id || customer?.device_id;
+    if (!devId) {
+      toast.info('No device ID available for sync');
+      return;
+    }
     setSyncing(true);
     try {
-      if (activeTab === 'iptv') {
-        await OneBssApi.syncIptvCustomers(mobile || '9125253535');
-        await loadDeviceData();
-        toast.success(`STB device synchronized for ${customerName}`);
+      const res = await OneBssApi.syncNmsDevice(devId, false);
+      await fetchDeviceData();
+      if (res && res.ok && res.data?.success) {
+        toast.success('Device synchronized successfully');
       } else {
-        const intId = linkedInternet?.internet_id || customer?.internet_id || 1;
-        await OneBssApi.syncInternetCustomerDetail(intId);
-        await loadDeviceData();
-        toast.success(`Internet device synchronized for ${customerName}`);
+        toast.info('Device status refreshed');
       }
     } catch (e) {
       toast.info('Device status refreshed');
@@ -152,294 +81,74 @@ export const CustomerDevicesModal = ({ visible, onClose, customer }) => {
     }
   };
 
-  if (!visible || !customer) return null;
-
-  // Render IPTV STB Device View
-  const renderIptvDevice = () => {
-    const acc = linkedIptv || customer;
-    const stbBox = acc?.stb_box || acc?.stb_no || acc?.smartcard || '—';
-    const pioneerId = acc?.pioneer_stb_id || acc?.id || '—';
-    const smartcard = acc?.smartcard || acc?.vc_number || stbBox;
-    const iptvId = acc?.id || acc?.iptv_id || customer?.iptv_id || '—';
-
-    const mac =
-      acc?.stb_mac ||
-      acc?.mac ||
-      formatMacFromKey(stbBox !== '—' ? `${stbBox}_${iptvId}` : `${pioneerId}_${iptvId}`);
-
-    const ipAddress =
-      acc?.ip_address ||
-      acc?.stb_ip ||
-      customer?.ip_address ||
-      customer?.stb_ip ||
-      generateSubscriberIp(stbBox !== '—' ? `${stbBox}_${iptvId}` : `${pioneerId}_${iptvId}`, 'iptv');
-
-    const statusRaw = String(acc?.sts || acc?.status || acc?.status_text || 'Active').trim();
-    const isExpired =
-      statusRaw.toLowerCase().includes('expire') ||
-      acc?.status_key === 'expired';
-    const isActive = !isExpired && (statusRaw.toLowerCase() === 'active' || acc?.status_key === 'active');
-    const statusLabel = isExpired ? 'EXPIRED' : (isActive ? 'ACTIVE' : statusRaw.toUpperCase());
-
-    const pkgName = acc?.package_name || acc?.plan_name || '—';
-    const subPlan = acc?.subplan_name || '—';
-    const branch = acc?.branch_name ? (acc?.branch_id ? `${acc.branch_name} (#${acc.branch_id})` : acc.branch_name) : 'Default';
-    const partner = acc?.partner_name || customer?.partner_name || '—';
-    const expiry = acc?.expriration || acc?.expiration || '—';
-
-    return (
-      <>
-        {/* Device Banner */}
-        <View style={styles.deviceBanner}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
-            <View style={[styles.deviceIconCircle, { backgroundColor: 'rgba(124, 58, 237, 0.1)' }]}>
-              <Feather name="tv" size={22} color="#7c3aed" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.deviceModelTitle}>
-                {acc?.box_model || 'Pioneer HD / 4K Set-Top Box (STB)'}
-              </Text>
-              <Text style={styles.deviceSerialSub}>
-                STB No: {stbBox}
-              </Text>
-            </View>
-          </View>
-          <View style={[styles.onlineBadge, { backgroundColor: isActive ? '#dcfce7' : (isExpired ? '#fef3c7' : '#fee2e2') }]}>
-            <View style={[styles.statusDot, { backgroundColor: isActive ? '#16a34a' : (isExpired ? '#d97706' : '#dc2626') }]} />
-            <Text style={[styles.onlineBadgeText, { color: isActive ? '#15803d' : (isExpired ? '#b45309' : '#b91c1c') }]}>
-              {statusLabel}
-            </Text>
-          </View>
-        </View>
-
-        {/* Grid of IPTV Device Parameters */}
-        <View style={styles.detailsGrid}>
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>STB Box Number</Text>
-            <Text style={[styles.paramValue, { color: '#7c3aed' }]}>{stbBox}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>Pioneer STB ID</Text>
-            <Text style={styles.paramValue}>{pioneerId}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>Smartcard / VC No</Text>
-            <Text style={styles.paramValue}>{smartcard}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>Device MAC Address</Text>
-            <Text style={styles.paramValue}>{mac}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>STB IP Address</Text>
-            <Text style={[styles.paramValue, { color: '#0f172a' }]}>{ipAddress}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>Current Package</Text>
-            <Text style={[styles.paramValue, { color: '#0f172a' }]} numberOfLines={1}>{pkgName}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>Validity / Subplan</Text>
-            <Text style={styles.paramValue}>{subPlan}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>Branch</Text>
-            <Text style={styles.paramValue}>{branch}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>Operator / Partner</Text>
-            <Text style={styles.paramValue} numberOfLines={1}>{partner}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>Expiry Date</Text>
-            <Text style={[styles.paramValue, { color: isExpired ? '#dc2626' : '#15803d' }]}>{expiry}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>Account Link</Text>
-            <Text style={styles.paramValue}>IPTV #{iptvId}</Text>
-          </View>
-        </View>
-      </>
-    );
+  const handleTerminal = async () => {
+    const devId = onuData?.switch?.device_id || onuData?.olt?.id || onuData?.data?.device_id || onuData?.device_id || customer?.device_id;
+    if (!devId) {
+      toast.info('No device ID available for terminal');
+      return;
+    }
+    try {
+      const res = await OneBssApi.getNmsDeviceTerminal(devId);
+      if (res && res.ok && (res.data?.url || res.data?.terminal_url)) {
+        window.open(res.data.url || res.data.terminal_url, '_blank');
+      } else {
+        toast.info(res.data?.message || 'Terminal connection requested');
+      }
+    } catch (e) {
+      toast.error('Failed to connect to device terminal');
+    }
   };
 
-  // Render Internet ONT / Router Device View
-  const renderInternetDevice = () => {
-    const acc = linkedInternet || customer;
-    const internetId = acc?.internet_id || customer?.internet_id || customer?.cust_id || '—';
-    const accId = acc?.acc_id || customer?.acc_id || '—';
-    const username = acc?.username || customer?.username || '—';
-
-    const isOnline =
-      acc?.is_online === true ||
-      String(acc?.online || '').toUpperCase() === 'ONLINE' ||
-      customer?.is_online === true ||
-      String(customer?.online || '').toUpperCase() === 'ONLINE';
-
-    const serialNo =
-      onuData?.serial_number ||
-      onuData?.serial ||
-      acc?.onu_serial ||
-      (username !== '—' ? `HWTC-${username.toUpperCase()}` : `ONT-${internetId}`);
-
-    const mac =
-      onuData?.mac_address ||
-      onuData?.mac ||
-      acc?.mac ||
-      acc?.mac_address ||
-      customer?.mac ||
-      formatMacFromKey(username !== '—' ? `${username}_${internetId}` : `int_${internetId}`);
-
-    const numericIntId = Number(internetId) || 1;
-    const branchId = acc?.branch_id || customer?.branch_id || 1;
-
-    const ponPort =
-      onuData?.pon_port ||
-      onuData?.pon ||
-      `PON 0/${(Number(branchId) % 4) + 1}/${(numericIntId % 16) + 1} : ONU ${(numericIntId % 64) + 1}`;
-
-    const rxPower =
-      onuData?.rx_power ||
-      onuData?.optical_rx ||
-      (isOnline ? `${(-18.1 - ((numericIntId * 7) % 45) * 0.1).toFixed(2)} dBm` : '— (Offline)');
-
-    const txPower =
-      onuData?.tx_power ||
-      onuData?.optical_tx ||
-      (isOnline ? `${(+2.0 + ((numericIntId * 3) % 15) * 0.05).toFixed(2)} dBm` : '— (Offline)');
-
-    const ipAddress =
-      onuData?.ip ||
-      acc?.framedipaddress ||
-      acc?.ip_address ||
-      customer?.framedipaddress ||
-      customer?.ip_address ||
-      generateSubscriberIp((username !== '—' ? username : '') + '_' + internetId, 'internet');
-
-    const pkgName = acc?.package_name || customer?.package_name || '—';
-    const partner = acc?.partner_name || customer?.partner_name || '—';
-
-    return (
-      <>
-        {/* Device Banner */}
-        <View style={styles.deviceBanner}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
-            <View style={styles.deviceIconCircle}>
-              <Feather name="wifi" size={22} color="#0284c7" />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={styles.deviceModelTitle}>
-                {onuData?.model || 'Gigabit Dual-Band XPON ONT (Fiber Router)'}
-              </Text>
-              <Text style={styles.deviceSerialSub}>SN: {serialNo}</Text>
-            </View>
-          </View>
-          <View style={[styles.onlineBadge, { backgroundColor: isOnline ? '#dcfce7' : '#fee2e2' }]}>
-            <View style={[styles.statusDot, { backgroundColor: isOnline ? '#16a34a' : '#dc2626' }]} />
-            <Text style={[styles.onlineBadgeText, { color: isOnline ? '#15803d' : '#dc2626' }]}>
-              {isOnline ? 'ONLINE' : 'OFFLINE'}
-            </Text>
-          </View>
-        </View>
-
-        {/* Grid of Internet Device Parameters */}
-        <View style={styles.detailsGrid}>
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>Serial Number</Text>
-            <Text style={[styles.paramValue, { color: '#0284c7' }]}>{serialNo}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>PPPoE Username</Text>
-            <Text style={styles.paramValue}>{username}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>MAC Address</Text>
-            <Text style={styles.paramValue}>{mac}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>IP Address (WAN / LAN)</Text>
-            <Text style={[styles.paramValue, { color: '#0f172a' }]}>{ipAddress}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>PON Port</Text>
-            <Text style={styles.paramValue}>{ponPort}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>Optical RX Power</Text>
-            <Text style={[styles.paramValue, { color: isOnline ? '#16a34a' : '#64748b', fontWeight: '700' }]}>
-              {rxPower}
-            </Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>Optical TX Power</Text>
-            <Text style={[styles.paramValue, { color: isOnline ? '#0f172a' : '#64748b' }]}>
-              {txPower}
-            </Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>Internet Plan</Text>
-            <Text style={styles.paramValue} numberOfLines={1}>{pkgName}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>Operator / Partner</Text>
-            <Text style={styles.paramValue} numberOfLines={1}>{partner}</Text>
-          </View>
-
-          <View style={styles.paramCard}>
-            <Text style={styles.paramLabel}>Account Link</Text>
-            <Text style={styles.paramValue}>Internet #{internetId} {accId !== '—' ? `· Acc #${accId}` : ''}</Text>
-          </View>
-        </View>
-      </>
-    );
+  const handleWebUrl = async () => {
+    const devId = onuData?.switch?.device_id || onuData?.olt?.id || onuData?.data?.device_id || onuData?.device_id || customer?.device_id;
+    if (!devId) {
+      toast.info('No device ID available for Web GUI');
+      return;
+    }
+    try {
+      const res = await OneBssApi.getNmsDeviceWebUrl(devId);
+      if (res && res.ok && (res.data?.url || res.data?.web_url)) {
+        window.open(res.data.url || res.data.web_url, '_blank');
+      } else {
+        toast.info(res.data?.message || 'Web GUI access requested');
+      }
+    } catch (e) {
+      toast.error('Failed to fetch device Web GUI URL');
+    }
   };
+
+  if (!visible) return null;
+
+  // Extract fields gracefully from live API response or subscriber profile
+  const resData = onuData?.data || onuData || {};
+  const onu = resData.onu || {};
+  const optical = resData.optical || {};
+  const olt = resData.olt || {};
+  const sw = resData.switch || {};
+  const freshness = resData.freshness || {};
+
+  const serialNo = onu.serial || onu.physical_id || resData.serial_number || customer?.stb_sn || '—';
+  const macAddress = resData.mac || onu.customer_mac || onu.onu_mac || customer?.stb_mac || customer?.mac || '—';
+  const ponPort = onu.interface || onu.pon || (sw.device_name && sw.port ? `${sw.device_name} [${sw.port}]` : sw.port) || '—';
+  const rxPower = optical.rx_power_dbm != null ? `${optical.rx_power_dbm} dBm` : (optical.rx_level || '—');
+  const txPower = optical.tx_power_dbm != null ? `${optical.tx_power_dbm} dBm` : '—';
+  const modelName = onu.type || olt.name || sw.device_name || 'ONU Device';
+  const ipAddress = sw.device_ip || olt.ip || customer?.framedipaddress || '—';
+  const firmware = onu.version || '—';
+  const isOnline = resData.found ? (freshness.stale === false || onu.status === 'online' || onu.status === 'active' || customer?.isOnline) : false;
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
         <View style={[styles.modalCard, { width: isMobile ? '96%' : 680, maxHeight: '90%' }]}>
-          {/* Header */}
+          {/* Clean Header */}
           <View style={styles.modalHeader}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View
-                style={[
-                  styles.headerIcon,
-                  {
-                    backgroundColor:
-                      activeTab === 'iptv'
-                        ? 'rgba(124, 58, 237, 0.1)'
-                        : 'rgba(2, 132, 199, 0.1)',
-                  },
-                ]}
-              >
-                <Feather
-                  name={activeTab === 'iptv' ? 'tv' : 'hard-drive'}
-                  size={20}
-                  color={activeTab === 'iptv' ? '#7c3aed' : '#0284c7'}
-                />
+              <View style={styles.headerIcon}>
+                <Feather name="hard-drive" size={20} color="#0284c7" />
               </View>
               <View>
-                <Text style={styles.modalTitle}>
-                  {activeTab === 'iptv' ? 'Connected STB Device Details' : 'Connected ONT / Router Details'}
-                </Text>
+                <Text style={styles.modalTitle}>Connected Device Details</Text>
                 <Text style={styles.modalSub}>
                   {customerName} {mobile ? `· +91 ${mobile}` : ''}
                 </Text>
@@ -450,111 +159,112 @@ export const CustomerDevicesModal = ({ visible, onClose, customer }) => {
             </TouchableOpacity>
           </View>
 
-          {/* Account Type Tabs (If subscriber has multiple devices/accounts) */}
-          {hasBothAccounts ? (
-            <View style={styles.tabContainer}>
-              <TouchableOpacity
-                style={[
-                  styles.tabButton,
-                  activeTab === 'internet' && styles.tabButtonActiveInternet,
-                ]}
-                onPress={() => setActiveTab('internet')}
-              >
-                <Feather
-                  name="wifi"
-                  size={14}
-                  color={activeTab === 'internet' ? '#0284c7' : '#64748b'}
-                />
-                <Text
-                  style={[
-                    styles.tabButtonText,
-                    activeTab === 'internet' && { color: '#0284c7', fontWeight: '700' },
-                  ]}
-                >
-                  Internet ONT Device
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.tabButton,
-                  activeTab === 'iptv' && styles.tabButtonActiveIptv,
-                ]}
-                onPress={() => setActiveTab('iptv')}
-              >
-                <Feather
-                  name="tv"
-                  size={14}
-                  color={activeTab === 'iptv' ? '#7c3aed' : '#64748b'}
-                />
-                <Text
-                  style={[
-                    styles.tabButtonText,
-                    activeTab === 'iptv' && { color: '#7c3aed', fontWeight: '700' },
-                  ]}
-                >
-                  IPTV Set-Top Box
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          {/* Modal Body */}
+          {/* Modal Body: ONLY Clean Device Information */}
           <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
             {loading ? (
               <View style={styles.loadingBox}>
-                <ActivityIndicator
-                  size="small"
-                  color={activeTab === 'iptv' ? '#7c3aed' : '#0284c7'}
-                />
-                <Text
-                  style={[
-                    styles.loadingText,
-                    { color: activeTab === 'iptv' ? '#7c3aed' : '#0284c7' },
-                  ]}
-                >
-                  Loading device specifications...
-                </Text>
+                <ActivityIndicator size="small" color="#0284c7" />
+                <Text style={styles.loadingText}>Fetching device details...</Text>
               </View>
             ) : null}
 
-            {activeTab === 'iptv' ? renderIptvDevice() : renderInternetDevice()}
+            {/* Device Overview Banner */}
+            <View style={styles.deviceBanner}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                <View style={styles.deviceIconCircle}>
+                  <Feather name="wifi" size={22} color="#0284c7" />
+                </View>
+                <View>
+                  <Text style={styles.deviceModelTitle}>{modelName}</Text>
+                  <Text style={styles.deviceSerialSub}>SN: {serialNo}</Text>
+                </View>
+              </View>
+              <View style={styles.onlineBadge}>
+                <View style={[styles.statusDot, { backgroundColor: isOnline ? '#16a34a' : '#dc2626' }]} />
+                <Text style={[styles.onlineBadgeText, { color: isOnline ? '#15803d' : '#dc2626' }]}>
+                  {isOnline ? 'ONLINE' : 'OFFLINE'}
+                </Text>
+              </View>
+            </View>
+
+            {/* Grid of Clean Device Parameters */}
+            <View style={styles.detailsGrid}>
+              <View style={styles.paramCard}>
+                <Text style={styles.paramLabel}>Serial Number</Text>
+                <Text style={styles.paramValue}>{serialNo}</Text>
+              </View>
+
+              <View style={styles.paramCard}>
+                <Text style={styles.paramLabel}>MAC Address</Text>
+                <Text style={styles.paramValue}>{macAddress}</Text>
+              </View>
+
+              <View style={styles.paramCard}>
+                <Text style={styles.paramLabel}>PON Port</Text>
+                <Text style={styles.paramValue}>{ponPort}</Text>
+              </View>
+
+              <View style={styles.paramCard}>
+                <Text style={styles.paramLabel}>Optical RX Power</Text>
+                <Text style={[styles.paramValue, { color: '#16a34a', fontWeight: '700' }]}>{rxPower}</Text>
+              </View>
+
+              <View style={styles.paramCard}>
+                <Text style={styles.paramLabel}>Optical TX Power</Text>
+                <Text style={styles.paramValue}>{txPower}</Text>
+              </View>
+
+              <View style={styles.paramCard}>
+                <Text style={styles.paramLabel}>IP Address</Text>
+                <Text style={styles.paramValue}>{ipAddress}</Text>
+              </View>
+
+              <View style={styles.paramCard}>
+                <Text style={styles.paramLabel}>Firmware Version</Text>
+                <Text style={styles.paramValue}>{firmware}</Text>
+              </View>
+
+              <View style={styles.paramCard}>
+                <Text style={styles.paramLabel}>Account Link</Text>
+                <Text style={styles.paramValue}>Internet #{internetId}</Text>
+              </View>
+            </View>
           </ScrollView>
 
           {/* Clean Footer */}
           <View style={styles.modalFooter}>
-            <TouchableOpacity
-              style={[
-                styles.refreshBtn,
-                activeTab === 'iptv' && {
-                  backgroundColor: 'rgba(124, 58, 237, 0.1)',
-                  borderColor: 'rgba(124, 58, 237, 0.25)',
-                },
-              ]}
-              onPress={handleSync}
-              disabled={syncing || loading}
-            >
-              {syncing ? (
-                <ActivityIndicator
-                  size="small"
-                  color={activeTab === 'iptv' ? '#7c3aed' : '#0284c7'}
-                />
-              ) : (
-                <Feather
-                  name="refresh-cw"
-                  size={13}
-                  color={activeTab === 'iptv' ? '#7c3aed' : '#0284c7'}
-                />
-              )}
-              <Text
-                style={[
-                  styles.refreshBtnText,
-                  activeTab === 'iptv' && { color: '#7c3aed' },
-                ]}
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <TouchableOpacity
+                style={styles.refreshBtn}
+                onPress={handleSync}
+                disabled={syncing || loading}
               >
-                {syncing ? 'Syncing...' : 'Sync Device'}
-              </Text>
-            </TouchableOpacity>
+                {syncing ? (
+                  <ActivityIndicator size="small" color="#0284c7" />
+                ) : (
+                  <Feather name="refresh-cw" size={13} color="#0284c7" />
+                )}
+                <Text style={styles.refreshBtnText}>{syncing ? 'Syncing...' : 'Sync Device'}</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.actionOutlineBtn}
+                onPress={handleWebUrl}
+                disabled={loading}
+              >
+                <Feather name="external-link" size={13} color="#334155" />
+                <Text style={styles.actionOutlineBtnText}>Web GUI</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.actionOutlineBtn}
+                onPress={handleTerminal}
+                disabled={loading}
+              >
+                <Feather name="terminal" size={13} color="#334155" />
+                <Text style={styles.actionOutlineBtnText}>Terminal</Text>
+              </TouchableOpacity>
+            </View>
 
             <TouchableOpacity style={styles.closeModalBtn} onPress={onClose}>
               <Text style={styles.closeModalBtnText}>Close</Text>
@@ -601,6 +311,7 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderRadius: 8,
+    backgroundColor: 'rgba(2, 132, 199, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -618,40 +329,6 @@ const styles = StyleSheet.create({
     padding: 6,
     borderRadius: 6,
   },
-  tabContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 4,
-    gap: 10,
-    backgroundColor: '#f8fafc',
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
-  },
-  tabButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    backgroundColor: '#ffffff',
-  },
-  tabButtonActiveInternet: {
-    borderColor: '#0284c7',
-    backgroundColor: 'rgba(2, 132, 199, 0.08)',
-  },
-  tabButtonActiveIptv: {
-    borderColor: '#7c3aed',
-    backgroundColor: 'rgba(124, 58, 237, 0.08)',
-  },
-  tabButtonText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#64748b',
-  },
   modalBody: {
     padding: 20,
   },
@@ -667,6 +344,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 12,
+    color: '#0284c7',
     fontWeight: '600',
   },
   deviceBanner: {
@@ -703,6 +381,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
+    backgroundColor: '#dcfce7',
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 14,
@@ -768,6 +447,22 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#0284c7',
+  },
+  actionOutlineBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+  },
+  actionOutlineBtnText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#334155',
   },
   closeModalBtn: {
     paddingHorizontal: 20,

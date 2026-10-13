@@ -7,6 +7,8 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   useWindowDimensions,
+  Linking,
+  Platform,
 } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
@@ -14,12 +16,11 @@ import { OneBssApi } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
 import { CustomerDevicesModal } from './CustomerDevicesModal';
 
-// Ensures Leaflet JS is available in the browser window
+// Ensures Leaflet JS and CSS are available in the browser window
 const ensureLeaflet = async () => {
   if (typeof window === 'undefined') return null;
   if (window.L) return window.L;
 
-  // Add Leaflet CSS if not already attached
   if (!document.getElementById('leaflet-cdn-css')) {
     const link = document.createElement('link');
     link.id = 'leaflet-cdn-css';
@@ -28,14 +29,13 @@ const ensureLeaflet = async () => {
     document.head.appendChild(link);
   }
 
-  // Load Leaflet JS
   if (!window.L) {
     await new Promise((resolve, reject) => {
       const script = document.createElement('script');
       script.id = 'leaflet-cdn-js';
       script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
       script.onload = () => resolve(window.L);
-      script.onerror = () => reject(new Error('Failed to load Leaflet maps library'));
+      script.onerror = () => reject(new Error('Failed to load Leaflet library'));
       document.body.appendChild(script);
     });
   }
@@ -43,7 +43,7 @@ const ensureLeaflet = async () => {
   return window.L;
 };
 
-// SVG Pin Icon for high-contrast crisp rendering
+// SVG Marker Pin
 const createPinIcon = (L, color = '#2563eb') => {
   const svg = `
     <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="36" height="36" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
@@ -62,15 +62,20 @@ const createPinIcon = (L, color = '#2563eb') => {
 export const CustomerLocationMap = ({
   mobile,
   customerName = 'Subscriber',
+  customerAddress = '',
+  customerZipcode = '',
   custId = '',
   onLocationSaved,
   onOpenDevices,
+  onClose,
   isCard = false,
 }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
-  // Coordinates state (Default to Hyderabad matching prompt: 17.385044, 78.486671)
+  const cleanMobile = String(mobile || '').replace(/\D/g, '').slice(-10);
+
+  // Default to Hyderabad or customer saved coords
   const [latitude, setLatitude] = useState(17.385044);
   const [longitude, setLongitude] = useState(78.486671);
   const [hasServerLocation, setHasServerLocation] = useState(false);
@@ -80,51 +85,11 @@ export const CustomerLocationMap = ({
   const [searchingPlace, setSearchingPlace] = useState(false);
   const [devicesModalOpen, setDevicesModalOpen] = useState(false);
 
-  const mapContainerId = useRef(`map-container-${custId || mobile || Math.floor(Math.random() * 100000)}`);
+  const containerUniqueId = useRef(`popup-map-${custId || cleanMobile || Math.floor(Math.random() * 1000000)}`);
   const mapRef = useRef(null);
   const markerRef = useRef(null);
 
-  const cleanMobile = String(mobile || '').replace(/\D/g, '').slice(-10);
-
-  // 1. Fetch Location from GET /customer_location.php?mobile=...
-  const fetchLocationData = async () => {
-    if (!cleanMobile || cleanMobile.length !== 10) {
-      setLoadingLocation(false);
-      return;
-    }
-
-    setLoadingLocation(true);
-    try {
-      const res = await OneBssApi.getCustomerLocation(cleanMobile);
-      const dataArr = res?.data?.data || res?.data || [];
-      const rec = Array.isArray(dataArr) ? dataArr[0] : (typeof dataArr === 'object' ? dataArr : null);
-
-      if (rec && rec.latitude !== null && rec.longitude !== null && rec.latitude !== undefined && rec.longitude !== undefined) {
-        const lat = parseFloat(rec.latitude);
-        const lng = parseFloat(rec.longitude);
-        if (!isNaN(lat) && !isNaN(lng)) {
-          setLatitude(lat);
-          setLongitude(lng);
-          setHasServerLocation(true);
-          updateMapMarker(lat, lng, true);
-        } else {
-          setHasServerLocation(false);
-        }
-      } else {
-        setHasServerLocation(false);
-      }
-    } catch (err) {
-      console.warn('Error fetching customer location:', err);
-    } finally {
-      setLoadingLocation(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchLocationData();
-  }, [cleanMobile]);
-
-  // Helper to move marker and pan map
+  // Update map marker and pan
   const updateMapMarker = (lat, lng, pan = true) => {
     if (!mapRef.current || !window.L) return;
     const L = window.L;
@@ -157,14 +122,58 @@ export const CustomerLocationMap = ({
     }
   };
 
-  // 2. Initialize Leaflet Map
+  // 1. Fetch Location from API
+  const fetchLocationData = async () => {
+    if (!cleanMobile || cleanMobile.length !== 10) {
+      setLoadingLocation(false);
+      return;
+    }
+
+    setLoadingLocation(true);
+    try {
+      const res = await OneBssApi.getCustomerLocation(cleanMobile);
+      const dataArr = res?.data?.data || res?.data || [];
+      const rec = Array.isArray(dataArr) ? dataArr[0] : (typeof dataArr === 'object' ? dataArr : null);
+
+      if (
+        rec &&
+        rec.latitude !== null &&
+        rec.longitude !== null &&
+        rec.latitude !== undefined &&
+        rec.longitude !== undefined
+      ) {
+        const lat = parseFloat(rec.latitude);
+        const lng = parseFloat(rec.longitude);
+        if (!isNaN(lat) && !isNaN(lng)) {
+          setLatitude(lat);
+          setLongitude(lng);
+          setHasServerLocation(true);
+          updateMapMarker(lat, lng, true);
+        } else {
+          setHasServerLocation(false);
+        }
+      } else {
+        setHasServerLocation(false);
+      }
+    } catch (err) {
+      console.warn('Error fetching customer location:', err);
+    } finally {
+      setLoadingLocation(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchLocationData();
+  }, [cleanMobile]);
+
+  // 2. Initialize Leaflet Map inside Popup
   useEffect(() => {
     let isCancelled = false;
 
     ensureLeaflet().then((L) => {
       if (isCancelled || !L) return;
 
-      const container = document.getElementById(mapContainerId.current);
+      const container = document.getElementById(containerUniqueId.current);
       if (!container) return;
 
       if (mapRef.current) {
@@ -221,9 +230,13 @@ export const CustomerLocationMap = ({
       mapRef.current = map;
       markerRef.current = marker;
 
+      // Invalidate size to ensure proper tiles rendering inside popup modal
       setTimeout(() => {
         map.invalidateSize();
-      }, 250);
+      }, 300);
+      setTimeout(() => {
+        map.invalidateSize();
+      }, 700);
     }).catch((err) => {
       console.error('Failed to init Leaflet:', err);
     });
@@ -248,7 +261,7 @@ export const CustomerLocationMap = ({
     }
   };
 
-  // 3. Search location via OpenStreetMap Nominatim
+  // 3. Search location via Nominatim
   const handleSearchAddress = async () => {
     if (!addressSearch.trim()) return;
     setSearchingPlace(true);
@@ -263,18 +276,18 @@ export const CustomerLocationMap = ({
         setLatitude(Number(lat.toFixed(6)));
         setLongitude(Number(lng.toFixed(6)));
         updateMapMarker(lat, lng, true);
-        toast.info(`Found location: ${data[0].display_name.split(',').slice(0, 3).join(',')}`);
+        toast.info(`Found: ${data[0].display_name.split(',').slice(0, 3).join(',')}`);
       } else {
-        toast.warn('No places found matching that search. Try a nearby landmark or city name.');
+        toast.warn('No places found matching that search. Try a landmark or city name.');
       }
     } catch (e) {
-      toast.error('Search failed. Check your internet connection.');
+      toast.error('Search failed. Check internet connection.');
     } finally {
       setSearchingPlace(false);
     }
   };
 
-  // 4. Use Current Device GPS
+  // 4. Use Current GPS
   const handleUseCurrentGps = () => {
     if (typeof navigator !== 'undefined' && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
@@ -284,10 +297,10 @@ export const CustomerLocationMap = ({
           setLatitude(lat);
           setLongitude(lng);
           updateMapMarker(lat, lng, true);
-          toast.success('Centered on your current GPS location!');
+          toast.success('Centered on current GPS location!');
         },
         (error) => {
-          toast.warn('Could not retrieve GPS location: ' + error.message);
+          toast.warn('Could not retrieve GPS: ' + error.message);
         },
         { enableHighAccuracy: true, timeout: 10000 }
       );
@@ -296,10 +309,23 @@ export const CustomerLocationMap = ({
     }
   };
 
-  // 5. Save location to POST /customer_location.php
+  // 5. Open in Google Maps directions
+  const handleOpenGoogleMaps = () => {
+    const dest = `${latitude},${longitude}`;
+    const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.open(mapsUrl, '_blank', 'noopener,noreferrer');
+    } else {
+      Linking.openURL(mapsUrl).catch(() => {
+        toast.error('Unable to open Google Maps on this device.');
+      });
+    }
+  };
+
+  // 6. Save Location to POST /customer_location.php
   const handleSaveLocation = async () => {
     if (!cleanMobile || cleanMobile.length !== 10) {
-      toast.error('Cannot save: Customer does not have a valid 10-digit mobile number.');
+      toast.error('Customer does not have a valid 10-digit mobile number.');
       return;
     }
 
@@ -307,57 +333,45 @@ export const CustomerLocationMap = ({
     try {
       const res = await OneBssApi.saveCustomerLocation(cleanMobile, latitude, longitude);
       if (res.ok || res.data?.success) {
-        toast.success(`Location saved successfully for ${customerName} (${cleanMobile})!`);
+        toast.success(`Location (${latitude}, ${longitude}) saved for ${customerName}!`);
         setHasServerLocation(true);
         if (onLocationSaved) {
           onLocationSaved({ latitude, longitude });
         }
+        if (onClose) {
+          onClose();
+        }
       } else {
-        toast.error(res.data?.message || 'Failed to save customer location.');
+        toast.error(res.data?.message || 'Failed to save location.');
       }
     } catch (e) {
-      toast.error('Network error saving customer location.');
+      toast.error('Network error saving location.');
     } finally {
       setSavingLocation(false);
     }
   };
 
   return (
-    <View style={[styles.card, isCard && styles.cardElevated]}>
-      {/* Header Bar */}
-      <View style={styles.headerRow}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <View style={styles.iconCircle}>
-            <Feather name="map-pin" size={18} color="#2563eb" />
-          </View>
-          <View>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              <Text style={styles.title}>Customer GPS Location & Map</Text>
-              {loadingLocation ? (
-                <ActivityIndicator size="small" color="#2563eb" />
-              ) : hasServerLocation ? (
-                <View style={styles.badgeSuccess}>
-                  <Feather name="check-circle" size={12} color="#15803d" />
-                  <Text style={styles.badgeSuccessText}>Location Pinned</Text>
-                </View>
-              ) : (
-                <View style={styles.badgeWarning}>
-                  <Feather name="alert-circle" size={12} color="#b45309" />
-                  <Text style={styles.badgeWarningText}>Not Set</Text>
-                </View>
-              )}
-            </View>
-            <Text style={styles.subtitle}>
-              Live geographic mapping & install coordinates for {customerName} · {cleanMobile || 'No mobile'}
-            </Text>
-          </View>
-        </View>
-
+    <View style={styles.container}>
+      {/* Top Controls Row */}
+      <View style={styles.topBar}>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          {hasServerLocation ? (
+            <View style={styles.badgeSuccess}>
+              <Feather name="check-circle" size={12} color="#15803d" />
+              <Text style={styles.badgeSuccessText}>Location Pinned</Text>
+            </View>
+          ) : (
+            <View style={styles.badgeWarning}>
+              <Feather name="alert-circle" size={12} color="#b45309" />
+              <Text style={styles.badgeWarningText}>Not Set</Text>
+            </View>
+          )}
+
           <TouchableOpacity
             style={styles.btnSecondary}
             onPress={handleUseCurrentGps}
-            title="Pin Current GPS"
+            title="Use Current Device GPS"
           >
             <Feather name="crosshair" size={13} color="#2563eb" />
             <Text style={styles.btnSecondaryText}>My GPS</Text>
@@ -365,42 +379,35 @@ export const CustomerLocationMap = ({
 
           <TouchableOpacity
             style={styles.btnExternal}
-            onPress={() => {
-              if (typeof window !== 'undefined') {
-                window.open(`https://www.google.com/maps?q=${latitude},${longitude}`, '_blank');
-              }
-            }}
-            title="Open in Google Maps"
+            onPress={handleOpenGoogleMaps}
+            title="Open in Google Maps (Directions)"
           >
-            <Feather name="external-link" size={13} color="#475569" />
+            <Feather name="navigation" size={13} color="#475569" />
             <Text style={styles.btnExternalText}>Google Maps</Text>
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.btnDevices}
-            onPress={() => {
-              if (onOpenDevices) {
-                onOpenDevices();
-              } else {
-                setDevicesModalOpen(true);
-              }
-            }}
-            title="View Connected Devices"
-          >
-            <Feather name="hard-drive" size={13} color="#0284c7" />
-            <Text style={styles.btnDevicesText}>Devices</Text>
-          </TouchableOpacity>
         </View>
+
+        <TouchableOpacity
+          style={[styles.saveBtn, savingLocation && { opacity: 0.7 }]}
+          onPress={handleSaveLocation}
+          disabled={savingLocation}
+        >
+          {savingLocation ? (
+            <ActivityIndicator size="small" color="#ffffff" />
+          ) : (
+            <Feather name="save" size={14} color="#ffffff" />
+          )}
+          <Text style={styles.saveBtnText}>{savingLocation ? 'Saving...' : 'Save Location'}</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Controls & Search Row */}
+      {/* Search and Lat/Lng Row */}
       <View style={[styles.controlsRow, { flexDirection: isMobile ? 'column' : 'row' }]}>
-        {/* Address Search */}
         <View style={styles.searchBox}>
           <Feather name="search" size={14} color="#64748b" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search city, area, landmark (e.g. Madhapur, Hyderabad)..."
+            placeholder="Search landmark, city, area..."
             placeholderTextColor="#94a3b8"
             value={addressSearch}
             onChangeText={setAddressSearch}
@@ -415,7 +422,6 @@ export const CustomerLocationMap = ({
           )}
         </View>
 
-        {/* Lat / Lng Display & Edit */}
         <View style={styles.coordsGroup}>
           <View style={styles.coordInputWrap}>
             <Text style={styles.coordLabel}>LAT:</Text>
@@ -435,96 +441,44 @@ export const CustomerLocationMap = ({
               keyboardType="numeric"
             />
           </View>
-
-          <TouchableOpacity
-            style={[styles.saveBtn, savingLocation && { opacity: 0.7 }]}
-            onPress={handleSaveLocation}
-            disabled={savingLocation}
-          >
-            {savingLocation ? (
-              <ActivityIndicator size="small" color="#ffffff" />
-            ) : (
-              <Feather name="save" size={14} color="#ffffff" />
-            )}
-            <Text style={styles.saveBtnText}>{savingLocation ? 'Saving...' : 'Save Location'}</Text>
-          </TouchableOpacity>
         </View>
       </View>
 
       {/* Map Interactive Canvas */}
       <View style={styles.mapFrame}>
         <div
-          id={mapContainerId.current}
+          id={containerUniqueId.current}
           style={{
             width: '100%',
             height: isMobile ? 320 : 420,
             borderRadius: 10,
             zIndex: 1,
+            position: 'relative',
           }}
         />
         <View style={styles.mapTipBar}>
           <Feather name="info" size={12} color="#475569" />
           <Text style={styles.mapTipText}>
-            Click anywhere on the map or drag the blue pin to set the exact installation point. Then click <Text style={{ fontWeight: '700', color: '#16a34a' }}>Save Location</Text>.
+            Click anywhere on the map or drag the blue pin to set the exact installation point, then click <Text style={{ fontWeight: '700', color: '#16a34a' }}>Save Location</Text>.
           </Text>
         </View>
       </View>
-
-      {/* Devices Modal */}
-      <CustomerDevicesModal
-        visible={devicesModalOpen}
-        onClose={() => setDevicesModalOpen(false)}
-        customer={{
-          cust_id: custId,
-          name: customerName,
-          mobile: cleanMobile,
-        }}
-      />
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  card: {
-    backgroundColor: '#ffffff',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    padding: 16,
-    marginBottom: 20,
+  container: {
+    display: 'flex',
+    flexDirection: 'column',
   },
-  cardElevated: {
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 8,
-    elevation: 3,
-  },
-  headerRow: {
+  topBar: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 12,
-    marginBottom: 14,
-  },
-  iconCircle: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
-    backgroundColor: 'rgba(37, 99, 235, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  title: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: '#0f172a',
-  },
-  subtitle: {
-    fontSize: 12,
-    color: '#64748b',
-    marginTop: 2,
+    gap: 10,
+    marginBottom: 12,
   },
   badgeSuccess: {
     flexDirection: 'row',
@@ -532,7 +486,7 @@ const styles = StyleSheet.create({
     gap: 4,
     backgroundColor: '#dcfce7',
     paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingVertical: 3,
     borderRadius: 12,
   },
   badgeSuccessText: {
@@ -546,7 +500,7 @@ const styles = StyleSheet.create({
     gap: 4,
     backgroundColor: '#fef3c7',
     paddingHorizontal: 8,
-    paddingVertical: 2,
+    paddingVertical: 3,
     borderRadius: 12,
   },
   badgeWarningText: {
@@ -557,12 +511,12 @@ const styles = StyleSheet.create({
   btnSecondary: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
     backgroundColor: 'rgba(37, 99, 235, 0.08)',
     borderWidth: 1,
     borderColor: 'rgba(37, 99, 235, 0.25)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 6,
   },
   btnSecondaryText: {
@@ -573,12 +527,12 @@ const styles = StyleSheet.create({
   btnExternal: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
     backgroundColor: '#f8fafc',
     borderWidth: 1,
     borderColor: '#cbd5e1',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 6,
   },
   btnExternalText: {
@@ -586,26 +540,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#475569',
   },
-  btnDevices: {
+  saveBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: 'rgba(14, 165, 233, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(14, 165, 233, 0.3)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 6,
+    backgroundColor: '#16a34a',
+    paddingHorizontal: 16,
+    height: 36,
+    borderRadius: 8,
+    shadowColor: '#16a34a',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
-  btnDevicesText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#0284c7',
+  saveBtnText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '700',
   },
   controlsRow: {
-    gap: 12,
+    gap: 10,
     alignItems: 'center',
-    marginBottom: 14,
+    marginBottom: 12,
   },
   searchBox: {
     flex: 1,
@@ -617,7 +573,7 @@ const styles = StyleSheet.create({
     borderColor: '#cbd5e1',
     borderRadius: 8,
     paddingHorizontal: 10,
-    height: 38,
+    height: 36,
     width: '100%',
   },
   searchInput: {
@@ -651,7 +607,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f1f5f9',
     borderRadius: 6,
     paddingHorizontal: 8,
-    height: 38,
+    height: 36,
     borderWidth: 1,
     borderColor: '#e2e8f0',
   },
@@ -667,24 +623,6 @@ const styles = StyleSheet.create({
     minWidth: 80,
     outlineStyle: 'none',
     paddingVertical: 0,
-  },
-  saveBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#16a34a',
-    paddingHorizontal: 14,
-    height: 38,
-    borderRadius: 8,
-    shadowColor: '#16a34a',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-  },
-  saveBtnText: {
-    color: '#ffffff',
-    fontSize: 12,
-    fontWeight: '700',
   },
   mapFrame: {
     borderRadius: 10,

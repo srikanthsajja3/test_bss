@@ -772,49 +772,41 @@ export const OneBssApi = {
   // 24. Customer Lookup (GET /customer_lookup.php?mobile={mobile}&cust_id={cust_id}&username={username})
   customerLookup: async (query = '9125253535') => {
     let q = String(query || '').trim();
-    if (!q) return request('/customer_lookup.php', { method: 'GET' });
-    let res;
+    if (!q) return { ok: true, status: 200, data: { success: true, data: [] } };
+
+    // 1. If 10-digit mobile
     if (/^\d{10}$/.test(q)) {
-      res = await request(`/customer_lookup.php?mobile=${encodeURIComponent(q)}`, { method: 'GET' });
-    } else if (/^\d+$/.test(q)) {
-      res = await request(`/customer_lookup.php?cust_id=${encodeURIComponent(q)}`, { method: 'GET' });
-      if (!res.ok || res.data?.success === false) {
-        try {
-          const listRes = await request('/customers_list.php?limit=100', { method: 'GET' });
-          const rows = listRes.data?.data || listRes.data?.customers || [];
-          const found = rows.find((r) => String(r.cust_id) === q || String(r.id) === q);
-          if (found?.mobile) {
-            const cleanM = String(found.mobile).replace(/\D/g, '').slice(-10);
-            if (cleanM.length === 10) {
-              res = await request(`/customer_lookup.php?mobile=${encodeURIComponent(cleanM)}`, { method: 'GET' });
-            }
-          }
-        } catch (e) {}
-      }
-    } else {
-      res = await request(`/customer_lookup.php?username=${encodeURIComponent(q)}`, { method: 'GET' });
-      if (!res.ok || res.data?.success === false) {
-        try {
-          const listRes = await request('/customers_list.php?limit=100', { method: 'GET' });
-          const rows = listRes.data?.data || listRes.data?.customers || [];
-          const found = rows.find((r) => String(r.username) === q);
-          if (found?.mobile) {
-            const cleanM = String(found.mobile).replace(/\D/g, '').slice(-10);
-            if (cleanM.length === 10) {
-              res = await request(`/customer_lookup.php?mobile=${encodeURIComponent(cleanM)}`, { method: 'GET' });
-            }
-          }
-        } catch (e) {}
-      }
+      return request(`/customer_lookup.php?mobile=${encodeURIComponent(q)}`, { method: 'GET' });
     }
-    if (!res.ok && (res.status === 400 || res.status === 404)) {
-      return {
-        ok: true,
-        status: 200,
-        data: { success: true, data: [] },
-      };
+
+    // 2. customer_lookup.php only supports 'mobile'. Resolve mobile from customers_list first.
+    try {
+      const listRes = await request('/customers_list.php?limit=200', { method: 'GET' });
+      const rows = listRes.data?.data || listRes.data?.customers || listRes.data || [];
+      const listArr = Array.isArray(rows) ? rows : [];
+      const found = listArr.find((r) =>
+        String(r.cust_id) === q ||
+        String(r.id) === q ||
+        String(r.username || '').toLowerCase() === q.toLowerCase()
+      );
+      if (found?.mobile) {
+        const cleanM = String(found.mobile).replace(/\D/g, '').slice(-10);
+        if (cleanM.length === 10) {
+          return request(`/customer_lookup.php?mobile=${encodeURIComponent(cleanM)}`, { method: 'GET' });
+        }
+      }
+    } catch (e) {}
+
+    const directDigits = q.replace(/\D/g, '').slice(-10);
+    if (directDigits.length === 10) {
+      return request(`/customer_lookup.php?mobile=${encodeURIComponent(directDigits)}`, { method: 'GET' });
     }
-    return res;
+
+    return {
+      ok: true,
+      status: 200,
+      data: { success: true, data: [] },
+    };
   },
 
   // customers_list.php — one row per account. Filtering, search, sorting and paging are all
@@ -1145,20 +1137,20 @@ export const OneBssApi = {
   // Module: OLT / NMS Device Management
   // -------------------------------------------------------------
   getOnuDetails: async (internetId) => {
-    const id = internetId || 42;
-    let res = await request(`/olt/internet_get_onu_details.php?internet_id=${encodeURIComponent(id)}`, { method: 'GET' });
-    if (!res.ok || res.status === 404) {
-      res = await request(`/internet_get_onu_details.php?internet_id=${encodeURIComponent(id)}`, { method: 'GET' });
+    if (!internetId) {
+      return { ok: false, error: 'internet_id is required' };
     }
-    return res;
+    return request(`/olt/internet_get_onu_details.php?internet_id=${encodeURIComponent(internetId)}`, { method: 'GET' });
   },
 
-  getNmsDevices: async (operatorPhone = '9125253535') => {
-    const cleanPhone = String(operatorPhone || '').replace(/\D/g, '').slice(-10) || '9125253535';
-    return request(`/olt/nms_get_devices.php?operator_phone=${encodeURIComponent(cleanPhone)}`, { method: 'GET' });
+  getNmsDevices: async (operatorPhone = '') => {
+    const cleanPhone = String(operatorPhone || '').replace(/\D/g, '').slice(-10);
+    const queryParam = cleanPhone ? `?operator_phone=${encodeURIComponent(cleanPhone)}` : '';
+    return request(`/olt/nms_get_devices.php${queryParam}`, { method: 'GET' });
   },
 
-  syncNmsDevice: async (deviceId = 3, force = false) => {
+  syncNmsDevice: async (deviceId, force = false) => {
+    if (!deviceId) return { ok: false, error: 'device_id is required' };
     return request('/olt/nms_device_sync.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1166,7 +1158,8 @@ export const OneBssApi = {
     });
   },
 
-  getNmsDeviceTerminal: async (deviceId = 3) => {
+  getNmsDeviceTerminal: async (deviceId) => {
+    if (!deviceId) return { ok: false, error: 'device_id is required' };
     return request('/olt/nms_device_terminal.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1174,7 +1167,8 @@ export const OneBssApi = {
     });
   },
 
-  getNmsDeviceWebUrl: async (deviceId = 1) => {
+  getNmsDeviceWebUrl: async (deviceId) => {
+    if (!deviceId) return { ok: false, error: 'device_id is required' };
     return request('/olt/nms_device_web_url.php', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
