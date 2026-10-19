@@ -34,29 +34,13 @@ export const isSuperAdmin = (user) => {
 
 export const isAccountVerified = (acc) => {
   if (!acc) return false;
-  if (typeof window !== 'undefined') {
-    try {
-      const stored = localStorage.getItem('onebss_verified_cust_ids');
-      if (stored) {
-        const set = new Set(JSON.parse(stored));
-        if (
-          (acc.id && set.has(String(acc.id))) ||
-          (acc.internet_id && set.has(String(acc.internet_id))) ||
-          (acc.cust_id && set.has(String(acc.cust_id))) ||
-          (acc.username && set.has(String(acc.username))) ||
-          (acc.mobile && set.has(String(acc.mobile)))
-        ) {
-          return true;
-        }
-      }
-    } catch (e) {}
-  }
+  // KYC status comes only from the server (Customer_demographics.aadhar_verified).
   const v = acc.verified ?? acc.aadhar_verified ?? acc.aadhaar_verified ?? acc.is_aadhar_verified ?? acc.is_aadhaar_verified;
   if (v === true || v === 1 || v === '1' || v === 'true' || String(v).trim().toLowerCase() === 'verified') {
     return true;
   }
   const k = String(acc.kyc || '').toLowerCase();
-  if (k.includes('aadhaar') || k.includes('verified') || k.includes('scoreme') || k.includes('digilocker')) {
+  if (!/\b(un|not|non)[\s_-]?verified\b|pending|failed/.test(k) && /\b(verified|aadhaar|scoreme|digilocker)\b/.test(k)) {
     return true;
   }
   return false;
@@ -143,7 +127,7 @@ export const KV = ({ label, value, bold }) => (
 );
 
 export const Note = ({ text, tone = 'warn' }) => {
-  const t = tone === 'error' ? { bg: '#fef2f2', bd: '#fecaca', fg: '#991b1b', icon: 'alert-circle' } : tone === 'info' ? { bg: '#eff6ff', bd: '#bfdbfe', fg: '#1e40af', icon: 'info' } : { bg: '#fffbeb', bd: '#fde68a', fg: '#92400e', icon: 'info' };
+  const t = tone === 'error' ? { bg: '#fef2f2', bd: '#fecaca', fg: '#991b1b', icon: 'alert-circle' } : tone === 'info' ? { bg: '#eff6ff', bd: '#bfdbfe', fg: '#1e40af', icon: 'info' } : tone === 'success' ? { bg: '#f0fdf4', bd: '#bbf7d0', fg: '#166534', icon: 'check-circle' } : { bg: '#fffbeb', bd: '#fde68a', fg: '#92400e', icon: 'info' };
   return (
     <View style={[styles.note, { backgroundColor: t.bg, borderColor: t.bd }]}>
       <Feather name={t.icon} size={13} color={t.fg} style={{ marginTop: 2 }} />

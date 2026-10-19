@@ -184,10 +184,18 @@ export const IptvAccountDetails = ({ customer, account, accountIndex, operatorNa
             </View>
           </View>
 
-          <TouchableOpacity style={styles.rechargeBtn} onPress={onOpenRecharge}>
-            <Feather name={rechargeType === 'advance' ? 'fast-forward' : 'refresh-cw'} size={15} color="#ffffff" />
-            <Text style={styles.rechargeBtnText}>{rechargeType === 'advance' ? 'Advance Renewal' : 'Recharge'}</Text>
-          </TouchableOpacity>
+          {account?.open_recharge ? (
+            // last recharge was paid but not completed by Pioneer -> Recheck instead of Recharge
+            <TouchableOpacity style={[styles.rechargeBtn, { backgroundColor: '#d97706' }]} onPress={onOpenRecharge} title={account.open_recharge.message || ''}>
+              <Feather name="rotate-ccw" size={15} color="#ffffff" />
+              <Text style={styles.rechargeBtnText}>Recheck Recharge · ₹{Number(account.open_recharge.amount || 0).toFixed(2)}</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity style={styles.rechargeBtn} onPress={onOpenRecharge}>
+              <Feather name={rechargeType === 'advance' ? 'fast-forward' : 'refresh-cw'} size={15} color="#ffffff" />
+              <Text style={styles.rechargeBtnText}>{rechargeType === 'advance' ? 'Advance Renewal' : 'Recharge'}</Text>
+            </TouchableOpacity>
+          )}
 
           {/* <View style={styles.linkRow}>
             {onSync ? (

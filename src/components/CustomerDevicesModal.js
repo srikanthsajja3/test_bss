@@ -1,273 +1,193 @@
 import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  Modal,
-  StyleSheet,
-  TouchableOpacity,
-  ActivityIndicator,
-  ScrollView,
-  useWindowDimensions,
-} from 'react-native';
+import { View, Text, Modal, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView, useWindowDimensions } from 'react-native';
 import { Feather } from '@expo/vector-icons';
-import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
-import { toast } from 'react-toastify';
+
+// ONU details for one internet account (read-only).
+// Source: olt/internet_get_onu_details.php — RADIUS gives the customer's MAC, the NMS says which
+// OLT / PON / ONU (and switch port) it sits behind, with the last optical readings.
+// No web login or terminal here: device access lives on the Partners page.
+
+const val = (v, suffix = '') => (v === null || v === undefined || v === '' ? '—' : `${v}${suffix}`);
+
+// Typical GPON/EPON receive window: good above -25 dBm, weak down to -28, bad below that.
+const rxTone = (dbm) => {
+  const n = Number(dbm);
+  if (dbm === null || dbm === undefined || dbm === '' || Number.isNaN(n)) return { fg: '#334155', label: '' };
+  if (n >= -25) return { fg: '#15803d', label: 'Good' };
+  if (n >= -28) return { fg: '#b45309', label: 'Weak' };
+  return { fg: '#dc2626', label: 'Low' };
+};
+
+const ago = (seconds) => {
+  const s = Number(seconds);
+  if (!Number.isFinite(s)) return '';
+  if (s < 90) return 'just now';
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  return `${Math.round(s / 86400)} days ago`;
+};
+
+const Row = ({ label, value, valueStyle }) => (
+  <View style={styles.row}>
+    <Text style={styles.rowLabel}>{label}</Text>
+    <Text style={[styles.rowValue, valueStyle]} selectable>{value}</Text>
+  </View>
+);
+
+const Block = ({ icon, title, children }) => (
+  <View style={styles.block}>
+    <View style={styles.blockHead}>
+      <Feather name={icon} size={14} color="#0284c7" />
+      <Text style={styles.blockTitle}>{title}</Text>
+    </View>
+    {children}
+  </View>
+);
 
 export const CustomerDevicesModal = ({ visible, onClose, customer }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
-
   const [loading, setLoading] = useState(false);
-  const [onuData, setOnuData] = useState(null);
-  const [syncing, setSyncing] = useState(false);
+  const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  // ONU not mapped: no MAC bound in RADIUS yet, or the MAC is not seen on any OLT / switch
+  const [notMapped, setNotMapped] = useState('');
 
-  const clean = (v) => (v === null || v === undefined || v === 'null' ? '' : String(v));
+  const internetId = customer?.internet_id || customer?.internet_accounts?.[0]?.internet_id || null;
+  const title = customer?.username || customer?.full_name || customer?.name || (internetId ? `Internet #${internetId}` : 'Subscriber');
 
-  const internetId =
-    customer?.internet_id ||
-    customer?.internet_accounts?.[0]?.internet_id ||
-    customer?.cust_id ||
-    customer?.id;
-
-  const customerName =
-    customer?.full_name || customer?.name || customer?.username || (internetId ? `Subscriber #${internetId}` : 'Subscriber');
-  const mobile = clean(customer?.mobile || customer?.MobileNumber || '');
-
-  // Fetch only the device ONU details
-  const fetchDeviceData = async () => {
-    if (!visible || !internetId) return;
-    setLoading(true);
-    try {
-      const res = await OneBssApi.getOnuDetails(internetId);
-      if (res && res.ok && res.data) {
-        setOnuData(res.data);
-      } else {
-        setOnuData(null);
-      }
-    } catch (err) {
-      setOnuData(null);
-    } finally {
-      setLoading(false);
+  const load = async (live = false) => {
+    if (!internetId) {
+      setError('This subscriber has no internet account, so there is no ONU to show.');
+      return;
     }
+    setLoading(true);
+    setError('');
+    setNotMapped('');
+    const res = await OneBssApi.getOnuDetails(internetId, live);
+    if (res.ok && res.data?.found === false) {
+      setData(res.data);
+      setNotMapped(`MAC ${res.data.mac || ''} is not seen on any OLT or switch yet.`.replace('MAC  is', 'The MAC is'));
+    } else if (res.ok) {
+      setData(res.data);
+    } else if (res.status === 404 || res.status === 422) {
+      // 404: no MAC bound for this connection; 422: MAC on file is invalid
+      setData(null);
+      setNotMapped(res.data?.message || 'No MAC address is bound to this connection yet.');
+    } else {
+      setData(null);
+      setError(res.data?.message || 'Could not fetch ONU details.');
+    }
+    setLoading(false);
   };
 
   useEffect(() => {
-    if (visible && internetId) {
-      fetchDeviceData();
+    if (visible) {
+      setData(null);
+      load(false);
     }
   }, [visible, internetId]);
 
-  // Clean sync button
-  const handleSync = async () => {
-    const devId = onuData?.switch?.device_id || onuData?.olt?.id || onuData?.data?.device_id || onuData?.device_id || customer?.device_id;
-    if (!devId) {
-      toast.info('No device ID available for sync');
-      return;
-    }
-    setSyncing(true);
-    try {
-      const res = await OneBssApi.syncNmsDevice(devId, false);
-      await fetchDeviceData();
-      if (res && res.ok && res.data?.success) {
-        toast.success('Device synchronized successfully');
-      } else {
-        toast.info('Device status refreshed');
-      }
-    } catch (e) {
-      toast.info('Device status refreshed');
-    } finally {
-      setSyncing(false);
-    }
-  };
-
-  const handleTerminal = async () => {
-    const devId = onuData?.switch?.device_id || onuData?.olt?.id || onuData?.data?.device_id || onuData?.device_id || customer?.device_id;
-    if (!devId) {
-      toast.info('No device ID available for terminal');
-      return;
-    }
-    try {
-      const res = await OneBssApi.getNmsDeviceTerminal(devId);
-      if (res && res.ok && (res.data?.url || res.data?.terminal_url)) {
-        window.open(res.data.url || res.data.terminal_url, '_blank');
-      } else {
-        toast.info(res.data?.message || 'Terminal connection requested');
-      }
-    } catch (e) {
-      toast.error('Failed to connect to device terminal');
-    }
-  };
-
-  const handleWebUrl = async () => {
-    const devId = onuData?.switch?.device_id || onuData?.olt?.id || onuData?.data?.device_id || onuData?.device_id || customer?.device_id;
-    if (!devId) {
-      toast.info('No device ID available for Web GUI');
-      return;
-    }
-    try {
-      const res = await OneBssApi.getNmsDeviceWebUrl(devId, mobile || '9125253535');
-      if (res && res.ok && (res.data?.url || res.data?.web_url)) {
-        window.open(res.data.url || res.data.web_url, '_blank');
-      } else {
-        toast.info(res.data?.message || 'Web GUI access requested');
-      }
-    } catch (e) {
-      toast.error('Failed to fetch device Web GUI URL');
-    }
-  };
-
   if (!visible) return null;
 
-  // Extract fields gracefully from live API response or subscriber profile
-  const resData = onuData?.data || onuData || {};
-  const onu = resData.onu || {};
-  const optical = resData.optical || {};
-  const olt = resData.olt || {};
-  const sw = resData.switch || {};
-  const freshness = resData.freshness || {};
-
-  const serialNo = onu.serial || onu.physical_id || resData.serial_number || customer?.stb_sn || '—';
-  const macAddress = resData.mac || onu.customer_mac || onu.onu_mac || customer?.stb_mac || customer?.mac || '—';
-  const ponPort = onu.interface || onu.pon || (sw.device_name && sw.port ? `${sw.device_name} [${sw.port}]` : sw.port) || '—';
-  const rxPower = optical.rx_power_dbm != null ? `${optical.rx_power_dbm} dBm` : (optical.rx_level || '—');
-  const txPower = optical.tx_power_dbm != null ? `${optical.tx_power_dbm} dBm` : '—';
-  const modelName = onu.type || olt.name || sw.device_name || 'ONU Device';
-  const ipAddress = sw.device_ip || olt.ip || customer?.framedipaddress || '—';
-  const firmware = onu.version || '—';
-  const isOnline = resData.found ? (freshness.stale === false || onu.status === 'online' || onu.status === 'active' || customer?.isOnline) : false;
+  const found = data?.found;
+  const onu = data?.onu || {};
+  const olt = data?.olt || {};
+  const opt = data?.optical || {};
+  const sw = data?.switch;
+  const fresh = data?.freshness || {};
+  const rx = rxTone(opt.rx_power_dbm);
+  const onuOnline = String(onu.status || '').toLowerCase();
+  const isUp = ['online', 'up', 'working', 'active'].includes(onuOnline);
 
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
-        <View style={[styles.modalCard, { width: isMobile ? '96%' : 680, maxHeight: '90%' }]}>
-          {/* Clean Header */}
-          <View style={styles.modalHeader}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-              <View style={styles.headerIcon}>
-                <Feather name="hard-drive" size={20} color="#0284c7" />
-              </View>
-              <View>
-                <Text style={styles.modalTitle}>Connected Device Details</Text>
-                <Text style={styles.modalSub}>
-                  {customerName} {mobile ? `· +91 ${mobile}` : ''}
-                </Text>
+      <View style={styles.overlay}>
+        <View style={[styles.card, { width: isMobile ? '96%' : 640 }]}>
+          <View style={styles.header}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
+              <View style={styles.headerIcon}><Feather name="hard-drive" size={18} color="#0284c7" /></View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={styles.title}>ONU details</Text>
+                <Text style={styles.sub} numberOfLines={1}>{title}{data?.mac ? ` · MAC ${data.mac}` : ''}</Text>
               </View>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
-              <Feather name="x" size={20} color="#64748b" />
-            </TouchableOpacity>
+            <TouchableOpacity onPress={onClose} style={styles.closeBtn}><Feather name="x" size={20} color="#64748b" /></TouchableOpacity>
           </View>
 
-          {/* Modal Body: ONLY Clean Device Information */}
-          <ScrollView style={styles.modalBody} showsVerticalScrollIndicator={false}>
-            {loading ? (
-              <View style={styles.loadingBox}>
-                <ActivityIndicator size="small" color="#0284c7" />
-                <Text style={styles.loadingText}>Fetching device details...</Text>
-              </View>
-            ) : null}
-
-            {/* Device Overview Banner */}
-            <View style={styles.deviceBanner}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                <View style={styles.deviceIconCircle}>
-                  <Feather name="wifi" size={22} color="#0284c7" />
-                </View>
-                <View>
-                  <Text style={styles.deviceModelTitle}>{modelName}</Text>
-                  <Text style={styles.deviceSerialSub}>SN: {serialNo}</Text>
-                </View>
-              </View>
-              <View style={styles.onlineBadge}>
-                <View style={[styles.statusDot, { backgroundColor: isOnline ? '#16a34a' : '#dc2626' }]} />
-                <Text style={[styles.onlineBadgeText, { color: isOnline ? '#15803d' : '#dc2626' }]}>
-                  {isOnline ? 'ONLINE' : 'OFFLINE'}
+          <ScrollView style={styles.body}>
+            {loading && !data ? (
+              <View style={styles.center}><ActivityIndicator size="small" color="#0284c7" /><Text style={styles.muted}>Looking up the ONU…</Text></View>
+            ) : notMapped ? (
+              <View style={styles.notMapped}>
+                <View style={styles.notMappedIcon}><Feather name="link-2" size={22} color="#b45309" /></View>
+                <Text style={styles.notMappedTitle}>ONU not mapped</Text>
+                <Text style={styles.notMappedText}>{notMapped}</Text>
+                <Text style={styles.notMappedHint}>
+                  Once the customer's router is online and its MAC is bound in RADIUS, the ONU appears here. Use “Read live from OLT” to check again.
                 </Text>
               </View>
-            </View>
+            ) : error ? (
+              <View style={styles.notice}><Feather name="info" size={14} color="#b45309" /><Text style={styles.noticeText}>{error}</Text></View>
+            ) : data ? (
+              <>
+                <View style={styles.statusStrip}>
+                  <View style={[styles.statusPill, { backgroundColor: isUp ? '#dcfce7' : '#f1f5f9' }]}>
+                    <View style={[styles.dot, { backgroundColor: isUp ? '#16a34a' : '#94a3b8' }]} />
+                    <Text style={[styles.statusText, { color: isUp ? '#15803d' : '#475569' }]}>{val(onu.status).toUpperCase()}</Text>
+                  </View>
+                  <Text style={[styles.rxBig, { color: rx.fg }]}>{val(opt.rx_power_dbm, ' dBm')}</Text>
+                  {rx.label ? <Text style={[styles.rxLabel, { color: rx.fg }]}>RX {rx.label}</Text> : null}
+                  <Text style={styles.freshText}>
+                    {fresh.data_age_seconds !== undefined && fresh.data_age_seconds !== null ? `Read ${ago(fresh.data_age_seconds)}` : ''}
+                    {fresh.stale ? ' · may be outdated' : ''}
+                  </Text>
+                </View>
 
-            {/* Grid of Clean Device Parameters */}
-            <View style={styles.detailsGrid}>
-              <View style={styles.paramCard}>
-                <Text style={styles.paramLabel}>Serial Number</Text>
-                <Text style={styles.paramValue}>{serialNo}</Text>
-              </View>
+                <Block icon="cpu" title="ONU">
+                  <Row label="Name" value={val(onu.name)} />
+                  <Row label="Interface / PON" value={val(onu.interface || onu.pon)} />
+                  <Row label="ONU ID" value={val(onu.id)} />
+                  <Row label="Model / type" value={val(onu.type)} />
+                  <Row label="Serial / physical ID" value={val(onu.serial || onu.physical_id)} />
+                  <Row label="ONU MAC" value={val(onu.onu_mac)} />
+                  <Row label="VLAN" value={val(onu.vlan)} />
+                </Block>
 
-              <View style={styles.paramCard}>
-                <Text style={styles.paramLabel}>MAC Address</Text>
-                <Text style={styles.paramValue}>{macAddress}</Text>
-              </View>
+                <Block icon="activity" title="Optical">
+                  <Row label="RX power" value={val(opt.rx_power_dbm, ' dBm')} valueStyle={{ color: rx.fg, fontWeight: '700' }} />
+                  <Row label="TX power" value={val(opt.tx_power_dbm, ' dBm')} />
+                  <Row label="Temperature" value={val(opt.temperature_c, ' °C')} />
+                  <Row label="Voltage" value={val(opt.voltage_v, ' V')} />
+                  <Row label="Bias current" value={val(opt.bias_ma, ' mA')} />
+                </Block>
 
-              <View style={styles.paramCard}>
-                <Text style={styles.paramLabel}>PON Port</Text>
-                <Text style={styles.paramValue}>{ponPort}</Text>
-              </View>
+                <Block icon="server" title="OLT">
+                  <Row label="OLT" value={val(olt.name)} />
+                  <Row label="IP" value={val(olt.ip)} />
+                  <Row label="Location" value={val(olt.location)} />
+                </Block>
 
-              <View style={styles.paramCard}>
-                <Text style={styles.paramLabel}>Optical RX Power</Text>
-                <Text style={[styles.paramValue, { color: '#16a34a', fontWeight: '700' }]}>{rxPower}</Text>
-              </View>
-
-              <View style={styles.paramCard}>
-                <Text style={styles.paramLabel}>Optical TX Power</Text>
-                <Text style={styles.paramValue}>{txPower}</Text>
-              </View>
-
-              <View style={styles.paramCard}>
-                <Text style={styles.paramLabel}>IP Address</Text>
-                <Text style={styles.paramValue}>{ipAddress}</Text>
-              </View>
-
-              <View style={styles.paramCard}>
-                <Text style={styles.paramLabel}>Firmware Version</Text>
-                <Text style={styles.paramValue}>{firmware}</Text>
-              </View>
-
-              <View style={styles.paramCard}>
-                <Text style={styles.paramLabel}>Account Link</Text>
-                <Text style={styles.paramValue}>Internet #{internetId}</Text>
-              </View>
-            </View>
+                {sw ? (
+                  <Block icon="git-branch" title="Switch port">
+                    <Row label="Switch" value={val(sw.device_name)} />
+                    <Row label="Port" value={val(sw.port)} />
+                    <Row label="VLAN" value={val(sw.vlan)} />
+                    <Row label="Last seen" value={val(sw.last_seen)} />
+                  </Block>
+                ) : null}
+              </>
+            ) : null}
           </ScrollView>
 
-          {/* Clean Footer */}
-          <View style={styles.modalFooter}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <TouchableOpacity
-                style={styles.refreshBtn}
-                onPress={handleSync}
-                disabled={syncing || loading}
-              >
-                {syncing ? (
-                  <ActivityIndicator size="small" color="#0284c7" />
-                ) : (
-                  <Feather name="refresh-cw" size={13} color="#0284c7" />
-                )}
-                <Text style={styles.refreshBtnText}>{syncing ? 'Syncing...' : 'Sync Device'}</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.actionOutlineBtn}
-                onPress={handleWebUrl}
-                disabled={loading}
-              >
-                <Feather name="external-link" size={13} color="#334155" />
-                <Text style={styles.actionOutlineBtnText}>Web GUI</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.actionOutlineBtn}
-                onPress={handleTerminal}
-                disabled={loading}
-              >
-                <Feather name="terminal" size={13} color="#334155" />
-                <Text style={styles.actionOutlineBtnText}>Terminal</Text>
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity style={styles.closeModalBtn} onPress={onClose}>
-              <Text style={styles.closeModalBtnText}>Close</Text>
+          <View style={styles.footer}>
+            <TouchableOpacity style={[styles.btn, styles.btnPrimary, (loading || !internetId) && { opacity: 0.6 }]} onPress={() => load(true)} disabled={loading || !internetId}>
+              {loading ? <ActivityIndicator size="small" color="#ffffff" /> : <Feather name="refresh-cw" size={13} color="#ffffff" />}
+              <Text style={styles.btnPrimaryText}>{loading ? 'Reading…' : 'Read live from OLT'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={onClose}>
+              <Text style={styles.btnGhostText}>Close</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -277,202 +197,40 @@ export const CustomerDevicesModal = ({ visible, onClose, customer }) => {
 };
 
 const styles = StyleSheet.create({
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(15, 23, 42, 0.65)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 16,
-    zIndex: 99999,
-  },
-  modalCard: {
-    backgroundColor: '#ffffff',
-    borderRadius: 14,
-    shadowColor: '#000000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.2,
-    shadowRadius: 20,
-    elevation: 20,
-    overflow: 'hidden',
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#e2e8f0',
-    backgroundColor: '#f8fafc',
-  },
-  headerIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 8,
-    backgroundColor: 'rgba(2, 132, 199, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  modalTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0f172a',
-  },
-  modalSub: {
-    fontSize: 12,
-    color: '#64748b',
-    marginTop: 2,
-  },
-  closeBtn: {
-    padding: 6,
-    borderRadius: 6,
-  },
-  modalBody: {
-    padding: 20,
-  },
-  loadingBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 14,
-    backgroundColor: 'rgba(2, 132, 199, 0.06)',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-  },
-  loadingText: {
-    fontSize: 12,
-    color: '#0284c7',
-    fontWeight: '600',
-  },
-  deviceBanner: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#f8fafc',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    borderRadius: 10,
-    padding: 14,
-    marginBottom: 16,
-  },
-  deviceIconCircle: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(2, 132, 199, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  deviceModelTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#0f172a',
-  },
-  deviceSerialSub: {
-    fontSize: 12,
-    color: '#64748b',
-    fontFamily: 'monospace',
-    marginTop: 2,
-  },
-  onlineBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#dcfce7',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 14,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  onlineBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-  },
-  detailsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  paramCard: {
-    width: '48%',
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-    padding: 12,
-    borderRadius: 8,
-  },
-  paramLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: '#64748b',
-    textTransform: 'uppercase',
-    letterSpacing: 0.3,
-    marginBottom: 4,
-  },
-  paramValue: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#0f172a',
-    fontFamily: 'monospace',
-  },
-  modalFooter: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 14,
-    borderTopWidth: 1,
-    borderTopColor: '#e2e8f0',
-    backgroundColor: '#f8fafc',
-  },
-  refreshBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 6,
-    backgroundColor: 'rgba(2, 132, 199, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(2, 132, 199, 0.25)',
-  },
-  refreshBtnText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#0284c7',
-  },
-  actionOutlineBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 6,
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: '#cbd5e1',
-  },
-  actionOutlineBtnText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#334155',
-  },
-  closeModalBtn: {
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 6,
-    backgroundColor: '#e2e8f0',
-  },
-  closeModalBtnText: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#334155',
-  },
+  overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.55)', alignItems: 'center', justifyContent: 'center', padding: 12 },
+  card: { backgroundColor: '#ffffff', borderRadius: 14, maxHeight: '92%', overflow: 'hidden' },
+  header: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#e2e8f0' },
+  headerIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(14,165,233,0.12)', alignItems: 'center', justifyContent: 'center' },
+  title: { fontSize: 16, fontWeight: '700', color: '#0f172a' },
+  sub: { fontSize: 12, color: '#64748b', marginTop: 2 },
+  closeBtn: { padding: 6 },
+  body: { padding: 16 },
+  center: { alignItems: 'center', gap: 8, paddingVertical: 30 },
+  muted: { fontSize: 12, color: '#64748b' },
+  notice: { flexDirection: 'row', gap: 8, padding: 12, borderRadius: 10, backgroundColor: 'rgba(245,158,11,0.1)', borderWidth: 1, borderColor: 'rgba(245,158,11,0.3)' },
+  noticeText: { flex: 1, fontSize: 13, color: '#92400e' },
+  statusStrip: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 10, padding: 12, borderRadius: 10, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', marginBottom: 12 },
+  statusPill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  statusText: { fontSize: 11, fontWeight: '700' },
+  dot: { width: 7, height: 7, borderRadius: 4 },
+  rxBig: { fontSize: 20, fontWeight: '700' },
+  rxLabel: { fontSize: 11, fontWeight: '700' },
+  freshText: { fontSize: 11, color: '#64748b', marginLeft: 'auto' },
+  notMapped: { alignItems: 'center', paddingVertical: 28, paddingHorizontal: 12 },
+  notMappedIcon: { width: 48, height: 48, borderRadius: 24, backgroundColor: 'rgba(245,158,11,0.12)', alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  notMappedTitle: { fontSize: 16, fontWeight: '700', color: '#92400e' },
+  notMappedText: { fontSize: 13, color: '#475569', marginTop: 6, textAlign: 'center' },
+  notMappedHint: { fontSize: 12, color: '#64748b', marginTop: 8, textAlign: 'center', maxWidth: 420 },
+  block: { borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 10, padding: 12, marginBottom: 10 },
+  blockHead: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  blockTitle: { fontSize: 12, fontWeight: '700', color: '#0f172a', letterSpacing: 0.3 },
+  row: { flexDirection: 'row', justifyContent: 'space-between', gap: 12, paddingVertical: 5 },
+  rowLabel: { fontSize: 12, color: '#64748b' },
+  rowValue: { fontSize: 13, color: '#0f172a', fontWeight: '600', textAlign: 'right', flexShrink: 1 },
+  footer: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, padding: 14, borderTopWidth: 1, borderTopColor: '#e2e8f0' },
+  btn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 8 },
+  btnPrimary: { backgroundColor: '#0284c7' },
+  btnPrimaryText: { color: '#ffffff', fontSize: 13, fontWeight: '700' },
+  btnGhost: { borderWidth: 1, borderColor: '#cbd5e1' },
+  btnGhostText: { color: '#334155', fontSize: 13, fontWeight: '700' },
 });

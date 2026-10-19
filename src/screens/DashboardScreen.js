@@ -5,19 +5,17 @@ import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi, setApiConfig } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
 
-export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartners }) => {
+export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartners, refreshSignal = 0 }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
-  const currentRole = user?.role ? user.role.toLowerCase() : 'superadmin';
+  const currentRole = String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
   const isSuperAdmin = currentRole === 'superadmin';
   const currentPartnerId = user?.partner_id;
 
   const [dashboardData, setDashboardData] = useState(null);
+  const [internetNote, setInternetNote] = useState(''); // live gateway unavailable -> saved counts
   const [loading, setLoading] = useState(true);
-  const [syncingInet, setSyncingInet] = useState(false);
-  const [syncingIptv, setSyncingIptv] = useState(false);
-  const [syncMsg, setSyncMsg] = useState('');
   const [dateSummary, setDateSummary] = useState(null); // customers_by_date.php?summary=1
   const [dateSummaryError, setDateSummaryError] = useState('');
   const [dashboardSearch, setDashboardSearch] = useState('');
@@ -42,8 +40,8 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
     }
   };
 
-  const refreshData = async () => {
-    setLoading(true);
+  const refreshData = async (quiet = false) => {
+    if (!quiet) setLoading(true);
     loadDateSummary();
     try {
       if (isSuperAdmin || currentRole === 'admin') {
@@ -56,8 +54,13 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
           setPartnerCounts({ total, admins, operators });
         }).catch(() => {});
       }
-      const res = await OneBssApi.getDashboard(currentPartnerId);
-      const data = res.data?.data || res.data;
+      // "My own" overview: the server scopes it by role (all / my operators / me)
+      const res = await OneBssApi.getDashboard();
+      if (!res.ok) {
+        toast.error(res.data?.message || 'Could not load dashboard figures.');
+      }
+      const data = res.ok ? (res.data?.data || res.data) : null;
+      setInternetNote(res.ok && res.data?.internet_error ? res.data.internet_error : '');
       if (data && (data.internet || data.iptv)) {
         setDashboardData(data);
       } else {
@@ -114,64 +117,53 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
     return () => clearTimeout(timer);
   }, [dashboardSearch, allPartners]);
 
-  const handleSyncInternet = async () => {
-    setSyncingInet(true);
-    try {
-      if (user?.token) setApiConfig(undefined, user.token);
-      const res = await OneBssApi.syncInternetCustomersBulk(currentPartnerId);
-      const data = res.data || {};
-
-      if (res.status === 403 || data.success === false) {
-        toast.error(data.message || 'Access Denied. Bulk RADIUS Sync requires Operator role token.');
-      } else if (data.summary) {
-        const s = data.summary;
-        toast.success(`Bulk RADIUS Sync Complete! Created: ${s.customers_created || 0}, Matched: ${s.customers_matched || 0}, Added: ${s.accounts_added || 0}`);
-      } else {
-        toast.success('Internet customer database synchronized successfully!');
-      }
-      await refreshData();
-    } catch (e) {
-      toast.success('Internet customer database synchronized with RADIUS gateway!');
-    } finally {
-      setSyncingInet(false);
+  // ---- Operator login: show the saved numbers first, then sync in the background ----
+  // Internet (RADIUS bulk list) and IPTV (Pioneer, per customer) syncs run without blocking the
+  // page. At most once every 30 minutes per operator in this browser; the server also refuses
+  // to start a second run for the same operator while one is going.
+  const [bgSync, setBgSync] = useState({ state: 'idle', at: null, notes: [] });
+  const SYNC_EVERY_MS = 30 * 60 * 1000;
+  const runBackgroundSync = async (force = false) => {
+    if (currentRole !== 'operator' || !currentPartnerId) return;
+    const key = `onebss_bg_sync_${currentPartnerId}`;
+    let last = 0;
+    try { last = Number(localStorage.getItem(key)) || 0; } catch (e) {}
+    if (!force && Date.now() - last < SYNC_EVERY_MS) {
+      setBgSync({ state: 'done', at: new Date(last), notes: [] });
+      return;
     }
-  };
-
-  const handleSyncIptv = async () => {
-    setSyncingIptv(true);
-    try {
-      if (user?.token) setApiConfig(undefined, user.token);
-      const res = await OneBssApi.syncIptvCustomers(user?.mobile || '9125253535');
-      const data = res.data || {};
-
-      if (res.status === 502 || data.success === false) {
-        toast.warn(`IPTV STB Sync: ${data.message || 'Pioneer IPTV STB Gateway returned an error.'}`);
-      } else {
-        toast.success('IPTV STB subscriber records synchronized via Gateway Sync API!');
-        await refreshData();
-      }
-    } catch (e) {
-      toast.error('IPTV subscriber sync failed.');
-    } finally {
-      setSyncingIptv(false);
-    }
+    try { localStorage.setItem(key, String(Date.now())); } catch (e) {}
+    setBgSync({ state: 'syncing', at: null, notes: [] });
+    const notes = [];
+    const [inetRes, iptvRes] = await Promise.all([
+      OneBssApi.syncInternetCustomersBulk(),
+      OneBssApi.syncIptvBulkCustomers(currentPartnerId),
+    ]);
+    if (!inetRes.ok && !inetRes.data?.already_running) notes.push(`Internet: ${inetRes.data?.message || 'sync failed'}`);
+    if (!iptvRes.ok && !iptvRes.data?.already_running) notes.push(`IPTV: ${iptvRes.data?.message || 'sync failed'}`);
+    setBgSync({ state: notes.length ? 'failed' : 'done', at: new Date(), notes });
+    refreshData(true);
   };
 
   useEffect(() => {
-    const initOperatorSyncAndRefresh = async () => {
-      if (currentRole === 'operator') {
-        try {
-          if (user?.token) setApiConfig(undefined, user.token);
-          await OneBssApi.syncInternetCustomersBulk();
-        } catch (e) {}
-      }
-      await refreshData();
-    };
-    initOperatorSyncAndRefresh();
+    refreshData();
+    runBackgroundSync(false);
   }, [currentPartnerId, currentRole]);
+
+  // Top-bar Refresh: reload the numbers (operators also re-run the provider sync)
+  const firstSignal = React.useRef(true);
+  useEffect(() => {
+    if (firstSignal.current) {
+      firstSignal.current = false;
+      return;
+    }
+    refreshData();
+    if (currentRole === 'operator') runBackgroundSync(true);
+  }, [refreshSignal]);
 
   const inet = dashboardData?.internet || { total: 0, active: 0, online: 0, expired: 0, suspend: 0, disabled: 0, new: 0 };
   const iptv = dashboardData?.iptv || { total: 0, active: 0, expired: 0 };
+  const ott = dashboardData?.ott || null; // null until the OTT tables exist on the server
 
   const handleCardClick = (filterKey) => {
     if (onNavigateToCustomers) {
@@ -187,64 +179,16 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
     );
   }
 
-  // CUSTOMER DASHBOARD
-  if (currentRole === 'customer') {
-    return (
-      <ScrollView
-        style={styles.container}
-        contentContainerStyle={[
-          styles.content,
-          { paddingHorizontal: isMobile ? 12 : 24, paddingVertical: isMobile ? 14 : 24, width: '100%' },
-        ]}
-      >
-        <View style={styles.headerRow}>
-          <View>
-            <Text style={styles.pageTitle}>Subscriber Portal Dashboard</Text>
-            <Text style={styles.pageSubtitle}>Welcome back, {user?.partner_name || 'Subscriber'}!</Text>
-          </View>
-          <View style={styles.badgeActive}><Text style={styles.badgeActiveText}>ACCOUNT ACTIVE</Text></View>
-        </View>
-
-        <View style={[styles.card, GLASS_CARD_INTERACTIVE]}>
-          <View style={styles.cardHeader}>
-            <Feather name="wifi" size={24} color={COLORS.primary} />
-            <View style={{ marginLeft: 10, flex: 1 }}>
-              <Text style={styles.cardTitle}>Ultra 100Mbps Broadband Plan</Text>
-              <Text style={styles.cardSubtitle}>RADIUS Username: srikanth@onefiber</Text>
-            </View>
-            <Text style={{ fontSize: 20, fontWeight: '700', color: COLORS.accentEmerald }}>₹699 / mo</Text>
-          </View>
-
-          <View style={styles.detailGrid}>
-            <View style={styles.detailItem}>
-              <Text style={styles.detailLabel}>DOWNLOAD / UPLOAD</Text>
-              <Text style={styles.detailVal}>100 Mbps / 100 Mbps</Text>
-            </View>
-            <View style={styles.detailItem}>
-              <Text style={styles.detailLabel}>RENEWAL DATE</Text>
-              <Text style={styles.detailVal}>October 18, 2026 (28 Days)</Text>
-            </View>
-            <View style={styles.detailItem}>
-              <Text style={styles.detailLabel}>IPTV SET-TOP BOX</Text>
-              <Text style={styles.detailVal}>Connected (STB #8849201)</Text>
-            </View>
-            <View style={styles.detailItem}>
-              <Text style={styles.detailLabel}>e-KYC STATUS</Text>
-              <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.accentEmerald }}>Verified via ScoreMe UIDAI</Text>
-            </View>
-          </View>
-        </View>
-      </ScrollView>
-    );
-  }
-
   const isOperator = currentRole === 'operator';
 
   const handleSearchNavigate = (filterKey = 'all', range = '', searchVal = '') => {
     const term = searchVal || dashboardSearch.trim();
+    // If every match is an IPTV account, open the IPTV list instead of Internet
+    const found = searchResults.customers || [];
+    const onlyIptv = found.length > 0 && found.every((c) => c.account_type === 'iptv' || c.type === 'iptv');
     setDashboardSearch('');
     if (onNavigateToCustomers) {
-      onNavigateToCustomers(filterKey, range, term);
+      onNavigateToCustomers(onlyIptv && filterKey === 'all' ? 'iptv_all' : filterKey, range, term);
     }
   };
 
@@ -287,11 +231,21 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
         { paddingHorizontal: isMobile ? 12 : 24, paddingVertical: isMobile ? 14 : 24, width: '100%' },
       ]}
     >
-      {/* Toast Notification Banner */}
-      {syncMsg ? (
-        <View style={styles.syncToastBanner}>
-          <Feather name="check-circle" size={15} color="#ffffff" />
-          <Text style={styles.syncToastText}>{syncMsg}</Text>
+      {/* Background provider sync status (operators) */}
+      {isOperator && bgSync.state !== 'idle' ? (
+        <View style={[styles.bgSyncBar, bgSync.state === 'failed' && styles.bgSyncBarWarn]}>
+          {bgSync.state === 'syncing' ? (
+            <ActivityIndicator size="small" color="#2563eb" />
+          ) : (
+            <Feather name={bgSync.state === 'failed' ? 'alert-triangle' : 'check-circle'} size={14} color={bgSync.state === 'failed' ? '#b45309' : '#047857'} />
+          )}
+          <Text style={[styles.bgSyncText, bgSync.state === 'failed' && { color: '#92400e' }, bgSync.state === 'done' && { color: '#047857' }]} numberOfLines={2}>
+            {bgSync.state === 'syncing'
+              ? 'Syncing your Internet and IPTV customers in the background — figures update when it finishes.'
+              : bgSync.state === 'failed'
+              ? `Some customers could not be synced (${bgSync.notes.join(' · ')}). Showing saved data.`
+              : `Customers synced${bgSync.at ? ` at ${bgSync.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : ''}.`}
+          </Text>
         </View>
       ) : null}
 
@@ -424,7 +378,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
       {/* PARTNERS / ADMINS COUNT IN SUPERADMIN DASHBOARD (ITEM 11) */}
       {(isSuperAdmin || currentRole === 'admin') && (
         <View style={{ marginBottom: 20 }}>
-          <Text style={[styles.sectionHeaderTitle, { marginBottom: 10 }]}>Partners & Hierarchy Overview</Text>
+          <Text style={[styles.sectionHeaderTitle, { marginBottom: 10 }]}>Partners</Text>
           <View style={{ flexDirection: 'row', gap: 12, flexWrap: 'wrap' }}>
             <TouchableOpacity
               style={{ flex: 1, minWidth: 160, backgroundColor: 'rgba(59, 130, 246, 0.08)', borderWidth: 1, borderColor: 'rgba(59, 130, 246, 0.25)', borderRadius: 12, padding: 14 }}
@@ -438,9 +392,10 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
                 </View>
                 <Feather name="arrow-up-right" size={13} color="#3b82f6" />
               </View>
-              <Text style={{ fontSize: 22, fontWeight: '800', color: '#1d4ed8' }}>{partnerCounts.operators || partnerCounts.total}</Text>
+              <Text style={{ fontSize: 22, fontWeight: '800', color: '#1d4ed8' }}>{partnerCounts.operators}</Text>
             </TouchableOpacity>
 
+            {isSuperAdmin ? (
             <TouchableOpacity
               style={{ flex: 1, minWidth: 160, backgroundColor: 'rgba(16, 185, 129, 0.08)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.25)', borderRadius: 12, padding: 14 }}
               onPress={() => onNavigateToPartners && onNavigateToPartners('admin')}
@@ -455,13 +410,20 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
               </View>
               <Text style={{ fontSize: 22, fontWeight: '800', color: '#047857' }}>{partnerCounts.admins}</Text>
             </TouchableOpacity>
+            ) : null}
           </View>
         </View>
       )}
 
       {/* INTERNET GRID */}
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
-        <Text style={styles.sectionHeaderTitle}>Subscriber Overview (Live Dashboard API)</Text>
+      <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
+        <Feather name="wifi" size={18} color={COLORS.primary} />
+        <Text style={styles.sectionHeaderTitle}>Internet</Text>
+        {internetNote ? (
+          <Text style={{ fontSize: 11, color: '#b45309', flex: 1 }} numberOfLines={1}>
+            Live RADIUS figures unavailable ({internetNote}) — showing last synced counts
+          </Text>
+        ) : null}
       </View>
 
       <View style={styles.statsGrid7}>
@@ -553,9 +515,9 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
       {/* IPTV  DATA CARD */}
       <View style={[styles.card, GLASS_CARD_INTERACTIVE]}>
         <View style={styles.cardHeader}>
-          <MaterialIcons name="live-tv" size={24} color="#8b5cf6" />
-          <View style={{ marginLeft: 10, flex: 1 }}>
-            <Text style={styles.cardTitle}>IPTV </Text>
+          <MaterialIcons name="live-tv" size={22} color="#8b5cf6" />
+          <View style={{ marginLeft: 8, flex: 1 }}>
+            <Text style={styles.cardTitle}>IPTV</Text>
           </View>
         </View>
 
@@ -588,6 +550,33 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
           </TouchableOpacity>
         </View>
       </View>
+      {/* OTT DATA CARD */}
+      {ott ? (
+        <View style={[styles.card, GLASS_CARD_INTERACTIVE]}>
+          <View style={styles.cardHeader}>
+            <Feather name="play-circle" size={22} color="#0ea5e9" />
+            <View style={{ marginLeft: 8, flex: 1 }}>
+              <Text style={styles.cardTitle}>OTT</Text>
+            </View>
+          </View>
+          <View style={styles.iptvGrid}>
+            {[
+              { key: 'total', label: 'TOTAL OTT USERS', color: '#0ea5e9' },
+              { key: 'active', label: 'ACTIVE OTT USERS', color: COLORS.accentEmerald },
+              { key: 'expired', label: 'EXPIRED OTT USERS', color: COLORS.accentRose },
+              { key: 'new', label: 'NOT ACTIVATED', color: '#8b5cf6' },
+            ].map((c) => (
+              <TouchableOpacity key={c.key} style={[styles.iptvCard, styles.iptvCardClickable]} onPress={() => handleCardClick('ott')}>
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <Text style={styles.iptvLabel}>{c.label}</Text>
+                  <Feather name="arrow-up-right" size={13} color={c.color} />
+                </View>
+                <Text style={[styles.iptvVal, { color: c.color }]}>{ott[c.key] ?? 0}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      ) : null}
       {/* EXPIRY & REGISTRATION (customers_by_date.php) */}
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
         <Text style={styles.sectionHeaderTitle}>Expiry & Registration</Text>
@@ -646,6 +635,9 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
 };
 
 const styles = StyleSheet.create({
+  bgSyncBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, backgroundColor: 'rgba(37,99,235,0.06)', borderWidth: 1, borderColor: 'rgba(37,99,235,0.2)', marginBottom: 16 },
+  bgSyncBarWarn: { backgroundColor: 'rgba(245,158,11,0.08)', borderColor: 'rgba(245,158,11,0.3)' },
+  bgSyncText: { flex: 1, fontSize: 12, color: '#1e3a8a', fontWeight: '600' },
   dateGroupsRow: { flexDirection: 'row', gap: 16, alignItems: 'stretch' },
   dateGroupCard: { flex: 1, marginBottom: 16 },
   dateRowTitle: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, letterSpacing: 0.5, marginBottom: 6 },

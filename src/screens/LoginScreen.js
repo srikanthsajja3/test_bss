@@ -18,8 +18,8 @@ export const LoginScreen = ({ onLoginSuccess }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
-  const [username, setUsername] = useState('onebss');
-  const [password, setPassword] = useState('onebss');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
@@ -42,15 +42,14 @@ export const LoginScreen = ({ onLoginSuccess }) => {
       const res = await OneBssApi.login(u, p);
       const data = res.data || {};
 
-      if (data.success === false || data.status === 'error' || res.status === 401) {
+      if (!res.ok || !data.token) {
         toast.error(data.message || 'Invalid username or password. Access denied.');
         setErrorMsg(`❌ ${data.message || 'Invalid username or password. Access denied.'}`);
         setLoading(false);
         return;
       }
 
-      const token = data.token || `token_${Date.now()}_authenticated_session`;
-      setApiConfig(undefined, token);
+      const token = data.token;
 
       let decoded = null;
       try {
@@ -67,10 +66,18 @@ export const LoginScreen = ({ onLoginSuccess }) => {
         }
       } catch (e) {}
 
-      const serverUser = data.user || {};
-      const role = (decoded?.role || serverUser.role || (u === 'oper1' || u.includes('oper') ? 'operator' : 'superadmin')).toLowerCase();
-      const partnerId = decoded?.partner_id || serverUser.partner_id || null;
-      const partnerName = decoded?.partner_name || serverUser.partner_name || (role === 'operator' ? 'Operator' : 'Super Admin');
+      // Role and partner come ONLY from the server-issued token. If they are missing
+      // we refuse the login instead of guessing (an old fallback made such users Super Admin).
+      const role = String(decoded?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
+      const partnerId = decoded?.partner_id || null;
+      if (!['superadmin', 'admin', 'operator'].includes(role) || (role !== 'superadmin' && !partnerId)) {
+        toast.error('Your account has no valid role assigned. Contact the administrator.');
+        setErrorMsg('❌ Your account has no valid role assigned. Contact the administrator.');
+        setLoading(false);
+        return;
+      }
+      setApiConfig(undefined, token);
+      const partnerName = decoded?.partner_name || decoded?.username || u;
 
       toast.success(`Welcome back, ${partnerName}!`);
 
@@ -163,12 +170,12 @@ export const LoginScreen = ({ onLoginSuccess }) => {
           )}
         </TouchableOpacity>
 
-        <View style={styles.footerNote}>
+        {/* <View style={styles.footerNote}>
           <Feather name="shield" size={12} color={COLORS.textMuted} />
           <Text style={styles.footerNoteText}>
-            Secured via JWT Bearer Token Authentication
+            
           </Text>
-        </View>
+        </View> */}
       </View>
     </ScrollView>
   );

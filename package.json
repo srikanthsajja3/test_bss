@@ -7,15 +7,16 @@
     "android": "expo start --android",
     "ios": "expo start --ios",
     "web": "expo start --web",
-    "build": "expo export -p web",
-    "vite": "expo export -p web"
+    "build": "expo export -p web && node scripts/fix-web-assets.js dist",
+    "vite": "expo export -p web && node scripts/fix-web-assets.js dist"
   },
   "dependencies": {
     "@expo/vector-icons": "^15.0.2",
-    "expo": "~57.0.24",
+    "@vis.gl/react-google-maps": "1.10.1",
+    "expo": "~57.0.30",
     "expo-asset": "^57.0.18",
+    "expo-font": "~57.0.4",
     "expo-status-bar": "~57.0.1",
-    "leaflet": "^1.9.4",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native": "0.86.3",

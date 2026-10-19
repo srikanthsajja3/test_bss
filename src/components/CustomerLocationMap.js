@@ -16,48 +16,56 @@ import { OneBssApi } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
 import { CustomerDevicesModal } from './CustomerDevicesModal';
 
-// Ensures Leaflet JS and CSS are available in the browser window
-const ensureLeaflet = async () => {
-  if (typeof window === 'undefined') return null;
-  if (window.L) return window.L;
+import { APIProvider, Map as GoogleMap, Marker, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
 
-  if (!document.getElementById('leaflet-cdn-css')) {
-    const link = document.createElement('link');
-    link.id = 'leaflet-cdn-css';
-    link.rel = 'stylesheet';
-    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-    document.head.appendChild(link);
-  }
+// Google Maps (official React library @vis.gl/react-google-maps): street, satellite and
+// satellite-with-labels, licensed for commercial use with your own Google Maps Platform key.
+// Set EXPO_PUBLIC_GOOGLE_MAPS_API_KEY at build time (Expo inlines process.env.EXPO_PUBLIC_* —
+// keep this exact expression). Enable "Maps JavaScript API" and "Geocoding API" for the key and
+// restrict it to your site's domain.
+// Without a key the map falls back to a read-only Google Maps view; pins can still be set with
+// My GPS or by typing the coordinates.
+const GOOGLE_MAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
-  if (!window.L) {
-    await new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.id = 'leaflet-cdn-js';
-      script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
-      script.onload = () => resolve(window.L);
-      script.onerror = () => reject(new Error('Failed to load Leaflet library'));
-      document.body.appendChild(script);
-    });
-  }
+const MAP_TYPES = [
+  { id: 'roadmap', label: 'Street', icon: 'map' },
+  { id: 'hybrid', label: 'Satellite', icon: 'globe' },
+];
 
-  return window.L;
+// Moves the map when `focus` changes ({ lat, lng, zoom, seq }).
+const MapFocus = ({ focus }) => {
+  const map = useMap();
+  useEffect(() => {
+    if (!map || !focus) return;
+    map.panTo({ lat: focus.lat, lng: focus.lng });
+    if (focus.zoom) map.setZoom(focus.zoom);
+  }, [map, focus?.seq]);
+  return null;
 };
 
-// SVG Marker Pin
-const createPinIcon = (L, color = '#2563eb') => {
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="36" height="36" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));">
-      <path fill="${color}" stroke="#ffffff" stroke-width="1.5" d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5a2.5 2.5 0 0 1 0-5 2.5 2.5 0 0 1 0 5z"/>
-    </svg>
-  `;
-  return L.divIcon({
-    className: 'custom-map-pin',
-    html: svg,
-    iconSize: [36, 36],
-    iconAnchor: [18, 36],
-    popupAnchor: [0, -36],
-  });
+// Hands a Google geocoder to the parent (search box + "centre on the address").
+const GeocoderBridge = ({ onReady }) => {
+  const lib = useMapsLibrary('geocoding');
+  useEffect(() => {
+    if (!lib) return;
+    const geocoder = new lib.Geocoder();
+    onReady((query) =>
+      geocoder
+        .geocode({ address: query, componentRestrictions: { country: 'IN' } })
+        .then(({ results }) => {
+          const r = results && results[0];
+          if (!r) return null;
+          return { lat: r.geometry.location.lat(), lng: r.geometry.location.lng(), name: r.formatted_address || query };
+        })
+        .catch(() => null)
+    );
+  }, [lib]);
+  return null;
 };
+
+// Map centre when a customer has no pin yet (Guntur / Vijayawada region); the address is
+// geocoded on open to get closer.
+const DEFAULT_CENTER = { lat: 16.3067, lng: 80.4365 };
 
 export const CustomerLocationMap = ({
   mobile,
@@ -75,9 +83,9 @@ export const CustomerLocationMap = ({
 
   const cleanMobile = String(mobile || '').replace(/\D/g, '').slice(-10);
 
-  // Default to Hyderabad or customer saved coords
-  const [latitude, setLatitude] = useState(17.385044);
-  const [longitude, setLongitude] = useState(78.486671);
+  const [latitude, setLatitude] = useState(null);
+  const [longitude, setLongitude] = useState(null);
+  const [pinned, setPinned] = useState(false); // a pin is on the map (saved or newly placed)
   const [hasServerLocation, setHasServerLocation] = useState(false);
   const [loadingLocation, setLoadingLocation] = useState(true);
   const [savingLocation, setSavingLocation] = useState(false);
@@ -85,262 +93,155 @@ export const CustomerLocationMap = ({
   const [searchingPlace, setSearchingPlace] = useState(false);
   const [devicesModalOpen, setDevicesModalOpen] = useState(false);
 
-  const containerUniqueId = useRef(`popup-map-${custId || cleanMobile || Math.floor(Math.random() * 1000000)}`);
-  const mapRef = useRef(null);
-  const markerRef = useRef(null);
+  const [mapType, setMapType] = useState('hybrid'); // satellite + labels by default: houses are easy to find
+  const [focus, setFocus] = useState(null); // where the map should move: { lat, lng, zoom, seq }
+  const [embedQuery, setEmbedQuery] = useState(''); // key-less fallback view: what to show
+  const geocoderRef = useRef(null);
+  const focusSeq = useRef(0);
 
-  // Update map marker and pan
-  const updateMapMarker = (lat, lng, pan = true) => {
-    if (!mapRef.current || !window.L) return;
-    const L = window.L;
-
-    if (!markerRef.current) {
-      markerRef.current = L.marker([lat, lng], {
-        icon: createPinIcon(L, '#2563eb'),
-        draggable: true,
-      }).addTo(mapRef.current);
-
-      markerRef.current.on('dragend', (e) => {
-        const pos = e.target.getLatLng();
-        setLatitude(Number(pos.lat.toFixed(6)));
-        setLongitude(Number(pos.lng.toFixed(6)));
-      });
-    } else {
-      markerRef.current.setLatLng([lat, lng]);
-    }
-
-    markerRef.current.bindPopup(`
-      <div style="font-family: sans-serif; font-size: 12px; line-height: 1.4;">
-        <strong style="color: #0f172a; font-size: 13px;">${customerName}</strong><br/>
-        <span style="color: #64748b;">Mobile: ${cleanMobile}</span><br/>
-        <span style="color: #2563eb; font-weight: 600;">Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}</span>
-      </div>
-    `).openPopup();
-
-    if (pan) {
-      mapRef.current.setView([lat, lng], 15);
-    }
+  const moveMap = (lat, lng, zoom) => {
+    focusSeq.current += 1;
+    setFocus({ lat: Number(lat), lng: Number(lng), zoom, seq: focusSeq.current });
   };
 
-  // 1. Fetch Location from API
+  // Place / move the pin. pan: also centre the map on it.
+  const placePin = (lat, lng, pan = true) => {
+    const nLat = Number(Number(lat).toFixed(6));
+    const nLng = Number(Number(lng).toFixed(6));
+    setLatitude(nLat);
+    setLongitude(nLng);
+    setPinned(true);
+    if (pan) moveMap(nLat, nLng, 18);
+  };
+
+  // Google geocoder when the key is set (none without a key — the fallback view searches itself)
+  const geocode = async (query) => (geocoderRef.current ? geocoderRef.current(query) : null);
+
+  // 1. Saved location from the API
   const fetchLocationData = async () => {
     if (!cleanMobile || cleanMobile.length !== 10) {
       setLoadingLocation(false);
       return;
     }
-
     setLoadingLocation(true);
     try {
       const res = await OneBssApi.getCustomerLocation(cleanMobile);
       const dataArr = res?.data?.data || res?.data || [];
       const rec = Array.isArray(dataArr) ? dataArr[0] : (typeof dataArr === 'object' ? dataArr : null);
-
-      if (
-        rec &&
-        rec.latitude !== null &&
-        rec.longitude !== null &&
-        rec.latitude !== undefined &&
-        rec.longitude !== undefined
-      ) {
-        const lat = parseFloat(rec.latitude);
-        const lng = parseFloat(rec.longitude);
-        if (!isNaN(lat) && !isNaN(lng)) {
-          setLatitude(lat);
-          setLongitude(lng);
-          setHasServerLocation(true);
-          updateMapMarker(lat, lng, true);
-        } else {
-          setHasServerLocation(false);
-        }
+      const lat = parseFloat(rec?.latitude);
+      const lng = parseFloat(rec?.longitude);
+      if (!isNaN(lat) && !isNaN(lng) && !(lat === 0 && lng === 0)) {
+        setHasServerLocation(true);
+        placePin(lat, lng, true);
       } else {
         setHasServerLocation(false);
+        // No pin yet: centre the map near the installation address
+        const q = [customerAddress, customerZipcode].filter(Boolean).join(', ');
+        if (q) {
+          setEmbedQuery(q);
+          const tryGeocode = async (n) => {
+            const hit = await geocode(q);
+            if (hit) moveMap(hit.lat, hit.lng, 16);
+            else if (n > 0 && !geocoderRef.current && GOOGLE_MAPS_KEY) setTimeout(() => tryGeocode(n - 1), 800);
+          };
+          tryGeocode(5);
+        }
       }
     } catch (err) {
-      console.warn('Error fetching customer location:', err);
+      setHasServerLocation(false);
     } finally {
       setLoadingLocation(false);
     }
   };
 
   useEffect(() => {
+    setLatitude(null);
+    setLongitude(null);
+    setPinned(false);
     fetchLocationData();
   }, [cleanMobile]);
-
-  // 2. Initialize Leaflet Map inside Popup
-  useEffect(() => {
-    let isCancelled = false;
-
-    ensureLeaflet().then((L) => {
-      if (isCancelled || !L) return;
-
-      const container = document.getElementById(containerUniqueId.current);
-      if (!container) return;
-
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-        markerRef.current = null;
-      }
-
-      const map = L.map(container, {
-        center: [latitude, longitude],
-        zoom: hasServerLocation ? 15 : 13,
-        zoomControl: true,
-      });
-
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 19,
-        attribution: '&copy; OpenStreetMap contributors',
-      }).addTo(map);
-
-      const marker = L.marker([latitude, longitude], {
-        icon: createPinIcon(L, '#2563eb'),
-        draggable: true,
-      }).addTo(map);
-
-      marker.bindPopup(`
-        <div style="font-family: sans-serif; font-size: 12px; line-height: 1.4;">
-          <strong style="color: #0f172a; font-size: 13px;">${customerName}</strong><br/>
-          <span style="color: #64748b;">Mobile: ${cleanMobile}</span><br/>
-          <span style="color: #2563eb; font-weight: 600;">Lat: ${latitude.toFixed(6)}, Lng: ${longitude.toFixed(6)}</span>
-        </div>
-      `);
-
-      marker.on('dragend', (e) => {
-        const pos = e.target.getLatLng();
-        setLatitude(Number(pos.lat.toFixed(6)));
-        setLongitude(Number(pos.lng.toFixed(6)));
-      });
-
-      map.on('click', (e) => {
-        const lat = Number(e.latlng.lat.toFixed(6));
-        const lng = Number(e.latlng.lng.toFixed(6));
-        setLatitude(lat);
-        setLongitude(lng);
-        marker.setLatLng([lat, lng]);
-        marker.bindPopup(`
-          <div style="font-family: sans-serif; font-size: 12px; line-height: 1.4;">
-            <strong style="color: #0f172a; font-size: 13px;">${customerName}</strong><br/>
-            <span style="color: #64748b;">Mobile: ${cleanMobile}</span><br/>
-            <span style="color: #2563eb; font-weight: 600;">Lat: ${lat.toFixed(6)}, Lng: ${lng.toFixed(6)}</span>
-          </div>
-        `).openPopup();
-      });
-
-      mapRef.current = map;
-      markerRef.current = marker;
-
-      // Invalidate size to ensure proper tiles rendering inside popup modal
-      setTimeout(() => {
-        map.invalidateSize();
-      }, 300);
-      setTimeout(() => {
-        map.invalidateSize();
-      }, 700);
-    }).catch((err) => {
-      console.error('Failed to init Leaflet:', err);
-    });
-
-    return () => {
-      isCancelled = true;
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-        markerRef.current = null;
-      }
-    };
-  }, []);
 
   const handleManualCoordChange = (newLat, newLng) => {
     const lat = parseFloat(newLat);
     const lng = parseFloat(newLng);
-    if (!isNaN(lat) && !isNaN(lng)) {
-      setLatitude(lat);
-      setLongitude(lng);
-      updateMapMarker(lat, lng, true);
+    if (!isNaN(lat) && !isNaN(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180) {
+      placePin(lat, lng, true);
     }
   };
 
-  // 3. Search location via Nominatim
+  // 3. Search a place (India only)
   const handleSearchAddress = async () => {
     if (!addressSearch.trim()) return;
+    if (!GOOGLE_MAPS_KEY) {
+      // key-less view: let Google's own map show the place
+      setEmbedQuery(addressSearch.trim());
+      setPinned(false);
+      return;
+    }
     setSearchingPlace(true);
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(addressSearch.trim())}&limit=1`
-      );
-      const data = await res.json();
-      if (data && data.length > 0) {
-        const lat = parseFloat(data[0].lat);
-        const lng = parseFloat(data[0].lon);
-        setLatitude(Number(lat.toFixed(6)));
-        setLongitude(Number(lng.toFixed(6)));
-        updateMapMarker(lat, lng, true);
-        toast.info(`Found: ${data[0].display_name.split(',').slice(0, 3).join(',')}`);
+      const hit = await geocode(addressSearch.trim());
+      if (hit) {
+        moveMap(hit.lat, hit.lng, 17);
+        toast.info(`${hit.name.split(',').slice(0, 3).join(',')} — tap the exact house to place the pin.`);
       } else {
-        toast.warn('No places found matching that search. Try a landmark or city name.');
+        toast.warn('No places found. Try a landmark, street or village name.');
       }
     } catch (e) {
-      toast.error('Search failed. Check internet connection.');
+      toast.error('Search failed. Check the internet connection.');
     } finally {
       setSearchingPlace(false);
     }
   };
 
-  // 4. Use Current GPS
+  // 4. Current GPS (useful for field staff standing at the customer's house)
   const handleUseCurrentGps = () => {
     if (typeof navigator !== 'undefined' && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
-          const lat = Number(position.coords.latitude.toFixed(6));
-          const lng = Number(position.coords.longitude.toFixed(6));
-          setLatitude(lat);
-          setLongitude(lng);
-          updateMapMarker(lat, lng, true);
-          toast.success('Centered on current GPS location!');
+          placePin(position.coords.latitude, position.coords.longitude, true);
+          toast.success(`Pinned at your current position (±${Math.round(position.coords.accuracy)} m).`);
         },
-        (error) => {
-          toast.warn('Could not retrieve GPS: ' + error.message);
-        },
-        { enableHighAccuracy: true, timeout: 10000 }
+        (error) => toast.warn('Could not get your location: ' + error.message),
+        { enableHighAccuracy: true, timeout: 15000 }
       );
     } else {
-      toast.warn('Geolocation is not supported by your browser.');
+      toast.warn('Location is not available in this browser.');
     }
   };
 
-  // 5. Open in Google Maps directions
+  // 5. Directions in Google Maps
   const handleOpenGoogleMaps = () => {
-    const dest = `${latitude},${longitude}`;
-    const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+    if (!pinned) {
+      toast.info('Place the pin first.');
+      return;
+    }
+    const mapsUrl = `https://www.google.com/maps/dir/?api=1&destination=${latitude},${longitude}`;
     if (Platform.OS === 'web' && typeof window !== 'undefined') {
       window.open(mapsUrl, '_blank', 'noopener,noreferrer');
     } else {
-      Linking.openURL(mapsUrl).catch(() => {
-        toast.error('Unable to open Google Maps on this device.');
-      });
+      Linking.openURL(mapsUrl).catch(() => toast.error('Unable to open Google Maps on this device.'));
     }
   };
 
-  // 6. Save Location to POST /customer_location.php
+  // 6. Save to POST /customer_location.php
   const handleSaveLocation = async () => {
     if (!cleanMobile || cleanMobile.length !== 10) {
       toast.error('Customer does not have a valid 10-digit mobile number.');
       return;
     }
-
+    if (!pinned || latitude === null || longitude === null) {
+      toast.warn('Tap the map (or use My GPS) to place the pin first.');
+      return;
+    }
     setSavingLocation(true);
     try {
       const res = await OneBssApi.saveCustomerLocation(cleanMobile, latitude, longitude);
-      if (res.ok || res.data?.success) {
-        toast.success(`Location (${latitude}, ${longitude}) saved for ${customerName}!`);
+      if (res.ok) {
+        toast.success(`Location saved for ${customerName}.`);
         setHasServerLocation(true);
-        if (onLocationSaved) {
-          onLocationSaved({ latitude, longitude });
-        }
-        if (onClose) {
-          onClose();
-        }
+        if (onLocationSaved) onLocationSaved({ latitude, longitude });
+        if (onClose) onClose();
       } else {
         toast.error(res.data?.message || 'Failed to save location.');
       }
@@ -359,12 +260,12 @@ export const CustomerLocationMap = ({
           {hasServerLocation ? (
             <View style={styles.badgeSuccess}>
               <Feather name="check-circle" size={12} color="#15803d" />
-              <Text style={styles.badgeSuccessText}>Location Pinned</Text>
+              <Text style={styles.badgeSuccessText}>Saved location</Text>
             </View>
           ) : (
             <View style={styles.badgeWarning}>
               <Feather name="alert-circle" size={12} color="#b45309" />
-              <Text style={styles.badgeWarningText}>Not Set</Text>
+              <Text style={styles.badgeWarningText}>{pinned ? 'New pin — not saved' : 'No location yet'}</Text>
             </View>
           )}
 
@@ -383,14 +284,14 @@ export const CustomerLocationMap = ({
             title="Open in Google Maps (Directions)"
           >
             <Feather name="navigation" size={13} color="#475569" />
-            <Text style={styles.btnExternalText}>Google Maps</Text>
+            <Text style={styles.btnExternalText}>Directions</Text>
           </TouchableOpacity>
         </View>
 
         <TouchableOpacity
-          style={[styles.saveBtn, savingLocation && { opacity: 0.7 }]}
+          style={[styles.saveBtn, (savingLocation || !pinned) && { opacity: 0.6 }]}
           onPress={handleSaveLocation}
-          disabled={savingLocation}
+          disabled={savingLocation || !pinned}
         >
           {savingLocation ? (
             <ActivityIndicator size="small" color="#ffffff" />
@@ -427,8 +328,9 @@ export const CustomerLocationMap = ({
             <Text style={styles.coordLabel}>LAT:</Text>
             <TextInput
               style={styles.coordInput}
-              value={String(latitude)}
-              onChangeText={(v) => handleManualCoordChange(v, longitude)}
+              value={latitude === null ? '' : String(latitude)}
+              placeholder="—"
+              onChangeText={(v) => handleManualCoordChange(v, longitude ?? '')}
               keyboardType="numeric"
             />
           </View>
@@ -436,8 +338,9 @@ export const CustomerLocationMap = ({
             <Text style={styles.coordLabel}>LNG:</Text>
             <TextInput
               style={styles.coordInput}
-              value={String(longitude)}
-              onChangeText={(v) => handleManualCoordChange(latitude, v)}
+              value={longitude === null ? '' : String(longitude)}
+              placeholder="—"
+              onChangeText={(v) => handleManualCoordChange(latitude ?? '', v)}
               keyboardType="numeric"
             />
           </View>
@@ -446,20 +349,74 @@ export const CustomerLocationMap = ({
 
       {/* Map Interactive Canvas */}
       <View style={styles.mapFrame}>
-        <div
-          id={containerUniqueId.current}
-          style={{
-            width: '100%',
-            height: isMobile ? 320 : 420,
-            borderRadius: 10,
-            zIndex: 1,
-            position: 'relative',
-          }}
-        />
+        {/* Street / Satellite */}
+        <View style={styles.mapTypeBar}>
+          {MAP_TYPES.map((t) => (
+            <TouchableOpacity key={t.id} style={[styles.mapTypeBtn, mapType === t.id && styles.mapTypeBtnOn]} onPress={() => setMapType(t.id)}>
+              <Feather name={t.icon} size={12} color={mapType === t.id ? '#ffffff' : '#334155'} />
+              <Text style={[styles.mapTypeText, mapType === t.id && { color: '#ffffff' }]}>{t.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        {GOOGLE_MAPS_KEY ? (
+          <APIProvider apiKey={GOOGLE_MAPS_KEY} region="IN" language="en">
+            <View style={{ width: '100%', height: isMobile ? 320 : 420 }}>
+              <GoogleMap
+                style={{ width: '100%', height: '100%' }}
+                defaultCenter={latitude !== null ? { lat: latitude, lng: longitude } : DEFAULT_CENTER}
+                defaultZoom={latitude !== null ? 18 : 13}
+                mapTypeId={mapType}
+                gestureHandling="greedy"
+                mapTypeControl={false}
+                streetViewControl={false}
+                fullscreenControl
+                clickableIcons={false}
+                onClick={(e) => {
+                  const ll = e?.detail?.latLng;
+                  if (ll) placePin(ll.lat, ll.lng, false);
+                }}
+              >
+                {pinned && latitude !== null ? (
+                  <Marker
+                    position={{ lat: latitude, lng: longitude }}
+                    draggable
+                    title={`${customerName} · ${latitude}, ${longitude}`}
+                    onDragEnd={(e) => {
+                      const ll = e?.latLng;
+                      if (ll) placePin(ll.lat(), ll.lng(), false);
+                    }}
+                  />
+                ) : null}
+              </GoogleMap>
+              <MapFocus focus={focus} />
+              <GeocoderBridge onReady={(fn) => (geocoderRef.current = fn)} />
+            </View>
+          </APIProvider>
+        ) : (
+          <iframe
+            title="Customer location"
+            style={{ width: '100%', height: isMobile ? 320 : 420, border: 0, display: 'block' }}
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+            src={`https://maps.google.com/maps?q=${encodeURIComponent(
+              pinned && latitude !== null ? `${latitude},${longitude}` : embedQuery || `${DEFAULT_CENTER.lat},${DEFAULT_CENTER.lng}`
+            )}&t=${mapType === 'roadmap' ? 'm' : 'k'}&z=${pinned ? 18 : 14}&output=embed`}
+          />
+        )}
         <View style={styles.mapTipBar}>
           <Feather name="info" size={12} color="#475569" />
           <Text style={styles.mapTipText}>
-            Click anywhere on the map or drag the blue pin to set the exact installation point, then click <Text style={{ fontWeight: '700', color: '#16a34a' }}>Save Location</Text>.
+            {GOOGLE_MAPS_KEY ? (
+              <>
+                Search the area, use <Text style={{ fontWeight: '700' }}>Satellite</Text> to see houses, tap the exact installation point or drag the pin, then{' '}
+                <Text style={{ fontWeight: '700', color: '#16a34a' }}>Save Location</Text>.
+              </>
+            ) : (
+              <>
+                View only — set the pin with <Text style={{ fontWeight: '700' }}>My GPS</Text> or type LAT / LNG, then{' '}
+                <Text style={{ fontWeight: '700', color: '#16a34a' }}>Save Location</Text>. Add a Google Maps key (EXPO_PUBLIC_GOOGLE_MAPS_API_KEY) to tap on the map.
+              </>
+            )}
           </Text>
         </View>
       </View>
@@ -578,6 +535,7 @@ const styles = StyleSheet.create({
   },
   searchInput: {
     flex: 1,
+    minWidth: 0,
     fontSize: 13,
     color: '#0f172a',
     paddingVertical: 0,
@@ -598,7 +556,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    flexWrap: 'wrap',
+    flexShrink: 0,
   },
   coordInputWrap: {
     flexDirection: 'row',
@@ -617,6 +575,7 @@ const styles = StyleSheet.create({
     color: '#64748b',
   },
   coordInput: {
+    width: 92,
     fontSize: 12,
     fontWeight: '600',
     color: '#0f172a',
@@ -630,6 +589,34 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#cbd5e1',
     position: 'relative',
+  },
+  mapTypeBar: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    zIndex: 5,
+    flexDirection: 'row',
+    backgroundColor: '#ffffff',
+    borderRadius: 8,
+    padding: 3,
+    gap: 3,
+    boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
+  },
+  mapTypeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  mapTypeBtnOn: {
+    backgroundColor: '#2563eb',
+  },
+  mapTypeText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#334155',
   },
   mapTipBar: {
     flexDirection: 'row',

@@ -5,6 +5,7 @@ import { COLORS } from '../../constants/theme';
 import { OneBssApi } from '../../services/oneBssApi';
 import { ModalShell, Btn, KV, Note } from '../internet/shared';
 import { parseApiDate, formatApiDate } from '../CustomerAccountsOverview';
+import { FtaIncluded } from './FtaIncluded';
 
 const IPTV = '#8b5cf6';
 const money = (v) => {
@@ -68,7 +69,12 @@ const PackList = ({ packs, mode, isSelected, onPress, disabled, emptyText, searc
               )}
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={[styles.rowName, on && { color: '#5b21b6', fontWeight: '700' }]} numberOfLines={1}>{p.plan_name}</Text>
-                {mode === 'single' ? <Text style={styles.rowSub}>{p.plan_validity} days</Text> : null}
+                {mode === 'single' ? (
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <Text style={styles.rowSub}>{p.plan_validity} days</Text>
+                    <FtaIncluded compact />
+                  </View>
+                ) : null}
               </View>
               <Text style={styles.rowPrice}>{money(p.price)}</Text>
             </TouchableOpacity>
@@ -95,6 +101,7 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [plans, setPlans] = useState({ DPO: [], Broadcaster: [], 'A-la-carte': [] });
+  const [fta, setFta] = useState([]);
   const [stb, setStb] = useState(null);
   const [currentSource, setCurrentSource] = useState('none');
   const [dpoId, setDpoId] = useState(null);
@@ -126,6 +133,7 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
           'A-la-carte': d.plans?.['A-la-carte'] || [],
         };
         setPlans(grouped);
+        setFta(Array.isArray(d.fta) ? d.fta : []);
         setStb(d.stb || null);
         setCurrentSource(d.current?.source || 'none');
 
@@ -156,6 +164,8 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
   // Same rule the backend uses: still active -> advance from current expiry, else from now
   const expiry = parseApiDate(stb?.expiration || account?.expriration || account?.expiration);
   const isAdvance = stb ? !!stb.is_active : !!(expiry && expiry.getTime() > Date.now());
+  // Advance renewal (STB still active) renews the CURRENT packs only — no changes allowed.
+  const locked = isAdvance;
   const validity = dpo?.plan_validity > 0 ? dpo.plan_validity : 30;
   const start = isAdvance && expiry ? new Date(expiry) : new Date();
   const end = new Date(start);
@@ -289,14 +299,10 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
         <Text style={styles.muted}>Select a DPO package to start.</Text>
       ) : (
         <>
-          {/* FTA PACK INCLUDED NOTICE (ITEM 9) */}
-          <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.1)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.25)', borderRadius: 8, padding: 8, marginBottom: 10, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Feather name="check-circle" size={14} color="#10b981" />
-            <Text style={{ fontSize: 11, fontWeight: '700', color: '#047857' }}>FTA (Free-To-Air) Pack Included (₹0.00)</Text>
-          </View>
+          <FtaIncluded fta={fta} />
           {summaryGroup('DPO', [dpo], false)}
-          {summaryGroup(`A-la-carte (${alacarte.length})`, alacarte, true)}
-          {summaryGroup(`Broadcasters (${broadcasters.length})`, broadcasters, true)}
+          {summaryGroup(`A-la-carte (${alacarte.length})`, alacarte, !locked)}
+          {summaryGroup(`Broadcasters (${broadcasters.length})`, broadcasters, !locked)}
           <View style={[styles.billRow, styles.billTotal]}>
             <Text style={[styles.billName, { fontWeight: '800' }]}>Total ({lines.length} pack{lines.length > 1 ? 's' : ''})</Text>
             <Text style={[styles.billPrice, { fontSize: 16, fontWeight: '800' }]}>{money(total)}</Text>
@@ -345,6 +351,21 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
         <Note tone="error" text={loadError} />
       ) : plans.DPO.length === 0 ? (
         <Note text="No DPO package is assigned to this operator yet. Ask your admin to map IPTV packages before recharging." />
+      ) : locked ? (
+        !dpo ? (
+          <Note
+            tone="error"
+            text="This STB is still active but its current packs are not known, so it cannot be renewed in advance. Sync the STB first, or recharge with new packs after it expires."
+          />
+        ) : (
+          <>
+            <View style={{ marginTop: 12 }}>{summaryPanel}</View>
+            <Note
+              tone="info"
+              text={`Advance renewal keeps the current packs. The new period starts when the current one ends (${formatApiDate(stb?.expiration || account.expriration)}). To change packs, recharge after it expires.`}
+            />
+          </>
+        )
       ) : (
         <>
           {currentSource === 'local' || currentSource === 'pioneer' ? (
@@ -354,13 +375,7 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
             {listPanel}
             {summaryPanel}
           </View>
-          <Note
-            text={
-              (isAdvance
-                ? 'Advance renewal starts when the current plan ends. If the packs differ from the current ones, Pioneer schedules the new pack set from that date.'
-                : 'Recharge starts now.') + ' The operator wallet is debited immediately; if Pioneer rejects the renewal, the full amount is refunded.'
-            }
-          />
+          <Note text="Recharge starts now. The operator wallet is debited only if Pioneer confirms the renewal." />
         </>
       )}
     </ModalShell>

@@ -37,7 +37,7 @@ export const CustomerLocationModal = ({
                 <Feather name="map-pin" size={18} color="#2563eb" />
               </View>
               <View>
-                <Text style={styles.modalTitle}>Edit Customer Location & GPS Pin</Text>
+                <Text style={styles.modalTitle}>Customer location</Text>
                 <Text style={styles.modalSub}>
                   {name} {cleanMobile ? `· +91 ${cleanMobile}` : ''}
                 </Text>

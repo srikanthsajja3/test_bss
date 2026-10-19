@@ -1,14 +1,15 @@
 import React, { useState } from 'react';
 import { StyleSheet, View, SafeAreaView, StatusBar, useWindowDimensions, Text, TouchableOpacity, Platform } from 'react-native';
 import { COLORS } from './src/constants/theme';
-import { setApiConfig, onUnauthorized, isJwtExpired } from './src/services/oneBssApi';
+import { setApiConfig, onUnauthorized, isJwtExpired, clearStoredSession } from './src/services/oneBssApi';
 import { Sidebar } from './src/components/Sidebar';
 import { Header } from './src/components/Header';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { PartnerScreen } from './src/screens/PartnerScreen';
+import { CustomerPricesPage } from './src/components/plans/CustomerPricesPage';
 import { CustomerScreen } from './src/screens/CustomerScreen';
+import { OttSubscribersScreen } from './src/screens/OttSubscribersScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
-import { LoginModal } from './src/screens/LoginModal';
 import { ToastContainer, toast } from 'react-toastify';
 import { createPortal } from 'react-dom';
 
@@ -38,7 +39,7 @@ export default function App() {
           const [routePart] = hash.split('&');
           const [rawTab, rawFilter] = routePart.split('?filter=');
           const tab = rawTab ? rawTab.split('?')[0] : '';
-          if (['dashboard', 'partners', 'customers', 'iptv_customers'].includes(tab)) {
+          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices'].includes(tab)) {
             const filter = rawFilter ? rawFilter.split('?')[0].split('&')[0] : 'all';
             const rangeMatch = hash.match(/[?&]range=([a-z0-9_]+)/);
             return { tab, filter, range: rangeMatch ? rangeMatch[1] : '' };
@@ -46,7 +47,7 @@ export default function App() {
         }
         const savedTab = localStorage.getItem('onebss_active_tab');
         const savedFilter = localStorage.getItem('onebss_filter');
-        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers'].includes(savedTab)) {
+        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices'].includes(savedTab)) {
           return { tab: savedTab, filter: savedFilter || 'all', range: '' };
         }
       }
@@ -89,7 +90,6 @@ export default function App() {
   const [customerInitialSearch, setCustomerInitialSearch] = useState('');
   const [globalRefreshKey, setGlobalRefreshKey] = useState(0);
   const [user, setUserState] = useState(getInitialUserState());
-  const [isLoginVisible, setIsLoginVisible] = useState(false);
   const [partnerCreateRole, setPartnerCreateRole] = useState(null);
   const [partnerInitialRole, setPartnerInitialRole] = useState('');
 
@@ -145,17 +145,13 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    clearStoredSession();
     try {
       if (typeof window !== 'undefined') {
-        localStorage.removeItem('onebss_user');
-        localStorage.removeItem('onebss_token');
-        localStorage.removeItem('onebss_impersonate_token');
-        localStorage.removeItem('onebss_super_admin_session');
         localStorage.removeItem('onebss_active_tab');
         localStorage.removeItem('onebss_filter');
       }
     } catch (e) {}
-    setApiConfig(undefined, '');
     setUserState(null);
     setActiveTabState('login');
   };
@@ -239,6 +235,28 @@ export default function App() {
     return () => clearInterval(interval);
   }, [user]);
 
+  // Global offline detector (spec item 22): banner + toast when the browser loses connectivity
+  const [isOffline, setIsOffline] = useState(
+    typeof navigator !== 'undefined' && navigator.onLine === false
+  );
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const goOffline = () => {
+      setIsOffline(true);
+      toast.warn('You are offline. Changes will not be saved until the connection is back.');
+    };
+    const goOnline = () => {
+      setIsOffline(false);
+      toast.success('Back online.');
+    };
+    window.addEventListener('offline', goOffline);
+    window.addEventListener('online', goOnline);
+    return () => {
+      window.removeEventListener('offline', goOffline);
+      window.removeEventListener('online', goOnline);
+    };
+  }, []);
+
   // Sidebar Auto-Closing / Collapsible State (Defaults to collapsed, expands on hover)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
   const [sidebarOpenMobile, setSidebarOpenMobile] = useState(false);
@@ -256,11 +274,16 @@ export default function App() {
     setCustomerInitialFilter(filterKey);
     setCustomerInitialRange(range);
     setCustomerInitialSearch(search || '');
+    // pass the search term through — setActiveTab resets it otherwise (dashboard search + Enter)
+    if (filterKey === 'ott' || filterKey.startsWith('ott_')) {
+      setActiveTab('ott_customers');
+      return;
+    }
     if (filterKey.startsWith('iptv') || filterKey === 'iptv') {
       const cleanFilter = (filterKey === 'iptv' || filterKey === 'iptv_all') ? 'all' : filterKey.replace('iptv_', '');
-      setActiveTab('iptv_customers', cleanFilter, range);
+      setActiveTab('iptv_customers', cleanFilter, range, search);
     } else {
-      setActiveTab('customers', filterKey, range);
+      setActiveTab('customers', filterKey, range, search);
     }
   };
 
@@ -285,8 +308,8 @@ export default function App() {
       case 'dashboard':
         return (
           <DashboardScreen
-            key={`dashboard_${globalRefreshKey}`}
             user={user}
+            refreshSignal={globalRefreshKey}
             onNavigateToCustomers={handleNavigateToCustomers}
             onNavigateToPartners={handleNavigateToPartners}
           />
@@ -294,7 +317,7 @@ export default function App() {
       case 'partners':
         return (
           <PartnerScreen
-            key={`partners_${globalRefreshKey}`}
+            refreshSignal={globalRefreshKey}
             initialCreateRole={partnerCreateRole}
             initialRoleFilter={partnerInitialRole}
             onOpenCreate={(r) => setPartnerCreateRole(r)}
@@ -302,11 +325,16 @@ export default function App() {
           />
         );
       case 'customers':
-        return <CustomerScreen key={`customers_${globalRefreshKey}`} user={user} isIptvMode={false} initialFilter={customerInitialFilter} initialRange={customerInitialRange} initialSearch={customerInitialSearch} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
+        return <CustomerScreen key="customers" refreshSignal={globalRefreshKey} user={user} isIptvMode={false} initialFilter={customerInitialFilter} initialRange={customerInitialRange} initialSearch={customerInitialSearch} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
       case 'iptv_customers':
-        return <CustomerScreen key={`iptv_${globalRefreshKey}`} user={user} isIptvMode={true} initialFilter={customerInitialFilter} initialRange={customerInitialRange} initialSearch={customerInitialSearch} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
+        return <CustomerScreen key="iptv" refreshSignal={globalRefreshKey} user={user} isIptvMode={true} initialFilter={customerInitialFilter} initialRange={customerInitialRange} initialSearch={customerInitialSearch} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
+      case 'ott_customers':
+        return <OttSubscribersScreen user={user} refreshSignal={globalRefreshKey} />;
+      case 'customer_prices':
+        // operators: one customer price per package for all their customers
+        return <CustomerPricesPage key={`cp_${globalRefreshKey}`} partnerId={user?.partner_id} partnerName={user?.partner_name} readOnly={String(user?.role || '').toLowerCase() !== 'operator'} />;
       default:
-        return <DashboardScreen key={`dashboard_def_${globalRefreshKey}`} user={user} onNavigateToCustomers={handleNavigateToCustomers} />;
+        return <DashboardScreen user={user} refreshSignal={globalRefreshKey} onNavigateToCustomers={handleNavigateToCustomers} onNavigateToPartners={handleNavigateToPartners} />;
     }
   };
 
@@ -315,14 +343,18 @@ export default function App() {
       case 'dashboard':
         return {
           title: 'Dashboard',
-          subtitle: `${user.partner_name || 'Account'} (#${user.partner_id || 1000})`,
+          subtitle: user.partner_id ? `${user.partner_name || 'Account'} (#${user.partner_id})` : (user.partner_name || 'Account'),
         };
       case 'partners':
-        return { title: 'Partners', subtitle: 'Gateway Bindings & Hierarchy' };
+        return { title: 'Partners' };
       case 'customers':
         return { title: 'Internet Subscribers'};
       case 'iptv_customers':
         return { title: 'IPTV Subscribers'};
+      case 'ott_customers':
+        return { title: 'OTT Subscribers' };
+      case 'customer_prices':
+        return { title: 'Customer Prices', subtitle: 'What your customers pay, per package' };
       default:
         return { title: 'OneBSS Platform', subtitle: 'Management Portal' };
     }
@@ -333,6 +365,12 @@ export default function App() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#ffffff" />
+
+      {isOffline && (
+        <View style={styles.offlineBanner}>
+          <Text style={styles.offlineBannerText}>No internet connection — showing the last loaded data. Actions will fail until you are back online.</Text>
+        </View>
+      )}
 
       <View style={styles.layout}>
         {/* Desktop Sidebar (Inline flex layout) */}
@@ -383,7 +421,12 @@ export default function App() {
             subtitle={meta.subtitle}
             activeView={activeTab}
             onViewChange={setActiveTab}
-            onRefresh={() => setGlobalRefreshKey((k) => k + 1)}
+            onRefresh={() => {
+              setGlobalRefreshKey((k) => k + 1);
+              try {
+                window.dispatchEvent(new Event('onebss:wallet-changed'));
+              } catch (e) {}
+            }}
             onOpenCreate={() => handleOpenCreateRole('operator')}
             onToggleSidebar={toggleSidebarCollapse}
             user={user}
@@ -395,12 +438,6 @@ export default function App() {
         </View>
       </View>
 
-      {/* Role Selection / Login Modal */}
-      <LoginModal
-        visible={isLoginVisible}
-        onClose={() => setIsLoginVisible(false)}
-        onLoginSuccess={(userData) => handleSetUser(userData)}
-      />
 
       <ToastHost />
     </SafeAreaView>
@@ -413,6 +450,18 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
     backgroundColor: COLORS.bgPrimary,
+  },
+  offlineBanner: {
+    width: '100%',
+    backgroundColor: '#b91c1c',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  offlineBannerText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   roleBanner: {
     width: '100%',

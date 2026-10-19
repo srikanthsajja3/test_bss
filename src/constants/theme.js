@@ -20,6 +20,11 @@ export const COLORS = {
   textMuted: '#4b5563',
   textDim: '#9ca3af',
   textLight: '#ffffff',
+
+  // used across screens but were missing — the fallbacks were dark-theme colours
+  cardBg: '#ffffff',
+  borderLight: '#e2e8f0',
+  border: '#cbd5e1',
 };
 
 export const GLASS_STYLE = {

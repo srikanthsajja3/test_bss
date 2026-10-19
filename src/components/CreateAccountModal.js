@@ -4,12 +4,47 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
+import { Dropdown } from './internet/shared';
 
-export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator', onAccountCreated }) => {
+// Hierarchy: Super Admin > Super Distributor > Distributor > Sub Distributor > Operator.
+// The three middle levels are "admin" accounts; their level comes from who they are created under.
+const LEVEL_TYPES = [
+  { id: 'sd', label: 'Super Distributor', role: 'admin', parentLevel: 0, icon: 'award' },
+  { id: 'd', label: 'Distributor', role: 'admin', parentLevel: 1, icon: 'shield' },
+  { id: 'subd', label: 'Sub Distributor', role: 'admin', parentLevel: 2, icon: 'git-branch' },
+  { id: 'operator', label: 'Operator', role: 'operator', parentLevel: null, icon: 'briefcase' },
+];
+
+export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator', onAccountCreated, canCreateAdmin = false, parentId = null }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
-  const [role, setRole] = useState(initialRole);
+  const [role, setRole] = useState(canCreateAdmin ? initialRole : 'operator');
+  const isOperatorRole = role !== 'admin';
+  // Where the new partner goes: its level and its parent ('' = directly under the super admin)
+  const [levelType, setLevelType] = useState(initialRole === 'admin' ? 'sd' : 'operator');
+  const [parentSel, setParentSel] = useState(parentId ? String(parentId) : '');
+  const [adminList, setAdminList] = useState([]);
+  const levelDef = LEVEL_TYPES.find((t) => t.id === levelType) || LEVEL_TYPES[3];
+  const parentOptions = levelDef.role === 'operator'
+    ? [{ value: '', label: 'Super Admin (directly)' }, ...adminList.map((a) => ({ value: String(a.partner_id), label: `${a.hierarchy_label || 'Admin'} — ${a.partner_name} (#${a.partner_id})` }))]
+    : levelDef.parentLevel === 0
+      ? [{ value: '', label: 'Super Admin' }]
+      : adminList
+          .filter((a) => Number(a.admin_level) === levelDef.parentLevel)
+          .map((a) => ({ value: String(a.partner_id), label: `${a.hierarchy_label || 'Admin'} — ${a.partner_name} (#${a.partner_id})` }));
+  const chooseLevel = (id) => {
+    const def = LEVEL_TYPES.find((t) => t.id === id);
+    setLevelType(id);
+    setRole(def.role);
+    // keep the parent only if it is valid for the new level
+    setParentSel((cur) => {
+      if (def.role === 'operator') return cur;
+      if (def.parentLevel === 0) return '';
+      const a = adminList.find((x) => String(x.partner_id) === String(cur));
+      return a && Number(a.admin_level) === def.parentLevel ? cur : '';
+    });
+  };
   
   // 1. Basic Operator Identity & Contact
   const [partnerName, setPartnerName] = useState('');
@@ -45,6 +80,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
   const [iptvBaseUrl, setIptvBaseUrl] = useState(DEFAULT_IPTV_BASE_URL);
   const [iptvKey, setIptvKey] = useState('');
   const [iptvOperatorId, setIptvOperatorId] = useState('');
+  const [ottFranchiseId, setOttFranchiseId] = useState('');
   const [iptvBranchId, setIptvBranchId] = useState('');
 
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
@@ -55,7 +91,30 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
   // Reset all fields whenever the modal opens
   useEffect(() => {
     if (visible) {
-      setRole(initialRole || 'operator');
+      setRole(canCreateAdmin ? initialRole || 'operator' : 'operator');
+      setLevelType(initialRole === 'admin' ? 'sd' : 'operator');
+      setParentSel(parentId ? String(parentId) : '');
+      if (canCreateAdmin) {
+        OneBssApi.getPartners('admin').then((res) => {
+          const list = res.ok && Array.isArray(res.data) ? res.data : [];
+          setAdminList(list);
+          // "Add ... under this admin": the level follows the parent's level
+          if (parentId) {
+            const parent = list.find((a) => String(a.partner_id) === String(parentId));
+            if (parent && initialRole === 'admin') {
+              const lvl = Number(parent.admin_level || 0);
+              const t = LEVEL_TYPES.find((x) => x.parentLevel === lvl && x.role === 'admin');
+              if (t) {
+                setLevelType(t.id);
+                setRole('admin');
+              }
+            } else if (initialRole !== 'admin') {
+              setLevelType('operator');
+              setRole('operator');
+            }
+          }
+        });
+      }
       setError('');
       setPartnerName('');
       setCompanyName('');
@@ -80,7 +139,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       setBranchDropdownOpen(false);
       setRoleDropdownOpen(false);
     }
-  }, [visible, initialRole]);
+  }, [visible, initialRole, parentId]);
 
   if (!visible) return null;
 
@@ -252,12 +311,12 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       toast.error('Please enter Company Name');
       return;
     }
-    if (!mobile.trim() || mobile.trim().length < 10) {
-      toast.error('Please enter 10-digit Primary Mobile Number');
+    if (!/^[6-9]\d{9}$/.test(mobile.trim())) {
+      toast.error('Please enter a valid 10-digit mobile number');
       return;
     }
-    if (!email.trim()) {
-      toast.error('Please enter Email Address');
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      toast.error('Please enter a valid email address');
       return;
     }
     if (!region.trim()) {
@@ -268,21 +327,23 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       toast.error('Please enter Login Username');
       return;
     }
-    if (!password.trim()) {
-      toast.error('Please enter Login Password');
+    if (password.trim().length < 8) {
+      toast.error('Password must be at least 8 characters');
       return;
     }
-    if (!internetBaseUrl.trim() || !internetToken.trim()) {
-      toast.error('Please enter Internet Base URL and Internet Token first');
+    if (canCreateAdmin && levelDef.role === 'admin' && levelDef.parentLevel > 0 && !parentSel) {
+      toast.error(`Choose the ${LEVEL_TYPES.find((t) => t.parentLevel === levelDef.parentLevel - 1 && t.role === 'admin')?.label || 'admin'} this ${levelDef.label} belongs to`);
       return;
     }
-    if (!internetPartnerId.trim()) {
-      toast.error('Please select an Upstream RADIUS Partner');
-      return;
-    }
-    if (!internetBranchId.trim()) {
-      toast.error('Please select an Upstream RADIUS Branch');
-      return;
+    if (isOperatorRole) {
+      if (!internetBaseUrl.trim() || !internetToken.trim()) {
+        toast.error('Please enter the RADIUS URL and API token');
+        return;
+      }
+      if (!internetPartnerId.trim() || !internetBranchId.trim()) {
+        toast.error('Please select the RADIUS partner and branch');
+        return;
+      }
     }
 
     setLoading(true);
@@ -300,18 +361,22 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
         password: password.trim(),
         role: role || 'operator',
       },
-      internet_mapping: {
-        internet_base_url: internetBaseUrl.trim(),
-        internet_token: internetToken.trim(),
-        internet_partner_id: internetPartnerId.trim(),
-        internet_branch_id: internetBranchId.trim(),
-      },
-      iptv_mapping: {
-        iptv_base_url: iptvBaseUrl.trim(),
-        iptv_key: iptvKey.trim(),
-        iptv_operator_id: Number(iptvOperatorId) || 0,
-        iptv_branch_id: iptvBranchId.trim(),
-      },
+      ...(canCreateAdmin && parentSel ? { parent_id: Number(parentSel) } : {}),
+      // Gateways belong to operators only; IPTV is optional (sent only when a key is given)
+      ...(isOperatorRole
+        ? {
+            internet_mapping: {
+              internet_base_url: internetBaseUrl.trim(),
+              internet_token: internetToken.trim(),
+              internet_partner_id: internetPartnerId.trim(),
+              internet_branch_id: internetBranchId.trim(),
+            },
+            ...(iptvKey.trim()
+              ? { iptv_mapping: { iptv_base_url: iptvBaseUrl.trim(), iptv_key: iptvKey.trim(), iptv_operator_id: Number(iptvOperatorId) || 0 } }
+              : {}),
+            ...(ottFranchiseId.trim() ? { ott_mapping: { franchise_id: ottFranchiseId.trim() } } : {}),
+          }
+        : {}),
     };
 
     try {
@@ -323,24 +388,15 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
         toast.error(errMsg);
         setError(errMsg);
       } else {
+        // The server returns the stored partner; the list is re-fetched by the parent.
         const createdPartner = resData.data || {
-          partner_id: resData.partner_id || Math.floor(1100 + Math.random() * 8800),
+          partner_id: resData.partner_id,
           partner_name: partnerName.trim(),
           company_name: companyName.trim(),
           account_username: username.trim(),
           account_role: role,
           status: 'enabled',
         };
-
-        // Add to local hierarchical store
-        OneBssApi.createHierarchicalPartner({
-          partner_name: partnerName.trim(),
-          company_name: companyName.trim(),
-          partner_mobile: mobile.trim(),
-          partner_email: email.trim(),
-          account_role: role,
-          status: 'enabled',
-        });
 
         toast.success(resData.message || `Operator "${partnerName.trim()}" registered successfully!`);
         if (onAccountCreated) {
@@ -366,99 +422,69 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       <View style={styles.fullScreenHeader}>
         <TouchableOpacity style={styles.backBtn} onPress={onClose}>
           <Feather name="arrow-left" size={18} color={COLORS.textMain} />
-          <Text style={styles.backBtnText}>Back to Partner Registry</Text>
+          <Text style={styles.backBtnText}>Back</Text>
         </TouchableOpacity>
 
         <View style={{ flex: 1, marginLeft: 16 }}>
           <Text style={styles.fullScreenTitle}>
-            Create New {role === 'admin' ? 'Admin' : 'Operator'} Account
+            New {canCreateAdmin ? levelDef.label.toLowerCase() : role === 'admin' ? 'admin' : 'operator'}
           </Text>
           <Text style={styles.fullScreenSubtitle}>
-            Full-Screen Registration Console • API Endpoint: POST /partner.php
+            {role === 'admin' ? 'Admin levels see the data of everything below them (view only) and earn margins on their operators\' recharges.' : 'Operators sell Internet, IPTV and OTT to their customers.'}
           </Text>
         </View>
 
-        <View style={styles.headerBadge}>
-          <Text style={styles.headerBadgeText}>{role.toUpperCase()}</Text>
-        </View>
       </View>
 
       <ScrollView style={styles.fullScreenContent} contentContainerStyle={{ paddingHorizontal: isMobile ? 14 : 28, paddingVertical: 20 }}>
-        {/* Role Type Selector */}
-        <View style={styles.sectionCard}>
-          <Text style={styles.sectionCardTitle}>ACCOUNT ROLE REGISTRATION TYPE (SELECT ROLE)</Text>
-          <View style={[styles.inputGroup, { marginTop: 8 }]}>
-            <TouchableOpacity
-              style={styles.dropdownSelectTrigger}
-              onPress={() => setRoleDropdownOpen(!roleDropdownOpen)}
-            >
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                <Feather name={role === 'admin' ? "shield" : "briefcase"} size={16} color={COLORS.primary} />
-                <Text style={styles.dropdownSelectValueText}>
-                  {role === 'operator' ? 'OPERATOR ACCOUNT (Default)' :
-                   role === 'admin' ? 'ADMIN REGIONAL ACCOUNT' :
-                   role === 'sub_operator' ? 'SUB-OPERATOR ACCOUNT' : 'REGIONAL MANAGER ACCOUNT'}
-                </Text>
-              </View>
-              <Feather name={roleDropdownOpen ? "chevron-up" : "chevron-down"} size={18} color={COLORS.textMuted} />
-            </TouchableOpacity>
-
-            {roleDropdownOpen && (
-              <View style={styles.dropdownMenuBox}>
-                {[
-                  { id: 'operator', label: 'OPERATOR ACCOUNT (Default)', icon: 'briefcase' },
-                  { id: 'admin', label: 'ADMIN REGIONAL ACCOUNT', icon: 'shield' },
-                  { id: 'sub_operator', label: 'SUB-OPERATOR ACCOUNT', icon: 'user' },
-                  { id: 'regional_manager', label: 'REGIONAL MANAGER ACCOUNT', icon: 'map-pin' },
-                ].map((r) => (
+        {/* Level + parent (super admin only — admins are view-only) */}
+        {canCreateAdmin ? (
+          <View style={[styles.sectionCard, { paddingVertical: 14 }]}>
+            <Text style={styles.sectionCardTitle}>LEVEL IN THE HIERARCHY</Text>
+            <View style={[styles.roleToggleRow, { marginTop: 8, flexWrap: 'wrap' }]}>
+              {LEVEL_TYPES.map((t) => {
+                const on = levelType === t.id;
+                return (
                   <TouchableOpacity
-                    key={r.id}
-                    style={[styles.dropdownMenuItem, role === r.id && styles.dropdownMenuItemActive]}
-                    onPress={() => {
-                      setRole(r.id);
-                      setRoleDropdownOpen(false);
-                    }}
+                    key={t.id}
+                    style={[styles.roleOption, { minWidth: 150 }, on && (t.role === 'admin' ? styles.roleOptionAdminActive : styles.roleOptionOperatorActive)]}
+                    onPress={() => chooseLevel(t.id)}
                   >
-                    <Feather name={r.icon} size={15} color={role === r.id ? COLORS.primary : COLORS.textMuted} />
-                    <Text style={[styles.dropdownMenuItemText, role === r.id && styles.dropdownMenuItemTextActive]}>
-                      {r.label}
-                    </Text>
+                    <Feather name={t.icon} size={16} color={on ? '#ffffff' : COLORS.textMuted} />
+                    <Text style={[styles.roleOptionText, on && styles.roleOptionTextActive]}>{t.label.toUpperCase()}</Text>
                   </TouchableOpacity>
-                ))}
-              </View>
-            )}
-          </View>
-
-          <View style={[styles.roleToggleRow, { marginTop: 10 }]}>
-            <TouchableOpacity
-              style={[styles.roleOption, role === 'operator' && styles.roleOptionOperatorActive]}
-              onPress={() => setRole('operator')}
-            >
-              <Feather name="briefcase" size={16} color={role === 'operator' ? '#ffffff' : COLORS.textMuted} />
-              <Text style={[styles.roleOptionText, role === 'operator' && styles.roleOptionTextActive]}>
-                OPERATOR
+                );
+              })}
+            </View>
+            <View style={[styles.inputGroup, { marginTop: 12 }]}>
+              <Text style={styles.label}>{levelDef.role === 'operator' ? 'UNDER' : levelDef.parentLevel === 0 ? 'UNDER' : `UNDER WHICH ${LEVEL_TYPES.find((t) => t.parentLevel === levelDef.parentLevel - 1 && t.role === 'admin')?.label.toUpperCase() || 'ADMIN'} *`}</Text>
+              {parentOptions.length ? (
+                <Dropdown
+                  value={parentSel}
+                  options={parentOptions}
+                  onChange={(v) => setParentSel(String(v))}
+                  disabled={levelDef.role === 'admin' && levelDef.parentLevel === 0}
+                  placeholder="Select…"
+                />
+              ) : (
+                <Text style={{ fontSize: 12.5, color: '#b45309' }}>
+                  No {LEVEL_TYPES.find((t) => t.parentLevel === levelDef.parentLevel - 1 && t.role === 'admin')?.label || 'admin'} exists yet — create one first.
+                </Text>
+              )}
+              <Text style={[styles.manualModeHelpText, { marginTop: 6 }]}>
+                Super Distributor › Distributor › Sub Distributor › Operator. Admin levels can only view their data; the super admin sets their margins on each operator's plans.
               </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[styles.roleOption, role === 'admin' && styles.roleOptionAdminActive]}
-              onPress={() => setRole('admin')}
-            >
-              <Feather name="shield" size={16} color={role === 'admin' ? '#ffffff' : COLORS.textMuted} />
-              <Text style={[styles.roleOptionText, role === 'admin' && styles.roleOptionTextActive]}>
-                ADMIN
-              </Text>
-            </TouchableOpacity>
+            </View>
           </View>
-        </View>
+        ) : null}
 
         {/* Section 1: Basic Identity & Contact */}
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionCardTitle}>1. OPERATOR PROFILE & CONTACT INFORMATION</Text>
+          <Text style={styles.sectionCardTitle}>1. PROFILE & CONTACT INFORMATION</Text>
 
           <View style={[styles.row, isMobile && styles.rowMobile]}>
             <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.label}>PARTNER NAME (DISPLAY NAME) *</Text>
+              <Text style={styles.label}>PARTNER NAME *</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Enter Partner / Operator Name"
@@ -469,7 +495,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
             </View>
 
             <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.label}>REGISTERED COMPANY NAME *</Text>
+              <Text style={styles.label}>COMPANY NAME *</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Enter Registered Company Name"
@@ -482,7 +508,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
 
           <View style={[styles.row, isMobile && styles.rowMobile]}>
             <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.label}>PRIMARY MOBILE (10 DIGITS) *</Text>
+              <Text style={styles.label}>MOBILE (10 DIGITS) *</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Enter 10-digit mobile number"
@@ -520,7 +546,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
 
         {/* Section 2: Login Credentials */}
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionCardTitle}>2. AUTHENTICATION & LOGIN CREDENTIALS</Text>
+          <Text style={styles.sectionCardTitle}>2. LOGIN CREDENTIALS</Text>
 
           <View style={[styles.row, isMobile && styles.rowMobile]}>
             <View style={[styles.inputGroup, { flex: 1 }]}>
@@ -535,7 +561,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
             </View>
 
             <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.label}>LOGIN PASSWORD *</Text>
+              <Text style={styles.label}>LOGIN PASSWORD (MIN 8) *</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Enter login password"
@@ -548,10 +574,11 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
           </View>
         </View>
 
-        {/* Section 3: RADIUS Internet Mapping */}
+        {/* Section 3: RADIUS Internet Mapping (operators only) */}
+        {isOperatorRole ? (
         <View style={styles.sectionCard}>
           <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-            <Text style={styles.sectionCardTitle}>3. INTERNET MAPPING (RADIUS GATEWAY SETTINGS)</Text>
+            <Text style={styles.sectionCardTitle}>3. INTERNET MAPPING (RADIUS GATEWAY)</Text>
             <TouchableOpacity
               style={styles.toggleModeBtn}
               onPress={() => setManualMode(!manualMode)}
@@ -565,7 +592,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
 
           <View style={[styles.row, isMobile && styles.rowMobile]}>
             <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.label}>INTERNET BASE URL *</Text>
+              <Text style={styles.label}>RADIUS BASE URL *</Text>
               <TextInput
                 style={styles.input}
                 placeholder="https://radius.domain.com"
@@ -576,7 +603,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
             </View>
 
             <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.label}>INTERNET TOKEN *</Text>
+              <Text style={styles.label}>RADIUS TOKEN *</Text>
               <TextInput
                 style={styles.input}
                 placeholder="Enter RADIUS Gateway Token"
@@ -624,7 +651,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
             <View style={{ marginTop: 14 }}>
               <View style={[styles.row, isMobile && styles.rowMobile]}>
                 <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>UPSTREAM RADIUS PARTNER ID *</Text>
+                  <Text style={styles.label}>RADIUS PARTNER ID *</Text>
                   <TextInput
                     style={styles.input}
                     placeholder="e.g. 292"
@@ -635,7 +662,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
                 </View>
 
                 <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>UPSTREAM RADIUS BRANCH ID *</Text>
+                  <Text style={styles.label}>RADIUS BRANCH ID *</Text>
                   <TextInput
                     style={styles.input}
                     placeholder="e.g. 328"
@@ -655,7 +682,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
               <View style={[styles.inputGroup, { marginTop: 14 }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={styles.label}>SELECT UPSTREAM RADIUS PARTNER *</Text>
+                    <Text style={styles.label}>SELECT RADIUS PARTNER *</Text>
                     {partnerList.length > 0 ? (
                       <View style={styles.seedIndicatorBadge}>
                         <Text style={styles.seedIndicatorText}>{partnerList.length} Available</Text>
@@ -709,7 +736,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
               <View style={[styles.inputGroup, { marginTop: 14 }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={styles.label}>SELECT UPSTREAM RADIUS BRANCH *</Text>
+                    <Text style={styles.label}>SELECT RADIUS BRANCH *</Text>
                     {branchList.length > 0 ? (
                       <View style={[styles.seedIndicatorBadge, { backgroundColor: 'rgba(139, 92, 246, 0.12)' }]}>
                         <Text style={[styles.seedIndicatorText, { color: '#8b5cf6' }]}>{branchList.length} Available</Text>
@@ -764,9 +791,12 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
           )}
         </View>
 
-        {/* Section 4: IPTV Mapping */}
+        ) : null}
+
+        {/* Section 4: IPTV Mapping (operators only) */}
+        {isOperatorRole ? (
         <View style={styles.sectionCard}>
-          <Text style={styles.sectionCardTitle}>4. IPTV MAPPING CONFIGURATION (OPTIONAL)</Text>
+          <Text style={styles.sectionCardTitle}>4. IPTV MAPPING (OPTIONAL)</Text>
 
           <View style={styles.inputGroup}>
             <Text style={styles.label}>IPTV BASE URL</Text>
@@ -803,23 +833,34 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
               />
             </View>
 
-            <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.label}>IPTV BRANCH ID / MAPPING</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="Optional IPTV Branch ID"
-                value={iptvBranchId}
-                onChangeText={setIptvBranchId}
-                placeholderTextColor={COLORS.textDim}
-              />
-            </View>
           </View>
+          <Text style={styles.manualModeHelpText}>Branches and packs are assigned from the partner page after creating the account.</Text>
         </View>
+        ) : null}
+
+        {/* Section 5: OTT (operators only) */}
+        {isOperatorRole ? (
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionCardTitle}>5. OTT MAPPING (OPTIONAL)</Text>
+          <View style={styles.inputGroup}>
+            <Text style={styles.label}>OTTAGGRE FRANCHISE ID</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="e.g. F1001"
+              value={ottFranchiseId}
+              onChangeText={setOttFranchiseId}
+              autoCapitalize="none"
+              placeholderTextColor={COLORS.textDim}
+            />
+          </View>
+          <Text style={styles.manualModeHelpText}>OTT packages are synced and priced from the partner page (OTT Plans) after creating the account.</Text>
+        </View>
+        ) : null}
 
         {/* Bottom Action Control Bar */}
         <View style={styles.fullScreenActionFooter}>
           <TouchableOpacity style={styles.footerCancelBtn} onPress={onClose} disabled={loading}>
-            <Text style={styles.footerCancelBtnText}>Cancel & Return</Text>
+            <Text style={styles.footerCancelBtnText}>Cancel</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -836,7 +877,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
               <Feather name="plus-circle" size={18} color="#fff" />
             )}
             <Text style={styles.footerSubmitBtnText}>
-              {loading ? 'Registering Operator...' : `Register & Create ${role.toUpperCase()} Account`}
+              {loading ? 'Creating…' : `Create ${canCreateAdmin ? levelDef.label.toLowerCase() : role === 'admin' ? 'admin' : 'operator'}`}
             </Text>
           </TouchableOpacity>
         </View>

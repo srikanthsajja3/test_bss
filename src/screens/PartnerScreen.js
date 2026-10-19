@@ -12,7 +12,13 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
-import { OneBssApi, setApiConfig, decodeJwt } from '../services/oneBssApi';
+import { OneBssApi, decodeJwt, saveOriginalSession, switchSession } from '../services/oneBssApi';
+import { PartnersTable, LevelBadge, levelLabelOf } from '../components/partners/PartnersTable';
+import { CustomerPricesPage } from '../components/plans/CustomerPricesPage';
+import { PartnerDevices } from '../components/partners/PartnerDevices';
+import { OttPlansPage } from '../components/ott/OttPlansPage';
+import { PlanCardList } from '../components/plans/PlanCardList';
+import { OperatorPlansView } from '../components/plans/OperatorPlansView';
 import { CreateAccountModal } from '../components/CreateAccountModal';
 import { Dropdown } from '../components/internet/shared';
 import { toast } from 'react-toastify';
@@ -81,7 +87,30 @@ const flattenComboOptions = (options) => {
   return { inetList, iptvList };
 };
 
-export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRoleFilter }) => {
+export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRoleFilter, refreshSignal = 0 }) => {
+  const [detailReloadKey, setDetailReloadKey] = useState(0);
+  const isSuperAdminUser = String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'superadmin';
+  const isAdminUser = String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'admin';
+  // Admins (super distributor / distributor / sub distributor) are VIEW-ONLY: no add, edit,
+  // wallet change, plan change or recharge. The backend refuses it too (auth_middleware.php).
+  const readOnly = !isSuperAdminUser;
+  // An admin may switch into a partner below it only while the super admin drives the session.
+  const canImpersonate = isSuperAdminUser || (isAdminUser && !!user?.is_impersonation);
+  // Admin page: the partners that admin created (same table as the main page)
+  const [adminChildren, setAdminChildren] = useState([]);
+  const [loadingAdminChildren, setLoadingAdminChildren] = useState(false);
+  // Drill-down trail: the partner pages we came through (Partners › SD › D › ...), so Back
+  // returns one level instead of jumping to the main list.
+  const [partnerTrail, setPartnerTrail] = useState([]);
+  const [createParentId, setCreateParentId] = useState(null);
+  const [customerPricesPartner, setCustomerPricesPartner] = useState(null);
+  // Hierarchy margins on an operator's packages (super admin, on the operator's plan pages):
+  // operator price = super admin price + the margin of each admin above the operator.
+  const [inetAdminChain, setInetAdminChain] = useState([]);
+  const [inetMargins, setInetMargins] = useState({}); // { subPlanId: { adminId: '20' } }
+  const [iptvAdminChain, setIptvAdminChain] = useState([]);
+  const [iptvMargins, setIptvMargins] = useState({});
+  const [bulkMargins, setBulkMargins] = useState({}); // { adminId: '10' } — "apply to all selected"
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
@@ -120,6 +149,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   const [savingPlanMapping, setSavingPlanMapping] = useState(false);
 
   const [iptvPlansPartner, setIptvPlansPartner] = useState(null);
+  const [ottPlansPartner, setOttPlansPartner] = useState(null);
   const [iptvPlans, setIptvPlans] = useState([]);
   const [loadingIptvPlans, setLoadingIptvPlans] = useState(false);
   const [searchIptvPlan, setSearchIptvPlan] = useState('');
@@ -176,13 +206,30 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     is_active: true,
   });
   const [savingCombo, setSavingCombo] = useState(false);
+  const [expandedIptvIds, setExpandedIptvIds] = useState([]);
+  const [comboAdminChain, setComboAdminChain] = useState([]);
   const [deletingComboId, setDeletingComboId] = useState(null);
+
+  // Opening an ADMIN: list the partners it created (its distributors / operators).
+  useEffect(() => {
+    const pid = selectedPartner?.partner_id;
+    const isAdminPartner = String(selectedPartner?.account_role || '').toLowerCase() === 'admin';
+    if (!pid || !isAdminPartner) {
+      setAdminChildren([]);
+      return;
+    }
+    setLoadingAdminChildren(true);
+    OneBssApi.getPartnersCreatedBy(pid)
+      .then((res) => setAdminChildren(res.ok && Array.isArray(res.data) ? res.data : []))
+      .catch(() => setAdminChildren([]))
+      .finally(() => setLoadingAdminChildren(false));
+  }, [selectedPartner?.partner_id, selectedPartner?.account_role, detailReloadKey]);
 
   useEffect(() => {
     if (selectedPartner?.partner_id) {
       OneBssApi.getWallet(selectedPartner.partner_id)
         .then((wRes) => {
-          if (wRes.data && wRes.data.wallet_balance !== undefined) {
+          if (wRes.ok && wRes.data && wRes.data.wallet_balance !== undefined) {
             setSelectedPartner((prev) => (prev ? { ...prev, wallet_balance: Number(wRes.data.wallet_balance) } : prev));
           }
         })
@@ -191,6 +238,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       setLoadingPartner(true);
       OneBssApi.getDashboard(selectedPartner.partner_id)
         .then((res) => {
+          if (!res.ok) {
+            toast.error(res.data?.message || 'Could not load this partner\'s dashboard.');
+            setPartner(null);
+            return;
+          }
           const data = res.data?.data || res.data;
           if (data) {
             const internetData = data.internet || (data.total !== undefined ? data : null);
@@ -218,7 +270,19 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     } else {
       setPartner(null);
     }
-  }, [selectedPartner?.partner_id]);
+  }, [selectedPartner?.partner_id, detailReloadKey]);
+
+  // Top-bar Refresh: reload the list and whatever partner page is open
+  const firstRefreshSignal = React.useRef(true);
+  useEffect(() => {
+    if (firstRefreshSignal.current) {
+      firstRefreshSignal.current = false;
+      return;
+    }
+    fetchPartners();
+    setDetailReloadKey((k) => k + 1);
+    if (walletPartner) handleOpenWallet(walletPartner, walletAction);
+  }, [refreshSignal]);
 
   useEffect(() => {
     const handleSubHashChange = () => {
@@ -261,20 +325,38 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
   }, []);
 
-  const handleSelectPartner = (partner) => {
+  const trailHash = (trail) => (trail.length ? `&trail=${trail.map((t) => t.partner_id).join(',')}` : '');
+
+  // Open a partner. From the main list the trail starts empty; from another partner's page
+  // (its "partners under" table) that page is pushed, so Back comes back to it.
+  const handleSelectPartner = (partner, fromParent = null) => {
+    const trail = fromParent ? [...partnerTrail, fromParent] : [];
+    setPartnerTrail(trail);
     setSelectedPartner(partner);
     if (typeof window !== 'undefined' && partner) {
       const pId = partner.partner_id || partner.id;
-      window.location.hash = `partners?partner_id=${pId}`;
+      window.location.hash = `partners?partner_id=${pId}${trailHash(trail)}`;
     }
   };
 
+  // Back from a partner page: one level up the trail, or the main list.
   const handleClosePartnerDetails = () => {
+    if (partnerTrail.length) {
+      const trail = partnerTrail.slice(0, -1);
+      const parent = partnerTrail[partnerTrail.length - 1];
+      setPartnerTrail(trail);
+      setSelectedPartner(parent);
+      if (typeof window !== 'undefined') window.location.hash = `partners?partner_id=${parent.partner_id}${trailHash(trail)}`;
+      return;
+    }
     setSelectedPartner(null);
     if (typeof window !== 'undefined') {
       window.location.hash = 'partners';
     }
   };
+
+  // Hash of a sub page (wallet, plans...) of the open partner, keeping the trail.
+  const partnerPageHash = (pId, extra = '') => `partners?partner_id=${pId}${extra}${trailHash(partnerTrail)}`;
 
   useEffect(() => {
     if (initialCreateRole) {
@@ -283,7 +365,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
   }, [initialCreateRole]);
 
-  const handleOpenCreate = (role = 'operator') => {
+  const handleOpenCreate = (role = 'operator', parentId = null) => {
+    setCreateParentId(parentId);
     setCreateRole(role);
     setIsCreateOpen(true);
     if (onOpenCreate) onOpenCreate(role);
@@ -298,7 +381,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     if (onOpenCreate) onOpenCreate(null);
     if (typeof window !== 'undefined') {
       const pId = selectedPartner?.partner_id || selectedPartner?.id;
-      window.location.hash = pId ? `partners?partner_id=${pId}` : 'partners';
+      window.location.hash = pId ? partnerPageHash(pId) : 'partners';
     }
   };
 
@@ -306,7 +389,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     setEditingPartner(null);
     if (typeof window !== 'undefined') {
       const pId = selectedPartner?.partner_id || selectedPartner?.id;
-      window.location.hash = pId ? `partners?partner_id=${pId}` : 'partners';
+      window.location.hash = pId ? partnerPageHash(pId) : 'partners';
     }
   };
 
@@ -314,7 +397,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     setWalletPartner(null);
     if (typeof window !== 'undefined') {
       const pId = selectedPartner?.partner_id || selectedPartner?.id;
-      window.location.hash = pId ? `partners?partner_id=${pId}` : 'partners';
+      window.location.hash = pId ? partnerPageHash(pId) : 'partners';
     }
   };
 
@@ -322,23 +405,28 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     setInternetPlansPartner(null);
     if (typeof window !== 'undefined') {
       const pId = selectedPartner?.partner_id || selectedPartner?.id;
-      window.location.hash = pId ? `partners?partner_id=${pId}` : 'partners';
+      window.location.hash = pId ? partnerPageHash(pId) : 'partners';
     }
   };
 
   const fetchPartners = async () => {
     setLoading(true);
     try {
-      const res = await OneBssApi.getPartners(search, selectedRole);
-      let list = [];
-      if (res.data && Array.isArray(res.data)) {
-        list = res.data;
+      // search is filtered client-side below; the server filters by role and scope
+      // Main table = only the caller's own level (super admin: its super distributors and
+      // direct operators). Deeper levels are opened from each admin's page.
+      const res = await OneBssApi.getPartners(selectedRole, '', 'direct');
+      if (!res.ok) {
+        toast.error(res.data?.message || 'Could not load partners.');
+        setPartners([]);
+        return;
       }
+      const list = Array.isArray(res.data) ? res.data : [];
       const listWithWallets = await Promise.all(
         list.map(async (p) => {
           try {
             const wRes = await OneBssApi.getWallet(p.partner_id);
-            if (wRes.data && wRes.data.wallet_balance !== undefined) {
+            if (wRes.ok && wRes.data && wRes.data.wallet_balance !== undefined) {
               return { ...p, wallet_balance: Number(wRes.data.wallet_balance) };
             }
           } catch (e) {}
@@ -355,7 +443,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
 
   useEffect(() => {
     fetchPartners();
-  }, [search, selectedRole]);
+  }, [selectedRole]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -368,15 +456,39 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         setIsCreateOpen(true);
       }
     }
-    if (partners && partners.length > 0 && typeof window !== 'undefined') {
+    if (partners && typeof window !== 'undefined') {
+      restoreFromHash();
+    }
+  }, [partners]);
+
+  // Reload / deep link: partners deeper than the main list are fetched by id, and the
+  // drill-down trail (#...&trail=2,4) is rebuilt so Back keeps working level by level.
+  const restoreFromHash = async () => {
+    {
       const hash = window.location.hash;
+      if (!/partner_id=|edit=|wallet=|internet=|iptv=|combo=/.test(hash)) return;
+      const cache = {};
+      partners.forEach((p) => { cache[String(p.partner_id)] = p; });
+      const ids = new Set();
+      ['partner_id', 'edit', 'wallet', 'internet', 'iptv', 'combo'].forEach((key) => {
+        const m = hash.match(new RegExp(`${key}=([^&]+)`));
+        if (m && m[1]) ids.add(m[1]);
+      });
+      const trailMatch = hash.match(/trail=([0-9,]+)/);
+      const trailIds = trailMatch ? trailMatch[1].split(',').filter(Boolean) : [];
+      trailIds.forEach((id) => ids.add(id));
+      for (const id of ids) {
+        if (!cache[id]) {
+          try {
+            const r = await OneBssApi.getPartnerById(id);
+            if (r.ok && r.data?.data) cache[id] = r.data.data;
+          } catch (e) {}
+        }
+      }
+      setPartnerTrail(trailIds.map((id) => cache[id]).filter(Boolean));
       const getPartnerFromHash = (key) => {
         const match = hash.match(new RegExp(`${key}=([^&]+)`));
-        if (match && match[1]) {
-          const targetId = match[1];
-          return partners.find((p) => String(p.partner_id || p.id) === String(targetId));
-        }
-        return null;
+        return match && match[1] ? cache[match[1]] || null : null;
       };
 
       const detailPartner = getPartnerFromHash('partner_id') || getPartnerFromHash('edit') || getPartnerFromHash('wallet') || getPartnerFromHash('internet') || getPartnerFromHash('iptv') || getPartnerFromHash('combo');
@@ -409,7 +521,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         handleOpenComboPlans(comboP);
       }
     }
-  }, [partners]);
+  };
 
   const filteredPartners = partners.filter((p) => {
     const query = search.toLowerCase().trim();
@@ -430,19 +542,24 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     const target = partners.find((p) => p.partner_id === partnerId);
     if (!target) return;
     const newStatus = target.status === 'enabled' ? 'disabled' : 'enabled';
+    const res = await OneBssApi.updatePartner(partnerId, { status: newStatus });
+    if (!res.ok) {
+      toast.error(res.data?.message || `Could not change status of partner #${partnerId}.`);
+      return;
+    }
     setPartners((prev) =>
       prev.map((p) => (p.partner_id === partnerId ? { ...p, status: newStatus } : p))
     );
     if (selectedPartner?.partner_id === partnerId) {
       setSelectedPartner((prev) => ({ ...prev, status: newStatus }));
     }
-    await OneBssApi.updatePartner(partnerId, { status: newStatus });
     toast.info(`Partner #${partnerId} status updated to ${newStatus.toUpperCase()}`);
   };
 
   const handleAccountCreated = (newPartner, msg) => {
-    toast.success(msg || `New ${newPartner.account_role.toUpperCase()} #${newPartner.partner_id} created successfully!`);
+    toast.success(msg || `New ${levelLabelOf(newPartner)} #${newPartner.partner_id} created successfully!`);
     fetchPartners();
+    setDetailReloadKey((k) => k + 1); // refresh "partners under" of the open admin
   };
 
   // 1. Edit Partner Handlers
@@ -454,44 +571,47 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
     if (typeof window !== 'undefined') {
       const pId = partner.partner_id || partner.id;
-      window.location.hash = `partners?partner_id=${pId}&edit=${pId}`;
+      window.location.hash = partnerPageHash(pId, `&edit=${pId}`);
     }
     setEditForm({
       partner_name: partner.partner_name || '',
       company_name: partner.company_name || '',
       partner_mobile: partner.partner_mobile || '',
       partner_email: partner.partner_email || '',
-      wallet_balance: partner.wallet_balance !== undefined ? String(partner.wallet_balance) : '0',
       status: partner.status || 'enabled',
       partner_region: partner.partner_region || '',
-      kyc_provider: partner.kyc_provider || 'Signzy',
-      kyc_api_key: partner.kyc_api_key || '',
-      iptv_branch_id: partner.iptv_branch_id || '',
+      ott_franchise_id: partner.ott_franchise_id || '',
     });
   };
 
   const handleSaveEdit = async () => {
     if (!editingPartner) return;
     try {
+      // Only the fields partner.php actually saves.
       const payload = {
-        partner_id: editingPartner.partner_id,
         partner_name: editForm.partner_name,
         company_name: editForm.company_name,
         partner_mobile: editForm.partner_mobile,
         partner_email: editForm.partner_email,
-        wallet_balance: Number(editForm.wallet_balance) || 0,
         status: editForm.status,
         partner_region: editForm.partner_region,
-        kyc_provider: editForm.kyc_provider,
-        kyc_api_key: editForm.kyc_api_key,
-        iptv_branch_id: editForm.iptv_branch_id,
+        // OTTAggre franchise id (operators); empty removes it
+        ...(String(editingPartner.account_role || editingPartner.role || '').toLowerCase() === 'operator'
+          ? { ott_mapping: { franchise_id: String(editForm.ott_franchise_id || '').trim() } }
+          : {}),
       };
-      await OneBssApi.updatePartner(editingPartner.partner_id, payload);
+      const res = await OneBssApi.updatePartner(editingPartner.partner_id, payload);
+      if (!res.ok) {
+        toast.error(res.data?.message || 'Failed to update partner details.');
+        return;
+      }
+      // Show what the server stored, not what we sent.
+      const saved = res.data?.data || payload;
       setPartners((prev) =>
-        prev.map((p) => (p.partner_id === editingPartner.partner_id ? { ...p, ...payload } : p))
+        prev.map((p) => (p.partner_id === editingPartner.partner_id ? { ...p, ...saved, wallet_balance: p.wallet_balance } : p))
       );
       if (selectedPartner?.partner_id === editingPartner.partner_id) {
-        setSelectedPartner((prev) => ({ ...prev, ...payload }));
+        setSelectedPartner((prev) => ({ ...prev, ...saved, wallet_balance: prev.wallet_balance }));
       }
       toast.success(`Partner #${editingPartner.partner_id} updated successfully!`);
       handleCloseEdit();
@@ -510,7 +630,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
     if (typeof window !== 'undefined') {
       const pId = partner.partner_id || partner.id;
-      window.location.hash = `partners?partner_id=${pId}&wallet=${pId}&action=${initialAction}`;
+      window.location.hash = partnerPageHash(pId, `&wallet=${pId}&action=${initialAction}`);
     }
     setTopupAmount('');
     setWalletRemark('');
@@ -520,7 +640,10 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       const pId = partner.partner_id || partner.id;
       const res = await OneBssApi.getWallet(pId);
       const data = res.data || {};
-      if (data.wallet_balance !== undefined) {
+      if (!res.ok) {
+        toast.error(data.message || 'Could not load wallet history.');
+      }
+      if (res.ok && data.wallet_balance !== undefined) {
         setWalletPartner((prev) => (prev ? { ...prev, wallet_balance: data.wallet_balance } : prev));
       }
       if (Array.isArray(data.transactions)) {
@@ -553,14 +676,16 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       const defaultRemark = isDebit ? `Wallet Debit via ${paymentMode}` : `Wallet Top-up via ${paymentMode}`;
       const remarkText = walletRemark.trim() || defaultRemark;
       const res = isDebit
-        ? await OneBssApi.debitWallet(walletPartner.partner_id, amountNum, remarkText, currentBal)
-        : await OneBssApi.topupWallet(walletPartner.partner_id, amountNum, remarkText, currentBal);
+        ? await OneBssApi.debitWallet(walletPartner.partner_id, amountNum, remarkText)
+        : await OneBssApi.topupWallet(walletPartner.partner_id, amountNum, remarkText);
       const data = res.data || {};
 
-      const expectedBal = isDebit ? Math.max(0, currentBal - amountNum) : (currentBal + amountNum);
-      const newBalance = (data.balance_after !== undefined && data.balance_after !== null && !isNaN(Number(data.balance_after)))
-        ? Number(data.balance_after)
-        : expectedBal;
+      // Money moves only when the server confirms it — never update balances on a failed call.
+      if (!res.ok || data.balance_after === undefined || data.balance_after === null || isNaN(Number(data.balance_after))) {
+        toast.error(data.message || (isDebit ? 'Wallet debit failed. No money was moved.' : 'Wallet top-up failed. No money was added.'));
+        return;
+      }
+      const newBalance = Number(data.balance_after);
 
       setPartners((prev) =>
         prev.map((p) => (p.partner_id === walletPartner.partner_id ? { ...p, wallet_balance: newBalance } : p))
@@ -571,7 +696,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       setWalletPartner((prev) => (prev ? { ...prev, wallet_balance: newBalance } : prev));
 
       const newTxn = {
-        ledger_id: data.ledger_id || Math.floor(Math.random() * 1000) + 1,
+        ledger_id: data.ledger_id,
         txn_amount: amountNum,
         txn_type: isDebit ? 'debit' : 'credit',
         balance_before_txn: currentBal,
@@ -589,7 +714,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
 
       try {
         const walletRes = await OneBssApi.getWallet(walletPartner.partner_id);
-        if (walletRes.data) {
+        if (walletRes.ok && walletRes.data) {
           if (Array.isArray(walletRes.data.transactions)) {
             setWalletTransactions(walletRes.data.transactions);
           }
@@ -611,6 +736,54 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     } catch (e) {
       toast.error(isDebit ? 'Wallet debit failed.' : 'Wallet topup failed.');
     }
+  };
+
+  // Admin margins: read the chain + saved margins from a plan-mapping response.
+  const marginsFromRows = (rows) => {
+    const out = {};
+    (rows || []).forEach((r) => {
+      const id = r.sub_plan_id || r.plan_id || r.id;
+      const m = r.margins && typeof r.margins === 'object' ? r.margins : {};
+      out[id] = {};
+      Object.keys(m).forEach((adminId) => {
+        out[id][adminId] = String(m[adminId]);
+      });
+    });
+    return out;
+  };
+  const captureInternetMargins = (res, grouped) => {
+    setInetAdminChain(Array.isArray(res?.data?.admin_chain) ? res.data.admin_chain : []);
+    setInetMargins(marginsFromRows((grouped || []).flatMap((p) => p.subplans || [])));
+    setBulkMargins({});
+  };
+  const captureIptvMargins = (res, rows) => {
+    setIptvAdminChain(Array.isArray(res?.data?.admin_chain) ? res.data.admin_chain : []);
+    setIptvMargins(marginsFromRows(rows));
+    setBulkMargins({});
+  };
+  // Payload: super admin price + { adminId: margin }; the server adds them up into the operator price.
+  const marginPayload = (chain, marginState, id, saPrice) => {
+    if (!isSuperAdminUser) return {};
+    const m = marginState[id] || {};
+    const out = {};
+    chain.forEach((a) => {
+      const v = m[a.partner_id];
+      if (v !== undefined && v !== '' && !isNaN(Number(v))) out[a.partner_id] = Number(v);
+    });
+    return { sa_price: saPrice, margins: out };
+  };
+  const marginTotal = (chain, marginState, id) =>
+    chain.reduce((sum, a) => sum + (Number((marginState[id] || {})[a.partner_id]) || 0), 0);
+  // Returns an error text when margins are invalid for one of the selected plans, else ''.
+  const checkMargins = (chain, marginState, ids, priceOf, nameOf) => {
+    if (!isSuperAdminUser || !chain.length) return '';
+    for (const id of ids) {
+      for (const a of chain) {
+        const v = (marginState[id] || {})[a.partner_id];
+        if (v !== undefined && v !== '' && (isNaN(Number(v)) || Number(v) < 0)) return `${nameOf(id)}: ${a.partner_name}'s margin must be 0 or more.`;
+      }
+    }
+    return '';
   };
 
   // 3. Internet Plans Handlers
@@ -679,7 +852,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         if (plan.subplans && Array.isArray(plan.subplans)) {
           plan.subplans.forEach((sub) => {
             const subId = sub.sub_plan_id || sub.id;
-            priceMap[subId] = String(sub.mapped_price !== null && sub.mapped_price !== undefined ? sub.mapped_price : (sub.base_price || '0'));
+            // super admin edits the SUPER ADMIN price (operator price = it + margins); others see the operator price
+            priceMap[subId] = String(sub.sa_price !== null && sub.sa_price !== undefined ? sub.sa_price : sub.mapped_price !== null && sub.mapped_price !== undefined ? sub.mapped_price : (sub.base_price || '0'));
           });
         } else {
           const planId = plan.sub_plan_id || plan.plan_id || plan.id;
@@ -698,7 +872,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
     if (typeof window !== 'undefined') {
       const pId = partner.partner_id || partner.id;
-      window.location.hash = `partners?partner_id=${pId}&internet=${pId}`;
+      window.location.hash = partnerPageHash(pId, `&internet=${pId}`);
     }
     setSearchInetPlan('');
     setSelectedSubPlanIds([]);
@@ -706,9 +880,13 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     setExpandedPlanIds([]);
     setLoadingInternetPlans(true);
     
-    try {
-      await OneBssApi.syncInternetPlans(partner.partner_id);
-    } catch (e) {}
+    // only the super admin fetches packages from RADIUS (admins are view-only)
+    if (isSuperAdminUser) {
+      const syncRes = await OneBssApi.syncInternetPlans(partner.partner_id);
+      if (!syncRes.ok) {
+        toast.warn('Could not refresh plans from RADIUS — showing the last synced catalog.');
+      }
+    }
 
     try {
       const res = await OneBssApi.getInternetPlans(partner.partner_id);
@@ -719,6 +897,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       setInternetPlans(groupedPlans);
       setSelectedSubPlanIds(extractMappedSubPlanIds(groupedPlans));
       setCustomPrices(extractInitialCustomPrices(groupedPlans));
+      captureInternetMargins(res, groupedPlans);
     } catch (e) {
       setInternetPlans([]);
     } finally {
@@ -730,7 +909,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     if (!internetPlansPartner) return;
     try {
       setLoadingInternetPlans(true);
-      await OneBssApi.syncInternetPlans(internetPlansPartner.partner_id);
+      const syncRes = await OneBssApi.syncInternetPlans(internetPlansPartner.partner_id);
+      if (!syncRes.ok) {
+        toast.error(syncRes.data?.message || 'Internet plan sync failed.');
+        return;
+      }
       const res = await OneBssApi.getInternetPlans(internetPlansPartner.partner_id);
       const dataArray = Array.isArray(res.data) 
         ? res.data 
@@ -739,9 +922,10 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       setInternetPlans(groupedPlans);
       setSelectedSubPlanIds(extractMappedSubPlanIds(groupedPlans));
       setCustomPrices(extractInitialCustomPrices(groupedPlans));
-      toast.success('Internet plans catalog synchronized successfully!');
+      captureInternetMargins(res, groupedPlans);
+      toast.success(syncRes.data?.message || 'Internet plans catalog synchronized.');
     } catch (e) {
-      toast.success('Internet plans synced!');
+      toast.error('Internet plan sync failed.');
     } finally {
       setLoadingInternetPlans(false);
     }
@@ -804,6 +988,27 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
 
   const handleSaveInternetPlanMapping = async () => {
     if (!internetPlansPartner) return;
+    const findSub = (id) => {
+      for (const plan of internetPlans) {
+        const sub = (plan.subplans || []).find((x) => String(x.sub_plan_id || x.id) === String(id));
+        if (sub) return { plan, sub };
+      }
+      return null;
+    };
+    const marginErr = checkMargins(
+      inetAdminChain,
+      inetMargins,
+      selectedSubPlanIds,
+      (id) => customPrices[id],
+      (id) => {
+        const h = findSub(id);
+        return h ? `${h.plan.plan_name} - ${h.sub.sub_plan_name}` : `Sub-plan #${id}`;
+      }
+    );
+    if (marginErr) {
+      toast.warn(marginErr);
+      return;
+    }
     setSavingPlanMapping(true);
     try {
       const plansToMap = selectedSubPlanIds.map((id) => {
@@ -815,6 +1020,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
           price: priceNum,
           mapped_price: priceNum,
           is_mapped: true,
+          ...marginPayload(inetAdminChain, inetMargins, id, priceNum),
         };
       });
       const res = await OneBssApi.mapInternetPlansToOperator(internetPlansPartner.partner_id, plansToMap);
@@ -826,11 +1032,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         setInternetPlans(arr);
         setSelectedSubPlanIds(extractMappedSubPlanIds(arr));
         setCustomPrices(extractInitialCustomPrices(arr));
+        captureInternetMargins(refreshed, arr);
       } else {
         toast.error(data.message || 'Failed to assign internet plans.');
       }
     } catch (e) {
-      toast.success(`Internet plans assigned successfully to Partner #${internetPlansPartner.partner_id}!`);
+      toast.error('Failed to assign internet plans.');
     } finally {
       setSavingPlanMapping(false);
     }
@@ -847,7 +1054,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     if (Array.isArray(plans)) {
       plans.forEach((p) => {
         const id = p.sub_plan_id || p.plan_id || p.id;
-        prices[id] = p.mapped_price !== undefined && p.mapped_price !== null ? String(p.mapped_price) : (p.base_price !== undefined ? String(p.base_price) : '0');
+        prices[id] = p.sa_price !== undefined && p.sa_price !== null
+          ? String(p.sa_price)
+          : p.mapped_price !== undefined && p.mapped_price !== null ? String(p.mapped_price) : (p.base_price !== undefined ? String(p.base_price) : '0');
       });
     }
     return prices;
@@ -861,7 +1070,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
     if (typeof window !== 'undefined') {
       const pId = partner.partner_id || partner.id;
-      window.location.hash = `partners?partner_id=${pId}&iptv=${pId}`;
+      window.location.hash = partnerPageHash(pId, `&iptv=${pId}`);
     }
     setSearchIptvPlan('');
     setIptvTypeFilter('');
@@ -876,6 +1085,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       setIptvPlans(dataArray);
       setSelectedIptvPlanIds(extractIptvMappedIds(dataArray));
       setCustomIptvPrices(extractIptvCustomPrices(dataArray));
+      captureIptvMargins(res, dataArray);
     } catch (e) {
       setIptvPlans([]);
     } finally {
@@ -887,15 +1097,21 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     if (!iptvPlansPartner) return;
     try {
       setLoadingIptvPlans(true);
-      await OneBssApi.syncIptvPlans(iptvPlansPartner.partner_id);
+      const syncRes = await OneBssApi.syncIptvPlans(iptvPlansPartner.partner_id);
+      if (!syncRes.ok) {
+        toast.error(syncRes.data?.message || 'IPTV catalog sync failed.');
+        return;
+      }
       const res = await OneBssApi.getIptvPlans(iptvPlansPartner.partner_id);
       const dataArray = Array.isArray(res.data) ? res.data : (res.data?.data && Array.isArray(res.data.data) ? res.data.data : []);
       setIptvPlans(dataArray);
       setSelectedIptvPlanIds(extractIptvMappedIds(dataArray));
       setCustomIptvPrices(extractIptvCustomPrices(dataArray));
-      toast.success('IPTV channel catalog synchronized successfully!');
+      captureIptvMargins(res, dataArray);
+      const sum = syncRes.data?.summary;
+      toast.success(`${syncRes.data?.message || 'IPTV packages synced.'}${sum ? ` — ${Number(sum.plans_added || 0)} new pack(s)` : ''}`);
     } catch (e) {
-      toast.success('IPTV channel catalog synced!');
+      toast.error('IPTV catalog sync failed.');
     } finally {
       setLoadingIptvPlans(false);
     }
@@ -911,20 +1127,22 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     });
   };
 
+  // Select / deselect every plan currently shown (respects the search and type filter)
   const handleSelectAllIptvPlans = () => {
     const allIds = filteredIptvPlans.map((p) => p.sub_plan_id || p.plan_id || p.id);
-    setSelectedIptvPlanIds([...new Set(allIds)]);
+    setSelectedIptvPlanIds((prev) => [...new Set([...prev, ...allIds])]);
   };
 
   const handleDeselectAllIptvPlans = () => {
-    setSelectedIptvPlanIds([]);
+    const shown = new Set(filteredIptvPlans.map((p) => p.sub_plan_id || p.plan_id || p.id));
+    setSelectedIptvPlanIds((prev) => prev.filter((id) => !shown.has(id)));
   };
 
   const handleCloseIptvPlans = () => {
     setIptvPlansPartner(null);
     setIsAssignIptvModalOpen(false);
     if (typeof window !== 'undefined') {
-      window.location.hash = selectedPartner ? `partners?partner_id=${selectedPartner.partner_id || selectedPartner.id}` : 'partners';
+      window.location.hash = selectedPartner ? partnerPageHash(selectedPartner.partner_id || selectedPartner.id) : 'partners';
     }
   };
 
@@ -932,6 +1150,17 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     if (!iptvPlansPartner) return;
     if (selectedIptvPlanIds.length === 0) {
       toast.warn('Please select at least one channel or pack to assign.');
+      return;
+    }
+    const marginErr = checkMargins(
+      iptvAdminChain,
+      iptvMargins,
+      selectedIptvPlanIds,
+      (id) => customIptvPrices[id],
+      (id) => iptvPlans.find((p) => String(p.sub_plan_id || p.plan_id || p.id) === String(id))?.plan_name || `Pack #${id}`
+    );
+    if (marginErr) {
+      toast.warn(marginErr);
       return;
     }
     setSavingIptvMapping(true);
@@ -945,6 +1174,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
           price: priceNum,
           mapped_price: priceNum,
           is_mapped: true,
+          ...marginPayload(iptvAdminChain, iptvMargins, id, priceNum),
         };
       });
       const res = await OneBssApi.mapIptvPlansToOperator(iptvPlansPartner.partner_id, plansToMap);
@@ -956,11 +1186,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         setIptvPlans(arr);
         setSelectedIptvPlanIds(extractIptvMappedIds(arr));
         setCustomIptvPrices(extractIptvCustomPrices(arr));
+        captureIptvMargins(refreshed, arr);
       } else {
         toast.error(data.message || 'Failed to assign IPTV plans.');
       }
     } catch (e) {
-      toast.success(`Assign successful! IPTV plans assigned to Partner #${iptvPlansPartner.partner_id}.`);
+      toast.error('Failed to assign IPTV plans.');
     } finally {
       setSavingIptvMapping(false);
     }
@@ -975,7 +1206,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
     if (typeof window !== 'undefined') {
       const pId = partner.partner_id || partner.id;
-      window.location.hash = `partners?partner_id=${pId}&combo=${pId}`;
+      window.location.hash = partnerPageHash(pId, `&combo=${pId}`);
     }
     setSearchComboPlan('');
     setLoadingComboPlans(true);
@@ -985,8 +1216,10 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         ? res.data
         : (res.data?.data && Array.isArray(res.data.data) ? res.data.data : []);
       setComboPlans(arr);
+      setComboAdminChain(Array.isArray(res.data?.admin_chain) ? res.data.admin_chain : []);
     } catch (e) {
       setComboPlans([]);
+      setComboAdminChain([]);
     } finally {
       setLoadingComboPlans(false);
     }
@@ -995,7 +1228,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   const handleCloseComboPlans = () => {
     setComboPlansPartner(null);
     if (typeof window !== 'undefined' && selectedPartner) {
-      window.location.hash = `partners?partner_id=${selectedPartner.partner_id || selectedPartner.id}`;
+      window.location.hash = partnerPageHash(selectedPartner.partner_id || selectedPartner.id);
     }
   };
 
@@ -1022,6 +1255,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       isub_plan_id: '',
       iptvsub_plan_id: '',
       price: '',
+      margins: {},
       is_active: true,
       _autoName: false,
       _autoPrice: false,
@@ -1035,9 +1269,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     setEditingComboPlan(comboItem);
     setComboForm({
       combo_name: comboItem.combo_name || '',
-      isub_plan_id: String(comboItem.isub_plan_id || ''),
-      iptvsub_plan_id: String(comboItem.iptvsub_plan_id || ''),
-      price: String(comboItem.price !== undefined ? comboItem.price : ''),
+      isub_plan_id: String(comboItem.isub_plan_id || comboItem.internet?.sub_plan_id || ''),
+      iptvsub_plan_id: String(comboItem.iptvsub_plan_id || comboItem.iptv?.sub_plan_id || ''),
+      // with admins above the operator the box is the super admin price (operator price = it + margins)
+      price: String(comboItem.sa_price !== undefined && comboItem.sa_price !== null ? comboItem.sa_price : comboItem.price !== undefined ? comboItem.price : ''),
+      margins: Object.fromEntries(Object.entries(comboItem.margins && typeof comboItem.margins === 'object' ? comboItem.margins : {}).map(([k, v]) => [k, String(v)])),
       is_active: comboItem.is_active !== false && comboItem.is_active !== 0 && comboItem.is_active !== '0',
       _autoName: false,
       _autoPrice: false,
@@ -1069,6 +1305,18 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     });
   };
 
+  // Combo operator price = super admin price (comboForm.price) + each admin's margin.
+  const comboMarginsOut = () => {
+    const out = {};
+    comboAdminChain.forEach((a) => {
+      const v = (comboForm.margins || {})[a.partner_id];
+      if (v !== undefined && v !== '' && !isNaN(Number(v))) out[a.partner_id] = Number(v);
+    });
+    return out;
+  };
+  const comboOperatorTotal = () =>
+    (Number(comboForm.price) || 0) + Object.values(comboMarginsOut()).reduce((sum, v) => sum + v, 0);
+
   const handleSaveCombo = async () => {
     if (!comboPlansPartner) return;
     if (!comboForm.combo_name.trim()) {
@@ -1099,6 +1347,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         price: Number(comboForm.price),
         is_active: comboForm.is_active ? 1 : 0,
       };
+      if (comboAdminChain.length) {
+        payload.sa_price = Number(comboForm.price);
+        payload.margins = comboMarginsOut();
+        payload.price = comboOperatorTotal();
+      }
 
       let res;
       if (editingComboPlan) {
@@ -1161,44 +1414,35 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   // Partner Reset Password & Impersonate Handlers
   const handleOpenPartnerResetPass = (partner) => {
     setResetPartnerModal(partner);
-    setPartnerNewPass('oper' + Math.floor(1000 + Math.random() * 9000));
+    // Empty = let the server generate a strong password (shown once after reset).
+    setPartnerNewPass('');
     setShowPartnerPass(true);
   };
 
   const handleConfirmPartnerResetPass = async () => {
-    if (!resetPartnerModal || !partnerNewPass.trim()) return;
+    if (!resetPartnerModal) return;
+    const typed = partnerNewPass.trim();
+    if (typed && typed.length < 8) {
+      toast.warn('Password must be at least 8 characters, or leave it empty to auto-generate one.');
+      return;
+    }
     setResettingPartnerPass(true);
     const pId = resetPartnerModal.partner_id || resetPartnerModal.id;
     const pName = resetPartnerModal.partner_name || resetPartnerModal.company_name || 'Partner';
-    const uname = resetPartnerModal.account_username || resetPartnerModal.login?.username || resetPartnerModal.partner_email || '';
-    const newPass = partnerNewPass.trim();
 
     try {
-      await OneBssApi.resetPartnerPassword(pId, newPass, uname);
-
-      setPartners((prev) =>
-        prev.map((p) => {
-          if ((p.partner_id || p.id) === pId) {
-            return {
-              ...p,
-              partner_password: newPass,
-              password: newPass,
-              login: { ...(p.login || {}), password: newPass },
-            };
-          }
-          return p;
-        })
-      );
-
-      if (selectedPartner && (selectedPartner.partner_id || selectedPartner.id) === pId) {
-        setSelectedPartner((prev) => (prev ? { ...prev, partner_password: newPass, password: newPass } : prev));
+      const res = await OneBssApi.resetPartnerPassword(pId, typed);
+      if (!res.ok || !res.data?.new_password) {
+        toast.error(res.data?.message || `Password reset failed for ${pName} (#${pId}).`);
+        return;
       }
-
-      toast.success(`Password successfully reset for ${pName} (#${pId})! New Password: ${newPass}`);
+      // Shown once; never kept in app state or storage.
+      const issued = res.data.new_password;
+      setPartnerNewPass(issued);
+      toast.success(`Password reset for ${pName} (#${pId}). New password: ${issued}`, { autoClose: false });
       setResetPartnerModal(null);
     } catch (e) {
-      toast.success(`Password reset for ${pName} (#${pId})! New Password: ${newPass}`);
-      setResetPartnerModal(null);
+      toast.error(`Password reset failed for ${pName} (#${pId}).`);
     } finally {
       setResettingPartnerPass(false);
     }
@@ -1207,61 +1451,48 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   const handleImpersonatePartner = async (partner) => {
     if (!partner) return;
     const pId = partner.partner_id || partner.id;
-    if (String(pId) === '1111' || (partner.account_role || '').toLowerCase() === 'superadmin') {
-      toast.info('You are already in the Super Admin session.');
+    const targetRole = String(partner.account_role || '').toLowerCase();
+    if (targetRole === 'superadmin') {
+      toast.info('Super Admin accounts cannot be impersonated.');
+      return;
+    }
+    if (String(pId) === String(user?.partner_id)) {
+      toast.info('You are already logged in as this account.');
       return;
     }
 
     setImpersonatingId(pId);
     try {
-      if (typeof window !== 'undefined') {
-        const curToken = user?.token || localStorage.getItem('onebss_token');
-        const curUser = user || (localStorage.getItem('onebss_user') ? JSON.parse(localStorage.getItem('onebss_user')) : null);
-        const decoded = decodeJwt(curToken);
-        const isSuper = decoded?.role?.toLowerCase() === 'superadmin' || user?.role === 'superadmin';
-        if (curToken && isSuper) {
-          try {
-            const parsedUser = typeof curUser === 'string' ? JSON.parse(curUser) : curUser;
-            localStorage.setItem('onebss_super_admin_session', JSON.stringify({ token: curToken, user: parsedUser }));
-          } catch (err) {
-            localStorage.setItem('onebss_super_admin_session', JSON.stringify({ token: curToken, user: curUser }));
-          }
-        }
-      }
-
-      if (user?.token) setApiConfig(undefined, user.token);
       const res = await OneBssApi.impersonatePartner(pId);
       const data = res.data || {};
 
-      if (res.ok && (data.token || data.data?.token)) {
-        const token = data.token || data.data?.token;
-        setApiConfig(undefined, token);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('onebss_token', token);
-          localStorage.setItem('onebss_impersonate_token', token);
-          const impUser = {
-            ...(data.impersonating || data.data?.impersonating || partner),
-            token: token,
-            role: (data.impersonating?.role || partner.account_role || 'operator').toLowerCase(),
-            partner_id: pId,
-          };
-          localStorage.setItem('onebss_user', JSON.stringify(impUser));
-          localStorage.setItem('onebss_active_tab', 'dashboard');
-          localStorage.setItem('onebss_filter', 'all');
-          window.location.hash = '#dashboard';
-        }
-        toast.success(`Logged in as ${partner.partner_name || partner.company_name} (#${pId})!`);
-        setTimeout(() => {
-          if (typeof window !== 'undefined') window.location.reload();
-        }, 500);
-      } else {
-        const errMsg = data.message || (res.status === 404 ? `Partner #${pId} not found on server.` : 'Login request failed.');
-        toast.error(errMsg);
-        console.warn('Impersonate failed:', res);
+      if (!res.ok || !data.token) {
+        toast.error(data.message || 'Could not start the impersonation session.');
+        return;
       }
+
+      // Remember the account we are leaving — one entry per level (super admin -> admin ->
+      // operator), so "Back" returns one level at a time (this tab only, never sent to the API).
+      if (user?.token) {
+        const { token: _t, ...origUser } = user;
+        saveOriginalSession(user.token, origUser);
+      }
+
+      const claims = decodeJwt(data.token) || {};
+      const impUser = {
+        username: claims.username || data.impersonating?.username || '',
+        partner_name: claims.partner_name || data.impersonating?.partner_name || partner.partner_name,
+        partner_id: claims.partner_id || pId,
+        role: String(claims.role || data.impersonating?.role || '').toLowerCase(),
+        is_impersonation: true,
+        impersonated_by: claims.impersonated_by || null,
+        root_impersonated_by: claims.root_impersonated_by || null,
+      };
+      // Straight into the partner's dashboard: no toast + delayed reload, so this account's
+      // screens are never shown in between.
+      switchSession(data.token, impUser, 'dashboard', impUser.partner_name || `partner #${pId}`);
     } catch (e) {
-      toast.error('Login request failed: ' + (e?.message || 'Network error'));
-      console.error('handleImpersonatePartner exception:', e);
+      toast.error('Could not start the impersonation session.');
     } finally {
       setImpersonatingId(null);
     }
@@ -1277,7 +1508,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       if (data.success !== false) {
         toast.success(data.message || `IPTV users synced successfully for ${partner.partner_name || 'Partner'} (#${pId})!`);
       } else {
-        toast.info(data.message || `IPTV sync completed for Partner #${pId}.`);
+        toast.error(data.message || `IPTV user sync failed for Partner #${pId}.`);
       }
     } catch (e) {
       toast.error('Sync failed: Network error');
@@ -1296,7 +1527,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       if (data.success !== false) {
         toast.success(data.message || `Internet users synced successfully for ${partner.partner_name || 'Partner'} (#${pId})!`);
       } else {
-        toast.info(data.message || `Internet sync completed for Partner #${pId}.`);
+        toast.error(data.message || `Internet user sync failed for Partner #${pId}.`);
       }
     } catch (e) {
       toast.error('Sync failed: Network error');
@@ -1314,6 +1545,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     try {
       const res = await OneBssApi.kycProviders(pId);
       const data = res.data || {};
+      if (!res.ok) {
+        toast.error(data.message || 'Could not load KYC providers.');
+      }
       const list = Array.isArray(data.providers)
         ? data.providers
         : (Array.isArray(data.data?.providers) ? data.data.providers : []);
@@ -1345,7 +1579,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       }
 
       if (promises.length > 0) {
-        await Promise.all(promises);
+        const results = await Promise.all(promises);
+        const failed = results.find((r) => !r.ok);
+        if (failed) {
+          toast.error(failed.data?.message || 'Failed to update KYC providers.');
+          return;
+        }
       }
 
       toast.success(`KYC providers updated successfully for ${kycPartner.partner_name || 'operator'}!`);
@@ -1573,8 +1812,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
               </Text>
               <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
                 <TextInput
-                  style={{ flex: 1, height: 36, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)', borderRadius: 8, paddingHorizontal: 10, fontSize: 12, color: '#000000', outlineStyle: 'none' }}
-                  placeholder="Enter Pioneer Key (optional)"
+                  style={{ flex: 1, minWidth: 0, height: 36, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)', borderRadius: 8, paddingHorizontal: 10, fontSize: 12, color: '#000000', outlineStyle: 'none' }}
+                  placeholder="Pioneer key (optional)"
                   value={pioneerKey}
                   onChangeText={setPioneerKey}
                   placeholderTextColor="#9ca3af"
@@ -1784,7 +2023,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 {/* Combo Price */}
                 <View>
                   <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMuted || '#94a3b8', marginBottom: 6 }}>
-                    COMBO PRICE (₹) *
+                    {comboAdminChain.length ? 'SUPER ADMIN PRICE (₹) *' : 'COMBO PRICE (₹) *'}
                   </Text>
                   <TextInput
                     style={{
@@ -1804,6 +2043,55 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                     placeholderTextColor={COLORS.textMuted || '#64748b'}
                   />
                 </View>
+
+                {/* Admin margins on this combo (one per level above the operator) */}
+                {comboAdminChain.length ? (
+                  <View style={{ padding: 12, borderRadius: 8, backgroundColor: 'rgba(236,72,153,0.05)', borderWidth: 1, borderColor: 'rgba(236,72,153,0.25)', gap: 10 }}>
+                    <Text style={{ fontSize: 12, fontWeight: '700', color: '#be185d' }}>MARGINS ON THIS COMBO</Text>
+                    {comboAdminChain.map((a) => (
+                      <View key={a.partner_id} style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textMain }} numberOfLines={1}>{a.label}</Text>
+                          <Text style={{ fontSize: 11, color: COLORS.textMuted }} numberOfLines={1}>{a.partner_name}</Text>
+                        </View>
+                        <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMain }}>+ ₹</Text>
+                        <TextInput
+                          style={{ width: 100, height: 36, borderRadius: 8, borderWidth: 1, borderColor: COLORS.border || '#334155', paddingHorizontal: 10, textAlign: 'right', fontSize: 14, fontWeight: '700', color: COLORS.textMain, backgroundColor: '#ffffff' }}
+                          value={(comboForm.margins || {})[a.partner_id] ?? ''}
+                          onChangeText={(text) => setComboForm((prev) => ({ ...prev, margins: { ...(prev.margins || {}), [a.partner_id]: text.replace(/[^0-9.]/g, '') } }))}
+                          placeholder="0"
+                          keyboardType="numeric"
+                          placeholderTextColor={COLORS.textMuted || '#64748b'}
+                        />
+                      </View>
+                    ))}
+                    <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 8, borderTopWidth: 1, borderTopColor: 'rgba(236,72,153,0.2)' }}>
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMain }}>Operator combo price</Text>
+                      <Text style={{ fontSize: 16, fontWeight: '800', color: '#db2777' }}>₹{comboOperatorTotal().toFixed(2)}</Text>
+                    </View>
+                    <Text style={{ fontSize: 11, color: COLORS.textMuted }}>The operator pays this price; each level gets its margin in its wallet on every recharge of this combo.</Text>
+                  </View>
+                ) : null}
+
+                {/* Price check: separate prices vs the combo price */}
+                {(() => {
+                  const selI = inetList.find((i) => String(i.sub_plan_id) === String(comboForm.isub_plan_id));
+                  const selT = iptvList.find((i) => String(i.sub_plan_id) === String(comboForm.iptvsub_plan_id));
+                  if (!selI || !selT) return null;
+                  const separate = Number(selI.price || 0) + Number(selT.price || 0);
+                  const combo = comboAdminChain.length ? comboOperatorTotal() : Number(comboForm.price || 0);
+                  const saving = separate - combo;
+                  return (
+                    <View style={{ padding: 10, borderRadius: 8, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', gap: 4 }}>
+                      <Text style={{ fontSize: 12, color: '#475569' }}>Internet ₹{Number(selI.price || 0).toFixed(2)} + IPTV ₹{Number(selT.price || 0).toFixed(2)} = <Text style={{ fontWeight: '800' }}>₹{separate.toFixed(2)}</Text> separately</Text>
+                      {combo > 0 ? (
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: saving >= 0 ? '#047857' : '#dc2626' }}>
+                          {saving >= 0 ? `Customer saves ₹${saving.toFixed(2)} with this combo` : `Combo is ₹${Math.abs(saving).toFixed(2)} more than buying separately`}
+                        </Text>
+                      ) : null}
+                    </View>
+                  );
+                })()}
 
                 {/* Active Toggle */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
@@ -1886,7 +2174,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
           </View>
 
           <Text style={{ fontSize: 13, color: COLORS.textMuted || '#94a3b8', marginBottom: 12 }}>
-            Enter a new password or accept the generated password for this partner.
+            Type a new password (8+ characters), or leave it empty and the server will generate a strong one. It is shown once after the reset.
           </Text>
 
           <View style={{ marginBottom: 20 }}>
@@ -1897,7 +2185,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 value={partnerNewPass}
                 onChangeText={setPartnerNewPass}
                 secureTextEntry={!showPartnerPass}
-                placeholder="Enter new password"
+                placeholder="Leave empty to auto-generate"
                 placeholderTextColor={COLORS.textMuted || '#64748b'}
               />
               <TouchableOpacity onPress={() => setShowPartnerPass(!showPartnerPass)} style={{ padding: 6 }}>
@@ -1943,7 +2231,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       <Modal visible={!!confirmStatusPartner} transparent animationType="fade" onRequestClose={() => setConfirmStatusPartner(null)}>
         <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: 20 }}>
           <View style={{ backgroundColor: '#ffffff', borderRadius: 16, padding: 24, maxWidth: 440, width: '100%', borderWidth: 1, borderColor: COLORS.glassBorder }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16, maxWidth: '100%' }}>
               <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: isCurrentlyEnabled ? 'rgba(239, 68, 68, 0.12)' : 'rgba(16, 185, 129, 0.12)', alignItems: 'center', justifyContent: 'center' }}>
                 <Feather name={isCurrentlyEnabled ? "alert-triangle" : "check-circle"} size={22} color={isCurrentlyEnabled ? "#ef4444" : "#10b981"} />
               </View>
@@ -1988,6 +2276,114 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     return !q || plan.plan_name?.toLowerCase().includes(q) || String(plan.plan_id).includes(q);
   });
 
+  // ---- Package cards for the plan pages (PlanCardList: card per package, options in a table) ----
+  // Read-only viewers (admins) only see what is assigned to the operator.
+  const internetGroups = () =>
+    filteredInternetPlans
+      .map((plan) => {
+        const planId = plan.plan_id || plan.id;
+        const subs = (plan.subplans || []).filter((sub) => !readOnly || sub.is_mapped);
+        return {
+          key: planId,
+          plan,
+          title: plan.plan_name,
+          meta: `Data: ${plan.data || 'Unlimited'} | Plan ID: #${planId}`,
+          rows: subs.map((sub) => ({
+            kind: 'plan',
+            id: sub.sub_plan_id || sub.id,
+            title: sub.sub_plan_name,
+            validity: sub.plan_validity || 30,
+            basePrice: sub.base_price,
+            saPrice: sub.sa_price,
+            mappedPrice: sub.mapped_price,
+            margins: sub.margins,
+          })),
+        };
+      })
+      .filter((g) => g.rows.length || !readOnly);
+  // IPTV packs grouped like internet plans: one card per pack, its validities (1 / 3 / 6 months...) inside.
+  const iptvGroups = () => {
+    const byPack = new Map();
+    filteredIptvPlans
+      .filter((plan) => !readOnly || plan.is_mapped)
+      .forEach((plan) => {
+        const key = plan.plan_id || plan.sub_plan_id || plan.id;
+        if (!byPack.has(key)) {
+          byPack.set(key, { key, title: plan.plan_name, typeLabel: plan.type || 'A-la-carte', meta: `Pack ID: #${key}`, rows: [] });
+        }
+        const days = plan.plan_validity || 30;
+        byPack.get(key).rows.push({
+          kind: 'plan',
+          id: plan.sub_plan_id || plan.plan_id || plan.id,
+          title: `${days} Days`,
+          basePrice: plan.base_price,
+          saPrice: plan.sa_price,
+          mappedPrice: plan.mapped_price,
+          margins: plan.margins,
+        });
+      });
+    return [...byPack.values()];
+  };
+  const selectOnEdit = (ids, setIds, id) => {
+    if (!ids.includes(id)) setIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+  };
+
+  // ---- Hierarchy pricing UI (operator plan pages) ----
+  // Operator price = super admin price (the box next to the plan) + one margin per admin above
+  // the operator (Super Distributor, Distributor, Sub Distributor — whichever exist).
+  // Super admin edits; an admin sees its own margin + the operator price; nothing for no admins.
+  // Explains the levels and offers "same margin for all selected" (super admin).
+  const renderMarginBulkBar = (chain, setMarginState, selectedIds, accent) => {
+    if (!chain.length) return null;
+    return (
+      <View style={{ padding: 12, borderRadius: 10, marginBottom: 16, backgroundColor: `${accent}0d`, borderWidth: 1, borderColor: `${accent}33`, gap: 8 }}>
+        <Text style={{ fontSize: 12.5, color: COLORS.textMain }}>
+          Super Admin › {chain.map((a) => `${a.label}: ${a.partner_name}`).join(' › ')} › this operator.{' '}
+          {isSuperAdminUser
+            ? 'The box next to each plan is the super admin price (the fetched price by default). Add each level\'s margin; the operator price is the total. On every recharge each level gets its margin in its wallet.'
+            : 'Prices are set by the super admin.'}
+        </Text>
+        {isSuperAdminUser ? (
+          <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+            <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748b' }}>SAME MARGIN FOR ALL SELECTED</Text>
+            {chain.map((a) => (
+              <View key={a.partner_id} style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                <Text style={{ fontSize: 11, color: COLORS.textMain }}>{a.label}</Text>
+                <TextInput
+                  style={{ width: 64, height: 28, paddingHorizontal: 6, fontSize: 12, fontWeight: '700', borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)', borderRadius: 6, backgroundColor: '#ffffff', textAlign: 'right' }}
+                  value={bulkMargins[a.partner_id] || ''}
+                  onChangeText={(val) => setBulkMargins((prev) => ({ ...prev, [a.partner_id]: val.replace(/[^0-9.]/g, '') }))}
+                  keyboardType="numeric"
+                  placeholder="₹0"
+                  placeholderTextColor={COLORS.textDim}
+                />
+              </View>
+            ))}
+            <TouchableOpacity
+              style={{ paddingHorizontal: 12, paddingVertical: 7, borderRadius: 6, backgroundColor: accent, opacity: selectedIds.length ? 1 : 0.5 }}
+              disabled={!selectedIds.length}
+              onPress={() => {
+                setMarginState((prev) => {
+                  const next = { ...prev };
+                  selectedIds.forEach((id) => {
+                    next[id] = { ...(next[id] || {}) };
+                    chain.forEach((a) => {
+                      if (bulkMargins[a.partner_id] !== undefined && bulkMargins[a.partner_id] !== '') next[id][a.partner_id] = bulkMargins[a.partner_id];
+                    });
+                  });
+                  return next;
+                });
+                toast.info(`Margins applied to ${selectedIds.length} selected plan(s). Press Assign to save.`);
+              }}
+            >
+              <Text style={{ fontSize: 12, fontWeight: '700', color: '#ffffff' }}>Apply to {selectedIds.length} selected</Text>
+            </TouchableOpacity>
+          </View>
+        ) : null}
+      </View>
+    );
+  };
+
   const filteredIptvPlans = iptvPlans.filter((plan) => {
     const q = searchIptvPlan.toLowerCase().trim();
     const planType = (plan.type || '').toLowerCase().trim();
@@ -2010,6 +2406,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         visible={true}
         onClose={handleCloseCreate}
         initialRole={createRole}
+        canCreateAdmin={isSuperAdminUser}
+        parentId={createParentId}
         onAccountCreated={(p) => {
           handleCloseCreate();
           handleAccountCreated(p);
@@ -2093,49 +2491,23 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
               />
             </View>
 
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>KYC PROVIDER MAPPING</Text>
-              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-                {['Signzy', 'Decentro', 'HyperVerge', 'Karza', 'Manual KYC', 'Disabled'].map((prov) => (
-                  <TouchableOpacity
-                    key={prov}
-                    style={[
-                      styles.roleChip,
-                      editForm.kyc_provider === prov && styles.roleChipActive,
-                      { paddingHorizontal: 10, paddingVertical: 6 }
-                    ]}
-                    onPress={() => setEditForm((prev) => ({ ...prev, kyc_provider: prov }))}
-                  >
-                    <Text style={[styles.roleChipText, editForm.kyc_provider === prov && styles.roleChipTextActive, { fontSize: 11 }]}>
-                      {prov}
-                    </Text>
-                  </TouchableOpacity>
-                ))}
+            {String(editingPartner?.account_role || editingPartner?.role || '').toLowerCase() === 'operator' ? (
+              <View style={styles.formGroup}>
+                <Text style={styles.formLabel}>OTT FRANCHISE ID (OTTAGGRE)</Text>
+                <TextInput
+                  style={styles.formInput}
+                  value={editForm.ott_franchise_id || ''}
+                  onChangeText={(val) => setEditForm((prev) => ({ ...prev, ott_franchise_id: val }))}
+                  placeholder="e.g. F1001 — leave empty if this operator doesn't sell OTT"
+                  placeholderTextColor={COLORS.textDim}
+                  autoCapitalize="none"
+                />
               </View>
-            </View>
+            ) : null}
 
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>IPTV BRANCH ID / MAPPING</Text>
-              <TextInput
-                style={styles.formInput}
-                value={editForm.iptv_branch_id}
-                onChangeText={(val) => setEditForm((prev) => ({ ...prev, iptv_branch_id: val }))}
-                placeholder="Enter Upstream IPTV Branch ID"
-                placeholderTextColor={COLORS.textDim}
-              />
-            </View>
-
-            <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>WALLET BALANCE (₹)</Text>
-              <TextInput
-                style={styles.formInput}
-                value={editForm.wallet_balance}
-                onChangeText={(val) => setEditForm((prev) => ({ ...prev, wallet_balance: val }))}
-                placeholder="Wallet balance"
-                keyboardType="numeric"
-                placeholderTextColor={COLORS.textDim}
-              />
-            </View>
+            <Text style={[styles.formLabel, { textTransform: 'none', fontWeight: '500', marginBottom: 12 }]}>
+              Wallet, KYC providers and IPTV branches are changed from the partner page, so every change is recorded.
+            </Text>
 
             <View style={styles.formGroup}>
               <Text style={styles.formLabel}>ACCOUNT STATUS</Text>
@@ -2185,12 +2557,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
           </View>
 
           <View style={{ marginVertical: 16 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 16, maxWidth: '100%' }}>
               <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(16, 185, 129, 0.12)', alignItems: 'center', justifyContent: 'center' }}>
                 <Text style={{ fontSize: 24, fontWeight: '700', color: '#10b981' }}>₹</Text>
               </View>
-              <View>
-                <Text style={{ fontSize: 22, fontWeight: '700', color: COLORS.textMain }}>Operator Wallet & Transaction History</Text>
+              <View style={{ flexShrink: 1, minWidth: 0 }}>
+                <Text style={{ fontSize: isMobile ? 18 : 22, fontWeight: '700', color: COLORS.textMain }}>Operator Wallet & Transaction History</Text>
                 <Text style={{ fontSize: 14, color: COLORS.textMuted }}>{walletPartner.partner_name} (#{walletPartner.partner_id})</Text>
               </View>
             </View>
@@ -2203,7 +2575,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
               </Text>
             </View>
 
-            {/* Topup / Debit Form */}
+            {/* Topup / Debit Form (super admin only — admins see the history) */}
+            {!readOnly ? (
             <View style={styles.topupFormContainer}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
                 <Text style={{ fontSize: 15, fontWeight: '700', color: COLORS.textMain }}>
@@ -2301,6 +2674,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 </TouchableOpacity>
               </View>
             </View>
+            ) : null}
 
             {/* Ledger Section */}
             <View style={{ marginTop: 24 }}>
@@ -2364,20 +2738,20 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
           <View style={{ marginVertical: 12 }}>
             {/* TOP TITLE & CONTROL BAR */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 14, marginBottom: 20 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 1, maxWidth: '100%' }}>
                 <View style={{ width: 48, height: 48, borderRadius: 12, backgroundColor: 'rgba(6, 182, 212, 0.12)', alignItems: 'center', justifyContent: 'center' }}>
                   <Feather name="wifi" size={24} color="#06b6d4" />
                 </View>
-                <View>
-                  <Text style={{ fontSize: 22, fontWeight: '700', color: COLORS.textMain }}>Internet Plans Catalog</Text>
+                <View style={{ flexShrink: 1, minWidth: 0 }}>
+                  <Text style={{ fontSize: isMobile ? 18 : 22, fontWeight: '700', color: COLORS.textMain }}>Internet Plans Catalog</Text>
                   <Text style={{ fontSize: 13, color: COLORS.textMuted }}>
                     Partner #{internetPlansPartner.partner_id} ({internetPlansPartner.partner_name})
                   </Text>
                 </View>
               </View>
 
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <View style={[styles.searchBox, { minWidth: 240, height: 42 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', width: isMobile ? '100%' : 'auto' }}>
+                <View style={[styles.searchBox, { minWidth: 240, height: 42 }, isMobile && { minWidth: 0, width: '100%', maxWidth: '100%', flexBasis: '100%' }]}>
                   <Feather name="search" size={14} color={COLORS.textDim} />
                   <TextInput
                     style={[styles.searchInput, { fontSize: 13 }]}
@@ -2403,6 +2777,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   <Text style={{ fontSize: 13, fontWeight: '600', color: '#64748b' }}>Collapse All</Text>
                 </TouchableOpacity>
 
+                {!readOnly ? (<>
                 <TouchableOpacity
                   style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)' }}
                   onPress={handleSelectAllSubPlans}
@@ -2416,7 +2791,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 >
                   <Text style={{ fontSize: 13, fontWeight: '600', color: '#64748b' }}>Deselect All</Text>
                 </TouchableOpacity>
+                </>) : null}
 
+                {!readOnly ? (
                 <TouchableOpacity
                   style={[styles.btnPrimary, { backgroundColor: '#10b981', paddingHorizontal: 16 }]}
                   onPress={handleSaveInternetPlanMapping}
@@ -2433,8 +2810,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                     </>
                   )}
                 </TouchableOpacity>
+                ) : null}
               </View>
             </View>
+
+            {renderMarginBulkBar(inetAdminChain, setInetMargins, selectedSubPlanIds, '#0284c7')}
 
             {loadingInternetPlans ? (
               <ActivityIndicator size="large" color="#06b6d4" style={{ marginVertical: 40 }} />
@@ -2444,182 +2824,31 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 <Text style={styles.emptyText}>No broadband plans matched your search filter.</Text>
               </View>
             ) : (
-              /* EXPANDABLE BROADBAND PLAN CARDS LIST */
-              <View style={{ gap: 14 }}>
-                {filteredInternetPlans.map((plan) => {
-                  const planId = plan.plan_id || plan.id;
-                  const packageSubIds = (plan.subplans || []).map((s) => s.sub_plan_id || s.id);
-                  const selectedInPackageCount = packageSubIds.filter((id) => selectedSubPlanIds.includes(id)).length;
-                  const isAllPackageSelected = packageSubIds.length > 0 && selectedInPackageCount === packageSubIds.length;
-                  const isExpanded = expandedPlanIds.includes(planId) || searchInetPlan.trim().length > 0;
-
-                  return (
-                    <View
-                      key={planId}
-                      style={{
-                        backgroundColor: '#ffffff',
-                        borderRadius: 14,
-                        borderWidth: 1,
-                        borderColor: isExpanded ? 'rgba(6, 182, 212, 0.4)' : 'rgba(0,0,0,0.08)',
-                        overflow: 'hidden',
-                        boxShadow: '0px 4px 12px rgba(0,0,0,0.03)',
-                      }}
-                    >
-                      {/* MAIN PLAN HEADER (CLICK TO EXPAND / COLLAPSE) */}
-                      <TouchableOpacity
-                        activeOpacity={0.7}
-                        onPress={() => toggleExpandPlan(planId)}
-                        style={{
-                          flexDirection: 'row',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          padding: 16,
-                          backgroundColor: isExpanded ? '#f8fafc' : '#ffffff',
-                        }}
-                      >
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 }}>
-                          <View
-                            style={{
-                              width: 40,
-                              height: 40,
-                              borderRadius: 10,
-                              backgroundColor: isExpanded ? 'rgba(6, 182, 212, 0.15)' : 'rgba(6, 182, 212, 0.08)',
-                              justifyContent: 'center',
-                              alignItems: 'center',
-                            }}
-                          >
-                            <Feather name="zap" size={20} color="#06b6d4" />
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                              <Text style={{ fontSize: 16, fontWeight: '700', color: '#000000' }}>{plan.plan_name}</Text>
-                              <View style={{ backgroundColor: '#e0f2fe', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                                <Text style={{ fontSize: 11, fontWeight: '600', color: '#0369a1' }}>
-                                  {plan.subplans?.length || 0} {plan.subplans?.length === 1 ? 'Option' : 'Options'}
-                                </Text>
-                              </View>
-                              {selectedInPackageCount > 0 && (
-                                <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', paddingHorizontal: 8, paddingVertical: 2, borderRadius: 6 }}>
-                                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>
-                                    {selectedInPackageCount} Selected
-                                  </Text>
-                                </View>
-                              )}
-                            </View>
-                            <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>
-                              Data: {plan.data || 'Unlimited'} | Plan ID: #{planId}
-                            </Text>
-                          </View>
-                        </View>
-
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                          {/* TOGGLE ALL SUBPLANS IN THIS PACKAGE */}
-                          {packageSubIds.length > 0 && (
-                            <TouchableOpacity
-                              onPress={(e) => {
-                                e?.stopPropagation?.();
-                                toggleAllSubPlansInPackage(plan);
-                              }}
-                              style={{
-                                flexDirection: 'row',
-                                alignItems: 'center',
-                                gap: 6,
-                                paddingHorizontal: 10,
-                                paddingVertical: 6,
-                                borderRadius: 6,
-                                backgroundColor: isAllPackageSelected ? 'rgba(16, 185, 129, 0.12)' : '#f1f5f9',
-                                borderWidth: 1,
-                                borderColor: isAllPackageSelected ? '#10b981' : 'rgba(0,0,0,0.08)',
-                              }}
-                            >
-                              <Feather name={isAllPackageSelected ? 'check-square' : 'square'} size={13} color={isAllPackageSelected ? '#10b981' : '#64748b'} />
-                              <Text style={{ fontSize: 11, fontWeight: '600', color: isAllPackageSelected ? '#10b981' : '#64748b' }}>
-                                {isAllPackageSelected ? 'All Selected' : 'Select All Options'}
-                              </Text>
-                            </TouchableOpacity>
-                          )}
-
-                          <View style={{ width: 32, height: 32, borderRadius: 8, backgroundColor: isExpanded ? 'rgba(6, 182, 212, 0.15)' : '#f1f5f9', justifyContent: 'center', alignItems: 'center' }}>
-                            <Feather name={isExpanded ? 'minus' : 'plus'} size={18} color={isExpanded ? '#06b6d4' : '#000000'} />
-                          </View>
-                        </View>
-                      </TouchableOpacity>
-
-                      {/* EXPANDABLE OPTIONS CONTENT */}
-                      {isExpanded && plan.subplans && plan.subplans.length > 0 && (
-                        <View style={{ padding: 16, borderTopWidth: 1, borderTopColor: '#f1f5f9', backgroundColor: '#ffffff', gap: 10 }}>
-                          {plan.subplans.map((sub) => {
-                            const subId = sub.sub_plan_id || sub.id;
-                            const isSelected = selectedSubPlanIds.includes(subId);
-                            return (
-                              <TouchableOpacity
-                                key={subId}
-                                onPress={() => toggleSubPlanSelection(subId)}
-                                style={{
-                                  flexDirection: 'row',
-                                  justifyContent: 'space-between',
-                                  alignItems: 'center',
-                                  padding: 12,
-                                  borderRadius: 10,
-                                  backgroundColor: isSelected ? 'rgba(16, 185, 129, 0.08)' : '#f8fafc',
-                                  borderWidth: 1,
-                                  borderColor: isSelected ? '#10b981' : 'rgba(0,0,0,0.06)',
-                                }}
-                              >
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                                  <Feather
-                                    name={isSelected ? 'check-square' : 'square'}
-                                    size={16}
-                                    color={isSelected ? '#10b981' : '#94a3b8'}
-                                  />
-                                  <View>
-                                    <Text style={{ fontSize: 13, fontWeight: isSelected ? '700' : '600', color: '#000000' }}>{sub.sub_plan_name}</Text>
-                                    <Text style={{ fontSize: 11, color: COLORS.textMuted, marginTop: 1 }}>
-                                      {sub.plan_validity ? `Validity: ${sub.plan_validity} Days` : 'Validity: 30 Days'}
-                                      {'  •  '}
-                                      Base Price: ₹{sub.base_price !== null && sub.base_price !== undefined ? sub.base_price : '0'}
-                                    </Text>
-                                  </View>
-                                </View>
-
-                                <View style={{ alignItems: 'flex-end' }}>
-                                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                    <Text style={{ fontSize: 12, fontWeight: '700', color: isSelected ? '#10b981' : '#000000' }}>₹</Text>
-                                    <TextInput
-                                      style={{
-                                        minWidth: 75,
-                                        height: 30,
-                                        paddingHorizontal: 6,
-                                        fontSize: 13,
-                                        fontWeight: '700',
-                                        color: isSelected ? '#10b981' : '#000000',
-                                        backgroundColor: '#ffffff',
-                                        borderWidth: 1,
-                                        borderColor: isSelected ? '#10b981' : 'rgba(0,0,0,0.15)',
-                                        borderRadius: 6,
-                                        textAlign: 'right',
-                                      }}
-                                      value={customPrices[subId] !== undefined ? String(customPrices[subId]) : String(sub.mapped_price !== null && sub.mapped_price !== undefined ? sub.mapped_price : (sub.base_price || '0'))}
-                                      onChangeText={(val) => {
-                                        setCustomPrices((prev) => ({ ...prev, [subId]: val }));
-                                        if (!selectedSubPlanIds.includes(subId)) {
-                                          setSelectedSubPlanIds((prev) => [...prev, subId]);
-                                        }
-                                      }}
-                                      keyboardType="numeric"
-                                      placeholder="0"
-                                    />
-                                  </View>
-                                </View>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-                      )}
-                    </View>
-                  );
-                })}
-              </View>
+              /* EXPANDABLE BROADBAND PLAN CARDS (options of an expanded card in a price table) */
+              <PlanCardList
+                groups={internetGroups()}
+                expandedKeys={expandedPlanIds}
+                onToggleExpand={toggleExpandPlan}
+                forceExpanded={searchInetPlan.trim().length > 0}
+                onToggleGroup={(g) => toggleAllSubPlansInPackage(g.plan)}
+                icon="zap"
+                accent="#06b6d4"
+                chain={inetAdminChain}
+                mode={readOnly ? 'view' : 'edit'}
+                viewerId={user?.partner_id}
+                selectedIds={selectedSubPlanIds}
+                onToggle={toggleSubPlanSelection}
+                saPriceOf={(r) => customPrices[r.id] ?? r.saPrice ?? r.basePrice ?? ''}
+                onSaPriceChange={(id, val) => {
+                  setCustomPrices((prev) => ({ ...prev, [id]: val }));
+                  selectOnEdit(selectedSubPlanIds, setSelectedSubPlanIds, id);
+                }}
+                marginState={inetMargins}
+                onMarginChange={(id, adminId, val) => {
+                  setInetMargins((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), [adminId]: val } }));
+                  selectOnEdit(selectedSubPlanIds, setSelectedSubPlanIds, id);
+                }}
+              />
             )}
           </View>
         </ScrollView>
@@ -2628,6 +2857,21 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   }
 
   // 5. FULL SCREEN IPTV PLANS CATALOG VIEW
+  if (ottPlansPartner) {
+    return <OttPlansPage partner={ottPlansPartner} onBack={() => setOttPlansPartner(null)} />;
+  }
+
+  if (customerPricesPartner) {
+    return (
+      <CustomerPricesPage
+        partnerId={customerPricesPartner.partner_id}
+        partnerName={customerPricesPartner.partner_name}
+        readOnly={!isSuperAdminUser}
+        onBack={() => setCustomerPricesPartner(null)}
+      />
+    );
+  }
+
   if (iptvPlansPartner) {
     const mappedCount = selectedIptvPlanIds.length;
     return (
@@ -2636,27 +2880,27 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
           <View style={styles.detailsHeaderRow}>
             <TouchableOpacity style={styles.backBtn} onPress={handleCloseIptvPlans}>
               <Feather name="arrow-left" size={18} color={COLORS.textMain} />
-              <Text style={styles.backBtnText}>Back to Partners List</Text>
+              <Text style={styles.backBtnText}>Back</Text>
             </TouchableOpacity>
           </View>
 
           <View style={{ marginVertical: 16 }}>
             {/* Header Title Section */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 1, maxWidth: '100%' }}>
                 <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(139, 92, 246, 0.12)', alignItems: 'center', justifyContent: 'center' }}>
                   <Feather name="tv" size={22} color="#8b5cf6" />
                 </View>
-                <View>
-                  <Text style={{ fontSize: 22, fontWeight: '700', color: COLORS.textMain }}>IPTV Channel & Pack Catalog</Text>
+                <View style={{ flexShrink: 1, minWidth: 0 }}>
+                  <Text style={{ fontSize: isMobile ? 18 : 22, fontWeight: '700', color: COLORS.textMain }}>IPTV Channel & Pack Catalog</Text>
                   <Text style={{ fontSize: 14, color: COLORS.textMuted }}>
                     Pioneer STB Gateway - Partner #{iptvPlansPartner.partner_id} ({iptvPlansPartner.partner_name})
                   </Text>
                 </View>
               </View>
 
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <View style={[styles.searchBox, { minWidth: 200, height: 42 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', width: isMobile ? '100%' : 'auto' }}>
+                <View style={[styles.searchBox, { minWidth: 200, height: 42 }, isMobile && { minWidth: 0, width: '100%', maxWidth: '100%', flexBasis: '100%' }]}>
                   <Feather name="search" size={14} color={COLORS.textDim} />
                   <TextInput
                     style={[styles.searchInput, { fontSize: 13 }]}
@@ -2667,7 +2911,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   />
                 </View>
 
-                <View style={{ flexDirection: 'row', gap: 6 }}>
+                <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
                   {[
                     { id: '', label: 'All' },
                     { id: 'DPO', label: 'DPO' },
@@ -2686,6 +2930,48 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   ))}
                 </View>
 
+                <TouchableOpacity
+                  style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)' }}
+                  onPress={() => setExpandedIptvIds(iptvGroups().map((g) => g.key))}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#7c3aed' }}>Expand All</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)' }}
+                  onPress={() => setExpandedIptvIds([])}
+                >
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#64748b' }}>Collapse All</Text>
+                </TouchableOpacity>
+
+                {isSuperAdminUser ? (
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(139,92,246,0.35)', opacity: loadingIptvPlans ? 0.6 : 1 }}
+                    onPress={handleSyncIptvPlansAction}
+                    disabled={loadingIptvPlans}
+                  >
+                    {loadingIptvPlans ? <ActivityIndicator size="small" color="#7c3aed" /> : <Feather name="refresh-cw" size={15} color="#7c3aed" />}
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: '#7c3aed' }}>Sync Packages</Text>
+                  </TouchableOpacity>
+                ) : null}
+
+                {!readOnly && (() => {
+                  const shownIds = filteredIptvPlans.map((p) => p.sub_plan_id || p.plan_id || p.id);
+                  const allOn = shownIds.length > 0 && shownIds.every((id) => selectedIptvPlanIds.includes(id));
+                  return (
+                    <TouchableOpacity
+                      style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, backgroundColor: '#f5f3ff', borderWidth: 1, borderColor: 'rgba(139,92,246,0.35)', opacity: shownIds.length ? 1 : 0.5 }}
+                      onPress={allOn ? handleDeselectAllIptvPlans : handleSelectAllIptvPlans}
+                      disabled={!shownIds.length}
+                    >
+                      <Feather name={allOn ? 'square' : 'check-square'} size={15} color="#7c3aed" />
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#7c3aed' }}>
+                        {allOn ? 'Deselect All' : `Select All (${shownIds.length})`}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })()}
+
+                {!readOnly ? (
                 <TouchableOpacity
                   style={{
                     backgroundColor: '#8b5cf6',
@@ -2711,8 +2997,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                     </>
                   )}
                 </TouchableOpacity>
+                ) : null}
               </View>
             </View>
+
+            {renderMarginBulkBar(iptvAdminChain, setIptvMargins, selectedIptvPlanIds, '#7c3aed')}
 
             {loadingIptvPlans ? (
               <ActivityIndicator size="large" color="#8b5cf6" style={{ marginVertical: 40 }} />
@@ -2722,88 +3011,34 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 <Text style={styles.emptyText}>No IPTV channel packages returned for this partner query.</Text>
               </View>
             ) : (
-              <View style={styles.iptvGridContainer}>
-                {filteredIptvPlans.map((plan) => {
-                  const pId = plan.sub_plan_id || plan.plan_id || plan.id;
-                  const isSelected = selectedIptvPlanIds.includes(pId);
-                  const isPackage = (plan.type || '').toLowerCase() === 'package';
-                  return (
-                    <View
-                      key={pId}
-                      style={[
-                        styles.iptvItemCard,
-                        isSelected && { borderColor: '#8b5cf6', backgroundColor: 'rgba(139, 92, 246, 0.03)' },
-                      ]}
-                    >
-                      <TouchableOpacity
-                        style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', gap: 10 }}
-                        onPress={() => toggleIptvPlanSelection(pId)}
-                      >
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                          <View
-                            style={{
-                              width: 20,
-                              height: 20,
-                              borderRadius: 4,
-                              borderWidth: 2,
-                              borderColor: isSelected ? '#8b5cf6' : '#cbd5e1',
-                              backgroundColor: isSelected ? '#8b5cf6' : 'transparent',
-                              justifyContent: 'center',
-                              alignItems: 'center',
-                            }}
-                          >
-                            {isSelected && <Feather name="check" size={14} color="#ffffff" />}
-                          </View>
-                          <Text style={[styles.iptvPlanTitle, { flex: 1 }]} numberOfLines={1}>{plan.plan_name}</Text>
-                        </View>
-                        <View style={[styles.typeBadge, isPackage ? { backgroundColor: 'rgba(139, 92, 246, 0.15)' } : { backgroundColor: 'rgba(245, 158, 11, 0.15)' }]}>
-                          <Text style={[styles.typeBadgeText, isPackage ? { color: '#8b5cf6' } : { color: '#d97706' }]}>
-                            {plan.type || 'A-la-carte'}
-                          </Text>
-                        </View>
-                      </TouchableOpacity>
-
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 14, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.06)' }}>
-                        <View>
-                          <Text style={styles.iptvValidity}>
-                            Validity: {plan.plan_validity || 30} Days
-                            {'  •  '}
-                            Base Price: ₹{plan.base_price !== undefined ? plan.base_price : '0'}
-                          </Text>
-                        </View>
-
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                          <Text style={{ fontSize: 12, fontWeight: '700', color: isSelected ? '#8b5cf6' : '#000000' }}>₹</Text>
-                          <TextInput
-                            style={{
-                              minWidth: 75,
-                              height: 30,
-                              paddingHorizontal: 6,
-                              fontSize: 13,
-                              fontWeight: '700',
-                              color: isSelected ? '#8b5cf6' : '#000000',
-                              backgroundColor: '#ffffff',
-                              borderWidth: 1,
-                              borderColor: isSelected ? '#8b5cf6' : 'rgba(0,0,0,0.15)',
-                              borderRadius: 6,
-                              textAlign: 'right',
-                            }}
-                            value={customIptvPrices[pId] !== undefined ? String(customIptvPrices[pId]) : String(plan.mapped_price !== undefined ? plan.mapped_price : (plan.base_price || '0'))}
-                            onChangeText={(val) => {
-                              setCustomIptvPrices((prev) => ({ ...prev, [pId]: val }));
-                              if (!selectedIptvPlanIds.includes(pId)) {
-                                setSelectedIptvPlanIds((prev) => [...prev, pId]);
-                              }
-                            }}
-                            keyboardType="numeric"
-                            placeholder="0"
-                          />
-                        </View>
-                      </View>
-                    </View>
-                  );
-                })}
-              </View>
+              /* IPTV PACK CARDS, same as internet (validities of an expanded pack in a price table) */
+              <PlanCardList
+                groups={iptvGroups()}
+                expandedKeys={expandedIptvIds}
+                onToggleExpand={(key) => setExpandedIptvIds((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))}
+                forceExpanded={searchIptvPlan.trim().length > 0}
+                onToggleGroup={(g, allSelected) => {
+                  const ids = g.rows.map((r) => r.id);
+                  setSelectedIptvPlanIds((prev) => (allSelected ? prev.filter((id) => !ids.includes(id)) : [...new Set([...prev, ...ids])]));
+                }}
+                icon="tv"
+                accent="#8b5cf6"
+                chain={iptvAdminChain}
+                mode={readOnly ? 'view' : 'edit'}
+                viewerId={user?.partner_id}
+                selectedIds={selectedIptvPlanIds}
+                onToggle={toggleIptvPlanSelection}
+                saPriceOf={(r) => customIptvPrices[r.id] ?? r.saPrice ?? r.basePrice ?? ''}
+                onSaPriceChange={(id, val) => {
+                  setCustomIptvPrices((prev) => ({ ...prev, [id]: val }));
+                  selectOnEdit(selectedIptvPlanIds, setSelectedIptvPlanIds, id);
+                }}
+                marginState={iptvMargins}
+                onMarginChange={(id, adminId, val) => {
+                  setIptvMargins((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), [adminId]: val } }));
+                  selectOnEdit(selectedIptvPlanIds, setSelectedIptvPlanIds, id);
+                }}
+              />
             )}
           </View>
         </ScrollView>
@@ -2818,8 +3053,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       if (!q) return true;
       return (
         item.combo_name?.toLowerCase().includes(q) ||
-        item.internet_plan_name?.toLowerCase().includes(q) ||
-        item.iptv_plan_name?.toLowerCase().includes(q) ||
+        (item.internet?.plan_name || item.internet_plan_name || '').toLowerCase().includes(q) ||
+        (item.iptv?.plan_name || item.iptv_plan_name || '').toLowerCase().includes(q) ||
         String(item.combo_id || item.id || '').includes(q)
       );
     });
@@ -2830,27 +3065,27 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
           <View style={styles.detailsHeaderRow}>
             <TouchableOpacity style={styles.backBtn} onPress={handleCloseComboPlans}>
               <Feather name="arrow-left" size={18} color={COLORS.textMain} />
-              <Text style={styles.backBtnText}>Back to Partners List</Text>
+              <Text style={styles.backBtnText}>Back</Text>
             </TouchableOpacity>
           </View>
 
           <View style={{ marginVertical: 16 }}>
             {/* Header Title Section */}
             <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 1, maxWidth: '100%' }}>
                 <View style={{ width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(236, 72, 153, 0.12)', alignItems: 'center', justifyContent: 'center' }}>
                   <Feather name="layers" size={22} color="#ec4899" />
                 </View>
-                <View>
-                  <Text style={{ fontSize: 22, fontWeight: '700', color: COLORS.textMain }}>Combo Plans Catalog</Text>
-                  <Text style={{ fontSize: 14, color: COLORS.textMuted }}>
-                    Broadband + IPTV Bundling - Partner #{comboPlansPartner.partner_id} ({comboPlansPartner.partner_name})
+                <View style={{ flexShrink: 1, minWidth: 0 }}>
+                  <Text style={{ fontSize: isMobile ? 18 : 22, fontWeight: '700', color: COLORS.textMain }}>Combo Plans</Text>
+                  <Text style={{ fontSize: 13, color: COLORS.textMuted }}>
+                    Internet + IPTV bundles for {comboPlansPartner.partner_name} (#{comboPlansPartner.partner_id})
                   </Text>
                 </View>
               </View>
 
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <View style={[styles.searchBox, { minWidth: 220, height: 42 }]}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', width: isMobile ? '100%' : 'auto' }}>
+                <View style={[styles.searchBox, { minWidth: 220, height: 42 }, isMobile && { minWidth: 0, width: '100%', maxWidth: '100%', flexBasis: '100%' }]}>
                   <Feather name="search" size={14} color={COLORS.textDim} />
                   <TextInput
                     style={[styles.searchInput, { fontSize: 13 }]}
@@ -2861,6 +3096,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   />
                 </View>
 
+                {!readOnly ? (
                 <TouchableOpacity
                   style={{
                     backgroundColor: '#ec4899',
@@ -2876,6 +3112,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   <Feather name="plus" size={16} color="#ffffff" />
                   <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: '700' }}>Create Combo Plan</Text>
                 </TouchableOpacity>
+                ) : null}
               </View>
             </View>
 
@@ -2886,12 +3123,13 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 <Text style={{ color: COLORS.textMuted, marginTop: 12, fontSize: 14 }}>Loading combo plans...</Text>
               </View>
             ) : filteredComboPlans.length === 0 ? (
-              <View style={{ backgroundColor: COLORS.cardBg || '#1e293b', borderRadius: 12, padding: 36, alignItems: 'center', borderWidth: 1, borderColor: '#afb1b5' }}>
+              <View style={{ backgroundColor: '#ffffff', borderRadius: 12, padding: 36, alignItems: 'center', borderWidth: 1, borderColor: '#e2e8f0' }}>
                 <Feather name="layers" size={40} color={COLORS.textMuted} style={{ marginBottom: 12, opacity: 0.5 }} />
                 <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.textMain, marginBottom: 4 }}>No Combo Plans Found</Text>
                 <Text style={{ fontSize: 13, color: COLORS.textMuted, textAlign: 'center', marginBottom: 16 }}>
                   {searchComboPlan ? 'No combo plans match your search query.' : 'No combo plans created for this partner yet.'}
                 </Text>
+                {!readOnly ? (
                 <TouchableOpacity
                   style={{ backgroundColor: '#ec4899', paddingHorizontal: 18, paddingVertical: 10, borderRadius: 8, flexDirection: 'row', alignItems: 'center', gap: 6 }}
                   onPress={handleOpenCreateCombo}
@@ -2899,137 +3137,125 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   <Feather name="plus" size={14} color="#ffffff" />
                   <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: '700' }}>Create First Combo Plan</Text>
                 </TouchableOpacity>
+                ) : null}
               </View>
             ) : (
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 16 }}>
-                {filteredComboPlans.map((item) => {
-                  const comboId = item.combo_id || item.id;
-                  const isActive = item.is_active === 1 || item.is_active === true || item.is_active === '1';
-                  const inetPrice = Number(item.internet_price || 0);
-                  const iptvPrice = Number(item.iptv_price || 0);
-                  const sumPrice = inetPrice + iptvPrice;
-                  const comboPrice = Number(item.price || 0);
-                  const discount = sumPrice > comboPrice ? sumPrice - comboPrice : 0;
-
+              <View style={styles.comboTableCard}>
+                {(() => {
+                  const chain = comboAdminChain;
+                  const showMine = readOnly && chain.some((a) => String(a.partner_id) === String(user?.partner_id));
+                  const minW = 60 + 220 + 200 + 200 + 100 + (!readOnly && chain.length ? 120 + chain.length * 130 : 0) + (showMine ? 110 : 0) + 130 + 100 + (!readOnly ? 160 : 0) + 28;
+                  const money = (v) => `₹${Number(v || 0).toFixed(2)}`;
                   return (
-                    <View
-                      key={comboId}
-                      style={{
-                        width: isMobile ? '100%' : 'calc(50% - 8px)',
-                        minWidth: 300,
-                        backgroundColor: COLORS.cardBg || '#1e293b',
-                        borderRadius: 12,
-                        borderWidth: 1,
-                        borderColor: isActive ? 'rgba(236, 72, 153, 0.4)' : '#334155',
-                        padding: 16,
-                      }}
-                    >
-                      {/* CARD HEADER */}
-                      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
-                        <View style={{ flex: 1, paddingRight: 8 }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                            <Text style={{ fontSize: 16, fontWeight: '700', color: COLORS.textMain }}>{item.combo_name}</Text>
-                            <View style={{ backgroundColor: 'rgba(255,255,255,0.08)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                              <Text style={{ fontSize: 11, color: COLORS.textMuted }}>#{comboId}</Text>
-                            </View>
-                          </View>
+                <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: '100%', flexGrow: 1 }}>
+                  <View style={{ minWidth: minW, flexGrow: 1 }}>
+                    <View style={[styles.comboTr, styles.comboThRow]}>
+                      <Text style={[styles.comboTh, { width: 60 }]}>ID</Text>
+                      <Text style={[styles.comboTh, { flex: 1, minWidth: 220 }]}>Combo</Text>
+                      <Text style={[styles.comboTh, { width: 200 }]}>Internet plan</Text>
+                      <Text style={[styles.comboTh, { width: 200 }]}>IPTV DPO</Text>
+                      <Text style={[styles.comboTh, { width: 100, textAlign: 'right' }]}>Separate</Text>
+                      {!readOnly && chain.length ? <Text style={[styles.comboTh, { width: 120, textAlign: 'right', paddingLeft: 10 }]} numberOfLines={2}>Super admin price</Text> : null}
+                      {!readOnly ? chain.map((a) => (
+                        <View key={a.partner_id} style={{ width: 130, alignItems: 'flex-end', paddingLeft: 12 }}>
+                          <Text style={[styles.comboTh, { textAlign: 'right' }]} numberOfLines={2}>+ {a.label}</Text>
+                          <Text style={{ fontSize: 11, color: '#94a3b8' }} numberOfLines={1}>{a.partner_name}</Text>
                         </View>
-
-                        <TouchableOpacity onPress={() => handleToggleComboStatus(item)}>
-                          <View style={{
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            gap: 4,
-                            backgroundColor: isActive ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)',
-                            paddingHorizontal: 8,
-                            paddingVertical: 4,
-                            borderRadius: 12,
-                          }}>
-                            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isActive ? '#10b981' : '#ef4444' }} />
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: isActive ? '#10b981' : '#ef4444' }}>
-                              {isActive ? 'ACTIVE' : 'INACTIVE'}
-                            </Text>
-                          </View>
-                        </TouchableOpacity>
-                      </View>
-
-                      {/* PRICE TAG */}
-                      <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, marginBottom: 14, backgroundColor: 'rgba(236, 72, 153, 0.06)', padding: 10, borderRadius: 8 }}>
-                        <Text style={{ fontSize: 22, fontWeight: '800', color: '#ec4899' }}>₹{comboPrice.toFixed(2)}</Text>
-                        {discount > 0 && (
-                          <>
-                            <Text style={{ fontSize: 13, color: COLORS.textMuted, textDecorationLine: 'line-through' }}>₹{sumPrice.toFixed(2)}</Text>
-                            <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.15)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 }}>
-                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>SAVE ₹{discount.toFixed(0)}</Text>
-                            </View>
-                          </>
-                        )}
-                      </View>
-
-                      {/* INCLUDED SERVICES */}
-                      <View style={{ gap: 8, marginBottom: 14 }}>
-                        {/* Internet Subplan Row */}
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(6, 182, 212, 0.06)', padding: 10, borderRadius: 8 }}>
-                          <Feather name="wifi" size={16} color="#06b6d4" />
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMain }}>
-                              {item.internet_plan_name || `Broadband Subplan #${item.isub_plan_id}`}
-                            </Text>
-                            <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
-                              {item.internet_sub_plan_name ? `${item.internet_sub_plan_name} • ` : ''}
-                              {item.internet_validity ? `${item.internet_validity} Days Validity` : 'Broadband Service'}
-                            </Text>
-                          </View>
-                          {inetPrice > 0 && (
-                            <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMuted }}>₹{inetPrice.toFixed(2)}</Text>
-                          )}
-                        </View>
-
-                        {/* IPTV Subplan Row */}
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(139, 92, 246, 0.06)', padding: 10, borderRadius: 8 }}>
-                          <Feather name="tv" size={16} color="#8b5cf6" />
-                          <View style={{ flex: 1 }}>
-                            <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMain }}>
-                              {item.iptv_plan_name || `IPTV Subplan #${item.iptvsub_plan_id}`}
-                            </Text>
-                            <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
-                              {item.iptv_validity_days ? `${item.iptv_validity_days} Days Validity` : 'IPTV Service'}
-                            </Text>
-                          </View>
-                          {iptvPrice > 0 && (
-                            <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMuted }}>₹{iptvPrice.toFixed(2)}</Text>
-                          )}
-                        </View>
-                      </View>
-
-                      {/* CARD FOOTER ACTIONS */}
-                      <View style={{ flexDirection: 'row', justifyContent: 'flex-end', gap: 8, paddingTop: 10, borderTopWidth: 1, borderTopColor: COLORS.borderLight || 'rgba(255,255,255,0.06)' }}>
-                        <TouchableOpacity
-                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(255,255,255,0.05)' }}
-                          onPress={() => handleOpenEditCombo(item)}
-                        >
-                          <Feather name="edit-2" size={13} color={COLORS.textMain} />
-                          <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMain }}>Edit</Text>
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(239, 68, 68, 0.1)' }}
-                          onPress={() => handleDeleteCombo(comboId)}
-                          disabled={deletingComboId === comboId}
-                        >
-                          {deletingComboId === comboId ? (
-                            <ActivityIndicator size="small" color="#ef4444" />
-                          ) : (
-                            <>
-                              <Feather name="trash-2" size={13} color="#ef4444" />
-                              <Text style={{ fontSize: 12, fontWeight: '600', color: '#ef4444' }}>Delete</Text>
-                            </>
-                          )}
-                        </TouchableOpacity>
-                      </View>
+                      )) : null}
+                      {showMine ? <Text style={[styles.comboTh, { width: 110, textAlign: 'right' }]}>Your margin</Text> : null}
+                      <Text style={[styles.comboTh, { width: 130, textAlign: 'right' }]}>Operator price</Text>
+                      <Text style={[styles.comboTh, { width: 100, textAlign: 'center' }]}>Status</Text>
+                      {!readOnly ? <Text style={[styles.comboTh, { width: 160, textAlign: 'right' }]}>Actions</Text> : null}
                     </View>
+                    {filteredComboPlans.map((item) => {
+                      const comboId = item.combo_id || item.id;
+                      const isActive = item.is_active === 1 || item.is_active === true || item.is_active === '1';
+                      // combo_plans.php returns nested { internet: {...}, iptv: {...} }
+                      const inet = item.internet || {};
+                      const tv = item.iptv || {};
+                      const inetPrice = Number(inet.price ?? item.internet_price ?? 0);
+                      const iptvPrice = Number(tv.price ?? item.iptv_price ?? 0);
+                      const sumPrice = Number(item.separate_total ?? inetPrice + iptvPrice);
+                      const comboPrice = Number(item.price || 0);
+                      const discount = sumPrice > comboPrice ? sumPrice - comboPrice : 0;
+                      const unavailable = item.is_available === false;
+                      const m = item.margins && typeof item.margins === 'object' ? item.margins : {};
+                      return (
+                        <View key={comboId} style={[styles.comboTr, !isActive && { backgroundColor: '#fafafa' }]}>
+                          <Text style={[styles.comboTd, { width: 60, color: COLORS.textMuted }]}>#{comboId}</Text>
+                          <View style={{ flex: 1, minWidth: 220, paddingRight: 10 }}>
+                            <Text style={[styles.comboTd, { fontWeight: '700' }]} numberOfLines={2}>{item.combo_name}</Text>
+                            {unavailable ? (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 3 }}>
+                                <Feather name="alert-triangle" size={11} color="#b45309" />
+                                <Text style={{ fontSize: 11, color: '#92400e', flexShrink: 1 }} numberOfLines={2}>{item.unavailable_reason || 'One of the plans is no longer mapped for this operator.'}</Text>
+                              </View>
+                            ) : null}
+                          </View>
+                          <View style={{ width: 200, paddingRight: 10, flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                            <Feather name="wifi" size={14} color="#06b6d4" />
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <Text style={styles.comboTd} numberOfLines={1}>{inet.plan_name || item.internet_plan_name || 'Internet plan'}</Text>
+                              <Text style={styles.comboSub} numberOfLines={1}>{[inet.sub_plan_name || (inet.validity ? `${inet.validity} days` : null), inetPrice > 0 ? `₹${inetPrice.toFixed(2)}` : null].filter(Boolean).join(' · ')}</Text>
+                            </View>
+                          </View>
+                          <View style={{ width: 200, paddingRight: 10, flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+                            <Feather name="tv" size={14} color="#8b5cf6" />
+                            <View style={{ flex: 1, minWidth: 0 }}>
+                              <Text style={styles.comboTd} numberOfLines={1}>{tv.plan_name || item.iptv_plan_name || 'IPTV pack'}</Text>
+                              <Text style={styles.comboSub} numberOfLines={1}>{[tv.validity_days ? `${tv.validity_days} days` : null, iptvPrice > 0 ? `₹${iptvPrice.toFixed(2)}` : null, 'FTA included'].filter(Boolean).join(' · ')}</Text>
+                            </View>
+                          </View>
+                          <Text style={[styles.comboTd, { width: 100, textAlign: 'right', color: COLORS.textMuted, textDecorationLine: discount > 0 ? 'line-through' : 'none' }]}>₹{sumPrice.toFixed(2)}</Text>
+                          {!readOnly && chain.length ? <Text style={[styles.comboTd, { width: 120, textAlign: 'right' }]}>{money(item.sa_price ?? comboPrice)}</Text> : null}
+                          {!readOnly ? chain.map((a) => (
+                            <Text key={a.partner_id} style={[styles.comboTd, { width: 130, textAlign: 'right', color: '#047857' }]}>{money(m[a.partner_id])}</Text>
+                          )) : null}
+                          {showMine ? <Text style={[styles.comboTd, { width: 110, textAlign: 'right', color: '#047857', fontWeight: '700' }]}>{money(m[user?.partner_id] ?? m[String(user?.partner_id)])}</Text> : null}
+                          <View style={{ width: 130, alignItems: 'flex-end' }}>
+                            <Text style={[styles.comboTd, { fontWeight: '800', color: '#db2777' }]}>₹{comboPrice.toFixed(2)}</Text>
+                            {discount > 0 ? <Text style={{ fontSize: 10, fontWeight: '700', color: '#10b981' }}>SAVE ₹{discount.toFixed(0)}</Text> : null}
+                          </View>
+                          <View style={{ width: 100, alignItems: 'center' }}>
+                            <TouchableOpacity onPress={() => !readOnly && handleToggleComboStatus(item)} disabled={readOnly} title={readOnly ? undefined : isActive ? 'Switch off' : 'Switch on'}>
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: isActive ? 'rgba(16, 185, 129, 0.12)' : 'rgba(239, 68, 68, 0.12)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 }}>
+                                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: isActive ? '#10b981' : '#ef4444' }} />
+                                <Text style={{ fontSize: 11, fontWeight: '700', color: isActive ? '#10b981' : '#ef4444' }}>{isActive ? 'ACTIVE' : 'INACTIVE'}</Text>
+                              </View>
+                            </TouchableOpacity>
+                          </View>
+                          {!readOnly ? (
+                          <View style={{ width: 160, flexDirection: 'row', justifyContent: 'flex-end', gap: 6 }}>
+                            <TouchableOpacity
+                              style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#cbd5e1', backgroundColor: '#ffffff' }}
+                              onPress={() => handleOpenEditCombo(item)}
+                            >
+                              <Feather name="edit-2" size={13} color={COLORS.textMain} />
+                              <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMain }}>Edit</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                              style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 6, backgroundColor: 'rgba(239, 68, 68, 0.1)' }}
+                              onPress={() => handleDeleteCombo(comboId)}
+                              disabled={deletingComboId === comboId}
+                            >
+                              {deletingComboId === comboId ? (
+                                <ActivityIndicator size="small" color="#ef4444" />
+                              ) : (
+                                <>
+                                  <Feather name="trash-2" size={13} color="#ef4444" />
+                                  <Text style={{ fontSize: 12, fontWeight: '600', color: '#ef4444' }}>Delete</Text>
+                                </>
+                              )}
+                            </TouchableOpacity>
+                          </View>
+                          ) : null}
+                        </View>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
                   );
-                })}
+                })()}
               </View>
             )}
           </View>
@@ -3041,438 +3267,237 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
 
   // 6. FULL SCREEN PARTNER DETAILS VIEW (WHEN ROW CLICKED)
   if (selectedPartner) {
-    const isEnabled = selectedPartner.status === 'enabled';
+    const p = selectedPartner;
+    const pid = p.partner_id || p.id;
+    const isEnabled = p.status === 'enabled';
+    const isOperatorPartner = String(p.account_role || 'operator').toLowerCase() === 'operator';
+    const inetStats = partner?.internet || {};
+    const iptvStats = partner?.iptv || {};
+    const inetCards = [
+      { label: 'Total', value: inetStats.total, color: COLORS.textMain },
+      { label: 'Active', value: inetStats.active, color: COLORS.accentEmerald },
+      { label: 'Online', value: inetStats.online, color: '#3b82f6' },
+      { label: 'Expired', value: inetStats.expired, color: COLORS.accentRose },
+      { label: 'Suspended', value: inetStats.suspend ?? inetStats.suspended, color: COLORS.accentAmber },
+      { label: 'Disabled', value: inetStats.disabled, color: '#64748b' },
+      { label: 'New', value: inetStats.new, color: '#8b5cf6' },
+    ];
+    const iptvCards = [
+      { label: 'Total STBs', value: iptvStats.total, color: COLORS.textMain },
+      { label: 'Active', value: iptvStats.active, color: COLORS.accentEmerald },
+      { label: 'Expired', value: iptvStats.expired, color: COLORS.accentRose },
+    ];
+    const ottStats = partner?.ott || {};
+    const ottCards = [
+      { label: 'Total', value: ottStats.total, color: COLORS.textMain },
+      { label: 'Active', value: ottStats.active, color: COLORS.accentEmerald },
+      { label: 'Expired', value: ottStats.expired, color: COLORS.accentRose },
+      { label: 'New', value: ottStats.new, color: '#8b5cf6' },
+    ];
+    const backLabel = partnerTrail.length ? `Back to ${partnerTrail[partnerTrail.length - 1].partner_name}` : 'Back to Partners';
+    const levelChain = Array.isArray(p.admin_chain) ? p.admin_chain : [];
+    const ActionBtn = ({ icon, label, color, onPress, busy, disabled }) => (
+      <TouchableOpacity
+        style={[styles.pdAction, { borderColor: `${color}55`, backgroundColor: `${color}12` }, (busy || disabled) && { opacity: 0.6 }]}
+        onPress={onPress}
+        disabled={busy || disabled}
+      >
+        {busy ? <ActivityIndicator size="small" color={color} /> : <Feather name={icon} size={14} color={color} />}
+        <Text style={[styles.pdActionText, { color }]}>{label}</Text>
+      </TouchableOpacity>
+    );
+    const StatStrip = ({ cards }) => (
+      <View style={styles.pdStatRow}>
+        {cards.map((c) => (
+          <View key={c.label} style={styles.pdStat}>
+            <Text style={[styles.pdStatNum, { color: c.color }]}>{loadingPartner && !partner ? '…' : c.value ?? 0}</Text>
+            <Text style={styles.pdStatLbl}>{c.label}</Text>
+          </View>
+        ))}
+      </View>
+    );
+
     return (
       <View style={{ flex: 1, backgroundColor: COLORS.bgPrimary }}>
         <ScrollView
           style={styles.container}
-          contentContainerStyle={[
-            styles.content,
-            {
-              paddingHorizontal: isMobile ? 12 : 24,
-              paddingVertical: isMobile ? 14 : 24,
-              width: '100%',
-            },
-          ]}
+          contentContainerStyle={[styles.content, { paddingHorizontal: isMobile ? 12 : 24, paddingVertical: isMobile ? 14 : 24, width: '100%' }]}
         >
-          {/* Navigation Bar */}
-          <View style={styles.detailsHeaderRow}>
-            <TouchableOpacity style={styles.backBtn} onPress={handleClosePartnerDetails}>
-              <Feather name="arrow-left" size={18} color={COLORS.textMain} />
-              <Text style={styles.backBtnText}>Back to Partners List</Text>
-            </TouchableOpacity>
+          <TouchableOpacity style={[styles.backBtn, { alignSelf: 'flex-start', marginBottom: 14 }]} onPress={handleClosePartnerDetails}>
+            <Feather name="arrow-left" size={16} color={COLORS.textMain} />
+            <Text style={styles.backBtnText}>{backLabel}</Text>
+          </TouchableOpacity>
 
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <View
-                style={[
-                  styles.roleBadge,
-                  selectedPartner.account_role === 'admin' ? styles.roleBadgeAdmin : styles.roleBadgeOperator,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.roleBadgeText,
-                    selectedPartner.account_role === 'admin' ? styles.roleBadgeTextAdmin : styles.roleBadgeTextOperator,
-                  ]}
-                >
-                  {(selectedPartner.account_role || 'operator').toUpperCase()}
-                </Text>
-              </View>
+          {/* where this partner sits: Super Admin › Super Distributor › ... */}
+          <Text style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 10 }}>
+            Super Admin{levelChain.map((a) => ` › ${a.label}: ${a.partner_name}`).join('')} › <Text style={{ fontWeight: '700', color: COLORS.textMain }}>{levelLabelOf(p)}: {p.partner_name}</Text>
+          </Text>
 
-              <TouchableOpacity onPress={() => togglePartnerStatus(selectedPartner.partner_id)}>
-                <View style={[styles.statusTag, isEnabled ? styles.tagEnabled : styles.tagDisabled]}>
-                  <View style={[styles.statusDot, isEnabled ? styles.dotEnabled : styles.dotDisabled]} />
-                  <Text style={[styles.tagText, isEnabled ? styles.tagTextEnabled : styles.tagTextDisabled]}>
-                    {isEnabled ? 'ENABLED' : 'DISABLED'}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Hero Header Card with Wallet Balance */}
+          {/* HEADER: identity, status, wallet, account actions */}
           <View style={styles.heroCard}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 14 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, flex: 1, minWidth: 200 }}>
+            <View style={{ flexDirection: isMobile ? 'column' : 'row', gap: 16, alignItems: isMobile ? 'flex-start' : 'center' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, flex: 1, minWidth: 0 }}>
                 <View style={styles.heroAvatar}>
-                  <Text style={styles.heroAvatarText}>
-                    {selectedPartner.partner_name ? selectedPartner.partner_name.charAt(0).toUpperCase() : 'P'}
-                  </Text>
+                  <Text style={styles.heroAvatarText}>{(p.partner_name || 'P').charAt(0).toUpperCase()}</Text>
                 </View>
-                <View style={{ flex: 1 }}>
+                <View style={{ flex: 1, minWidth: 0 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-                    <Text style={styles.heroTitle}>{selectedPartner.partner_name}</Text>
-                    <View style={styles.idBadge}>
-                      <Text style={styles.idText}>#{selectedPartner.partner_id}</Text>
-                    </View>
+                    <Text style={styles.heroTitle}>{p.partner_name}</Text>
+                    <View style={styles.idBadge}><Text style={styles.idText}>#{pid}</Text></View>
+                    <LevelBadge partner={p} />
+                    <TouchableOpacity onPress={() => !readOnly && setConfirmStatusPartner(p)} disabled={readOnly} title={isEnabled ? 'Disable this partner' : 'Enable this partner'}>
+                      <View style={[styles.statusTag, isEnabled ? styles.tagEnabled : styles.tagDisabled]}>
+                        <View style={[styles.statusDot, isEnabled ? styles.dotEnabled : styles.dotDisabled]} />
+                        <Text style={[styles.tagText, isEnabled ? styles.tagTextEnabled : styles.tagTextDisabled]}>{isEnabled ? 'ENABLED' : 'DISABLED'}</Text>
+                      </View>
+                    </TouchableOpacity>
                   </View>
-                  <Text style={styles.heroSubtitle}>{selectedPartner.company_name || 'Telecom Services Network'}</Text>
+                  <Text style={styles.heroSubtitle}>
+                    {[p.company_name, p.partner_region, p.partner_mobile, p.account_username ? `login: ${p.account_username}` : null].filter(Boolean).join('  ·  ')}
+                  </Text>
+                  {p.created_by_name && String(p.created_by) !== String(pid) ? (
+                    <Text style={[styles.heroSubtitle, { marginTop: 2 }]}>Under {p.created_by_name} (#{p.created_by})</Text>
+                  ) : null}
                 </View>
               </View>
 
-              {/* Wallet Balance Display inside Hero Card */}
-              <TouchableOpacity style={styles.heroWalletBadge} onPress={() => handleOpenWallet(selectedPartner)}>
-                <View style={styles.heroWalletIconBadge}>
-                  <Text style={{ fontSize: 16, fontWeight: '700', color: '#10b981' }}>₹</Text>
+              <View style={styles.pdWallet}>
+                <Text style={styles.heroWalletLabel}>WALLET BALANCE</Text>
+                <Text style={styles.heroWalletValue}>₹{Number(p.wallet_balance || 0).toLocaleString('en-IN')}</Text>
+                <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
+                  {!readOnly ? (
+                    <>
+                      <TouchableOpacity style={[styles.pdMini, { backgroundColor: '#10b981' }]} onPress={() => handleOpenWallet(p, 'credit')}>
+                        <Feather name="plus" size={12} color="#fff" /><Text style={styles.pdMiniText}>Add</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.pdMini, { backgroundColor: '#ef4444' }]} onPress={() => handleOpenWallet(p, 'debit')}>
+                        <Feather name="minus" size={12} color="#fff" /><Text style={styles.pdMiniText}>Deduct</Text>
+                      </TouchableOpacity>
+                    </>
+                  ) : null}
+                  <TouchableOpacity style={[styles.pdMini, { backgroundColor: '#475569' }]} onPress={() => handleOpenWallet(p, 'credit')}>
+                    <Feather name="list" size={12} color="#fff" /><Text style={styles.pdMiniText}>History</Text>
+                  </TouchableOpacity>
                 </View>
-                <View>
-                  <Text style={styles.heroWalletLabel}>WALLET BALANCE</Text>
-                  <Text style={styles.heroWalletValue}>
-                    ₹{(selectedPartner.wallet_balance !== undefined ? selectedPartner.wallet_balance : 0).toLocaleString('en-IN')}
-                  </Text>
-                </View>
-              </TouchableOpacity>
+              </View>
             </View>
+
+            {!readOnly || canImpersonate ? (
+              <View style={styles.pdAccountRow}>
+                {!readOnly ? <ActionBtn icon="edit-2" label="Edit Details" color="#2563eb" onPress={() => handleOpenEdit(p)} /> : null}
+                {!readOnly ? <ActionBtn icon="key" label="Reset Password" color="#d97706" onPress={() => handleOpenPartnerResetPass(p)} /> : null}
+                {canImpersonate ? <ActionBtn icon="log-in" label="Login as Partner" color="#db2777" onPress={() => handleImpersonatePartner(p)} busy={impersonatingId === pid} /> : null}
+                {!readOnly && !isOperatorPartner && Number(p.admin_level || 0) < 3 ? (
+                  <ActionBtn icon="user-plus" label={`Add ${Number(p.admin_level) === 1 ? 'Distributor' : 'Sub Distributor'} under`} color="#7c3aed" onPress={() => handleOpenCreate('admin', pid)} />
+                ) : null}
+                {!readOnly && !isOperatorPartner ? <ActionBtn icon="user-plus" label="Add Operator under" color="#059669" onPress={() => handleOpenCreate('operator', pid)} /> : null}
+              </View>
+            ) : null}
           </View>
 
-          {/* SECTION: SUBSCRIBER OVERVIEW (LIVE DASHBOARD API CARDS) */}
-          <View style={{ marginBottom: 20 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-              <Text style={styles.sectionHeaderTitle}>Internet Subscriber Overview</Text>
-              {loadingPartner && (
-                <ActivityIndicator size="small" color={COLORS.primary} style={{ marginLeft: 8 }} />
-              )}
-            </View>
-
-            <View style={styles.statsGrid7}>
-              {/* TOTAL USERS */}
-              <View style={[styles.statCardMetric, styles.statCardMetricClickable]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Feather name="users" size={14} color={COLORS.primary} />
-                    <Text style={styles.statLabel}>TOTAL USERS</Text>
-                  </View>
-                  <Feather name="arrow-up-right" size={13} color={COLORS.primary} />
+          {isOperatorPartner ? (
+            <>
+              {/* SUBSCRIBERS */}
+              <View style={styles.pdSection}>
+                <View style={styles.pdSectionHead}>
+                  <Feather name="wifi" size={16} color={COLORS.primary} />
+                  <Text style={styles.pdSectionTitle}>Internet Subscribers</Text>
+                  {loadingPartner ? <ActivityIndicator size="small" color={COLORS.primary} /> : null}
                 </View>
-                <Text style={styles.statValueMetric}>
-                  {partner?.internet?.total ?? partner?.total ?? selectedPartner?.total_internet_accounts ?? selectedPartner?.total_users ?? 0}
-                </Text>
+                <StatStrip cards={inetCards} />
+                <View style={[styles.pdSectionHead, { marginTop: 14 }]}>
+                  <Feather name="tv" size={16} color="#8b5cf6" />
+                  <Text style={styles.pdSectionTitle}>IPTV Subscribers</Text>
+                </View>
+                <StatStrip cards={iptvCards} />
+                <View style={[styles.pdSectionHead, { marginTop: 14 }]}>
+                  <Feather name="play-circle" size={16} color="#0ea5e9" />
+                  <Text style={styles.pdSectionTitle}>OTT Subscribers</Text>
+                </View>
+                <StatStrip cards={ottCards} />
+                {!readOnly ? (
+                  <View style={[styles.pdAccountRow, { marginTop: 14 }]}>
+                    <ActionBtn icon="refresh-cw" label="Sync Internet Users" color="#059669" onPress={() => handleSyncInternetUsers(p)} busy={syncingInetId === pid} />
+                    <ActionBtn icon="refresh-cw" label="Sync IPTV Users" color="#7c3aed" onPress={() => handleSyncIptvUsers(p)} busy={syncingIptvId === pid} />
+                  </View>
+                ) : null}
               </View>
 
-              {/* ACTIVE USERS */}
-              <View style={[styles.statCardMetric, styles.statCardMetricClickable]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Feather name="check-circle" size={14} color={COLORS.accentEmerald} />
-                    <Text style={styles.statLabel}>ACTIVE USERS</Text>
-                  </View>
-                  <Feather name="arrow-up-right" size={13} color={COLORS.accentEmerald} />
+              {/* PLANS & SETUP */}
+              <View style={styles.pdSection}>
+                <View style={styles.pdSectionHead}>
+                  <Feather name="sliders" size={16} color="#0f172a" />
+                  <Text style={styles.pdSectionTitle}>Plans & Setup</Text>
                 </View>
-                <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>
-                  {partner?.internet?.active ?? partner?.active ?? selectedPartner?.active_internet_accounts ?? selectedPartner?.active_users ?? 0}
-                </Text>
-              </View>
-
-              {/* ONLINE USERS */}
-              <View style={[styles.statCardMetric, styles.statCardMetricClickable]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Feather name="wifi" size={14} color="#3b82f6" />
-                    <Text style={styles.statLabel}>ONLINE USERS</Text>
-                  </View>
-                  <Feather name="arrow-up-right" size={13} color="#3b82f6" />
-                </View>
-                <Text style={[styles.statValueMetric, { color: '#3b82f6' }]}>
-                  {partner?.internet?.online ?? partner?.online ?? selectedPartner?.online_internet_accounts ?? selectedPartner?.online_users ?? 0}
-                </Text>
-              </View>
-
-              {/* EXPIRED USERS */}
-              <View style={[styles.statCardMetric, styles.statCardMetricClickable]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Feather name="clock" size={14} color={COLORS.accentRose} />
-                    <Text style={styles.statLabel}>EXPIRED USERS</Text>
-                  </View>
-                  <Feather name="arrow-up-right" size={13} color={COLORS.accentRose} />
-                </View>
-                <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>
-                  {partner?.internet?.expired ?? partner?.expired ?? selectedPartner?.expired_internet_accounts ?? 0}
-                </Text>
-              </View>
-
-              {/* SUSPENDED USERS */}
-              <View style={[styles.statCardMetric, styles.statCardMetricClickable]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Feather name="alert-triangle" size={14} color={COLORS.accentAmber} />
-                    <Text style={styles.statLabel}>SUSPENDED USERS</Text>
-                  </View>
-                  <Feather name="arrow-up-right" size={13} color={COLORS.accentAmber} />
-                </View>
-                <Text style={[styles.statValueMetric, { color: COLORS.accentAmber }]}>
-                  {partner?.internet?.suspend ?? partner?.internet?.suspended ?? partner?.suspend ?? partner?.suspended ?? 0}
-                </Text>
-              </View>
-
-              {/* DISABLED USERS */}
-              <View style={[styles.statCardMetric, styles.statCardMetricClickable]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Feather name="slash" size={14} color="#64748b" />
-                    <Text style={styles.statLabel}>DISABLED USERS</Text>
-                  </View>
-                  <Feather name="arrow-up-right" size={13} color="#64748b" />
-                </View>
-                <Text style={[styles.statValueMetric, { color: '#64748b' }]}>
-                  {partner?.internet?.disabled ?? partner?.disabled ?? 0}
-                </Text>
-              </View>
-
-              {/* NEW USERS */}
-              <View style={[styles.statCardMetric, styles.statCardMetricClickable]}>
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Feather name="user-plus" size={14} color="#8b5cf6" />
-                    <Text style={styles.statLabel}>NEW USERS</Text>
-                  </View>
-                  <Feather name="arrow-up-right" size={13} color="#8b5cf6" />
-                </View>
-                <Text style={[styles.statValueMetric, { color: '#8b5cf6' }]}>
-                  {partner?.internet?.new ?? partner?.new ?? 0}
-                </Text>
-              </View>
-            </View>
-
-            {/* IPTV SUBSCRIBER  (PLACED DIRECTLY BELOW INTERNET OVERVIEW - ITEM 17) */}
-            <View style={{ marginTop: 16 }}>
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap' }}>
-                <Text style={[styles.sectionHeaderTitle, { color: '#8b5cf6' }]}>IPTV Subscriber Overview (STB )</Text>
-              </View>
-
-              <View style={styles.statsGrid7}>
-                {/* IPTV TOTAL USERS */}
-                <View style={[styles.statCardMetric, { borderColor: 'rgba(139, 92, 246, 0.3)' }]}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Feather name="tv" size={14} color="#8b5cf6" />
-                      <Text style={styles.statLabel}>IPTV TOTAL USERS</Text>
-                    </View>
-                    <Feather name="arrow-up-right" size={13} color="#8b5cf6" />
-                  </View>
-                  <Text style={[styles.statValueMetric, { color: '#8b5cf6' }]}>
-                    {partner?.iptv?.total ?? selectedPartner?.iptv_total_users ?? selectedPartner?.active_iptv_accounts ?? 0}
-                  </Text>
-                </View>
-
-                {/* IPTV ACTIVE USERS */}
-                <View style={[styles.statCardMetric, { borderColor: 'rgba(16, 185, 129, 0.3)' }]}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Feather name="check-circle" size={14} color={COLORS.accentEmerald} />
-                      <Text style={styles.statLabel}>IPTV ACTIVE STBS</Text>
-                    </View>
-                    <Feather name="arrow-up-right" size={13} color={COLORS.accentEmerald} />
-                  </View>
-                  <Text style={[styles.statValueMetric, { color: COLORS.accentEmerald }]}>
-                    {partner?.iptv?.active ?? selectedPartner?.active_iptv_accounts ?? 0}
-                  </Text>
-                </View>
-
-                {/* IPTV EXPIRED STBS */}
-                <View style={[styles.statCardMetric, { borderColor: 'rgba(239, 68, 68, 0.3)' }]}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                      <Feather name="clock" size={14} color={COLORS.accentRose} />
-                      <Text style={styles.statLabel}>IPTV EXPIRED STBS</Text>
-                    </View>
-                    <Feather name="arrow-up-right" size={13} color={COLORS.accentRose} />
-                  </View>
-                  <Text style={[styles.statValueMetric, { color: COLORS.accentRose }]}>
-                    {partner?.iptv?.expired ?? selectedPartner?.expired_iptv_accounts ?? 0}
-                  </Text>
-                </View>
-              </View>
-            </View>
-          </View>
-
-          {/* SECTION: QUICK ACTION BUTTONS */}
-          <View style={{ marginBottom: 20 }}>
-            <Text style={[styles.sectionHeaderTitle, { marginBottom: 10 }]}>Quick Actions</Text>
-            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10 }}>
-              {/* WALLET TOPUP BUTTON */}
-              <TouchableOpacity
-                style={[styles.simpleActionBtn, { borderColor: 'rgba(16, 185, 129, 0.4)', backgroundColor: 'rgba(16, 185, 129, 0.08)' }]}
-                onPress={() => handleOpenWallet(selectedPartner, 'credit')}
-              >
-                <Text style={{ fontSize: 14, fontWeight: '700', color: '#10b981' }}>₹</Text>
-                <Text style={[styles.simpleActionBtnText, { color: '#10b981' }]}>
-                  Wallet
-                </Text>
-                <View style={styles.simpleBtnTopupBadge}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>Topup</Text>
-                </View>
-              </TouchableOpacity>
-
-              {/* WALLET DEBIT BUTTON */}
-              <TouchableOpacity
-                style={[styles.simpleActionBtn, { borderColor: 'rgba(185, 16, 16, 0.4)', backgroundColor: 'rgba(185, 16, 16, 0.08)' }]}
-                onPress={() => handleOpenWallet(selectedPartner, 'debit')}
-              >
-                <Text style={{ fontSize: 14, fontWeight: '700', color: '#b91010' }}>₹</Text>
-                <Text style={[styles.simpleActionBtnText, { color: '#b91010' }]}>
-                  Wallet
-                </Text>
-                <View style={styles.simpleBtnDebitBadge}>
-                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#b91010' }}>Debit</Text>
-                </View>
-              </TouchableOpacity>
-
-              {/* EDIT PROFILE BUTTON */}
-              {/* <TouchableOpacity
-                style={[styles.simpleActionBtn, { borderColor: 'rgba(59, 130, 246, 0.4)', backgroundColor: 'rgba(59, 130, 246, 0.08)' }]}
-                onPress={() => handleOpenEdit(selectedPartner)}
-              >
-                <Feather name="edit-3" size={14} color="#3b82f6" />
-                <Text style={[styles.simpleActionBtnText, { color: '#3b82f6' }]}>Edit Profile</Text>
-              </TouchableOpacity> */}
-
-              {/* INTERNET PLANS BUTTON */}
-              <TouchableOpacity
-                style={[styles.simpleActionBtn, { borderColor: 'rgba(6, 182, 212, 0.4)', backgroundColor: 'rgba(6, 182, 212, 0.08)' }]}
-                onPress={() => handleOpenInternetPlans(selectedPartner)}
-              >
-                <Feather name="wifi" size={14} color="#06b6d4" />
-                <Text style={[styles.simpleActionBtnText, { color: '#06b6d4' }]}>Internet Plans</Text>
-              </TouchableOpacity>
-
-              {/* IPTV PLANS BUTTON */}
-              <TouchableOpacity
-                style={[styles.simpleActionBtn, { borderColor: 'rgba(139, 92, 246, 0.4)', backgroundColor: 'rgba(139, 92, 246, 0.08)' }]}
-                onPress={() => handleOpenIptvPlans(selectedPartner)}
-              >
-                <Feather name="tv" size={14} color="#8b5cf6" />
-                <Text style={[styles.simpleActionBtnText, { color: '#8b5cf6' }]}>IPTV Plans</Text>
-              </TouchableOpacity>
-
-              {/* COMBO PLANS BUTTON */}
-              <TouchableOpacity
-                style={[styles.simpleActionBtn, { borderColor: 'rgba(236, 72, 153, 0.4)', backgroundColor: 'rgba(236, 72, 153, 0.08)' }]}
-                onPress={() => handleOpenComboPlans(selectedPartner)}
-              >
-                <Feather name="layers" size={14} color="#ec4899" />
-                <Text style={[styles.simpleActionBtnText, { color: '#ec4899' }]}>Combo Plans</Text>
-              </TouchableOpacity>
-
-              {/* KYC PROVIDERS BUTTON */}  
-              <TouchableOpacity
-                style={[styles.simpleActionBtn, { borderColor: 'rgba(246, 92, 241, 0.4)', backgroundColor: 'rgba(246, 92, 241, 0.08)' }]}
-                onPress={() => handleOpenKycProviders(selectedPartner)}
-              >
-                <Feather name="user-check" size={14} color="#f65cf4" />
-                <Text style={[styles.simpleActionBtnText, { color: '#f65cf4' }]}>KYC Providers</Text>
-              </TouchableOpacity>
-
-              {/* RESET PASSWORD BUTTON */}
-              <TouchableOpacity
-                style={[styles.simpleActionBtn, { borderColor: 'rgba(245, 158, 11, 0.4)', backgroundColor: 'rgba(245, 158, 11, 0.08)' }]}
-                onPress={() => handleOpenPartnerResetPass(selectedPartner)}
-              >
-                <Feather name="key" size={14} color="#f59e0b" />
-                <Text style={[styles.simpleActionBtnText, { color: '#f59e0b' }]}>Reset Password</Text>
-              </TouchableOpacity>
-
-              {/* SYNC INTERNET USERS BUTTON */}
-              <TouchableOpacity
-                style={[styles.simpleActionBtn, { borderColor: 'rgba(16, 185, 129, 0.4)', backgroundColor: 'rgba(16, 185, 129, 0.08)' }]}
-                onPress={() => handleSyncInternetUsers(selectedPartner)}
-                disabled={syncingInetId === (selectedPartner?.partner_id || selectedPartner?.id)}
-              >
-                {syncingInetId === (selectedPartner?.partner_id || selectedPartner?.id) ? (
-                  <ActivityIndicator size="small" color="#10b981" />
+                {readOnly ? (
+                  /* admins: view-only tables of what this operator has been given */
+                  <OperatorPlansView partner={p} viewerId={user?.partner_id} />
                 ) : (
-                  <Feather name="refresh-cw" size={14} color="#10b981" />
+                <View style={styles.pdTileGrid}>
+                  {[
+                    { icon: 'wifi', label: 'Internet Plans', hint: 'Map plans & prices', color: '#0284c7', onPress: () => handleOpenInternetPlans(p) },
+                    { icon: 'tv', label: 'IPTV Plans', hint: 'Map packs & prices', color: '#7c3aed', onPress: () => handleOpenIptvPlans(p) },
+                    { icon: 'layers', label: 'Combo Plans', hint: 'Internet + IPTV bundles', color: '#db2777', onPress: () => handleOpenComboPlans(p) },
+                    { icon: 'play-circle', label: 'OTT Plans', hint: p.ott_franchise_id ? `Franchise ${p.ott_franchise_id}` : 'Set the OTT franchise id', color: '#0ea5e9', onPress: () => setOttPlansPartner(p) },
+                    { icon: 'tag', label: 'Customer Prices', hint: 'Operator\'s price for its customers', color: '#059669', onPress: () => setCustomerPricesPartner(p) },
+                    { icon: 'git-branch', label: 'IPTV Branches', hint: 'Pioneer branch mapping', color: '#0891b2', onPress: () => handleOpenAssignBranches(p) },
+                    { icon: 'shield', label: 'KYC Providers', hint: 'DigiLocker / ScoreMe / manual', color: '#9333ea', onPress: () => handleOpenKycProviders(p) },
+                  ].map((t) => (
+                    <TouchableOpacity key={t.label} style={styles.pdTile} onPress={t.onPress}>
+                      <View style={[styles.pdTileIcon, { backgroundColor: `${t.color}18` }]}><Feather name={t.icon} size={16} color={t.color} /></View>
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.pdTileLabel}>{t.label}</Text>
+                        <Text style={styles.pdTileHint} numberOfLines={1}>{t.hint}</Text>
+                      </View>
+                      <Feather name="chevron-right" size={16} color="#94a3b8" />
+                    </TouchableOpacity>
+                  ))}
+                </View>
                 )}
-                <Text style={[styles.simpleActionBtnText, { color: '#10b981' }]}>
-                  {syncingInetId === (selectedPartner?.partner_id || selectedPartner?.id) ? 'Syncing...' : 'Sync Internet Users'}
-                </Text>
-              </TouchableOpacity>
+              </View>
 
-              {/* SYNC IPTV USERS BUTTON */}
-              <TouchableOpacity
-                style={[styles.simpleActionBtn, { borderColor: 'rgba(168, 85, 247, 0.4)', backgroundColor: 'rgba(168, 85, 247, 0.08)' }]}
-                onPress={() => handleSyncIptvUsers(selectedPartner)}
-                disabled={syncingIptvId === (selectedPartner?.partner_id || selectedPartner?.id)}
-              >
-                {syncingIptvId === (selectedPartner?.partner_id || selectedPartner?.id) ? (
-                  <ActivityIndicator size="small" color="#a855f7" />
-                ) : (
-                  <Feather name="refresh-cw" size={14} color="#a855f7" />
-                )}
-                <Text style={[styles.simpleActionBtnText, { color: '#a855f7' }]}>
-                  {syncingIptvId === (selectedPartner?.partner_id || selectedPartner?.id) ? 'Syncing...' : 'Sync IPTV Users'}
-                </Text>
-              </TouchableOpacity>
+              {/* NETWORK DEVICES (NMS) */}
+              <PartnerDevices partner={p} />
+            </>
+          ) : (
+            <>
+              {/* ADMIN DASHBOARD: every operator below this admin */}
+              <View style={styles.pdSection}>
+                <View style={styles.pdSectionHead}>
+                  <Feather name="bar-chart-2" size={16} color={COLORS.primary} />
+                  <Text style={styles.pdSectionTitle}>Customers of every operator below {p.partner_name}</Text>
+                  {loadingPartner ? <ActivityIndicator size="small" color={COLORS.primary} /> : null}
+                </View>
+                <Text style={{ fontSize: 12, color: COLORS.textMuted, marginBottom: 6 }}>Internet</Text>
+                <StatStrip cards={inetCards} />
+                <Text style={{ fontSize: 12, color: COLORS.textMuted, marginVertical: 6 }}>IPTV</Text>
+                <StatStrip cards={iptvCards} />
+                <Text style={{ fontSize: 12, color: COLORS.textMuted, marginVertical: 6 }}>OTT</Text>
+                <StatStrip cards={ottCards} />
+              </View>
 
-              {/* ASSIGN BRANCHES BUTTON */}
-              <TouchableOpacity
-                style={[styles.simpleActionBtn, { borderColor: 'rgba(6, 182, 212, 0.4)', backgroundColor: 'rgba(6, 182, 212, 0.08)' }]}
-                onPress={() => handleOpenAssignBranches(selectedPartner)}
-              >
-                <Feather name="git-branch" size={14} color="#06b6d4" />
-                <Text style={[styles.simpleActionBtnText, { color: '#06b6d4' }]}>Assign Branches</Text>
-              </TouchableOpacity>
-
-              {/* IMPERSONATE BUTTON */}
-              <TouchableOpacity
-                style={[styles.simpleActionBtn, { borderColor: 'rgba(236, 72, 153, 0.4)', backgroundColor: 'rgba(236, 72, 153, 0.08)' }]}
-                onPress={() => handleImpersonatePartner(selectedPartner)}
-                disabled={impersonatingId === selectedPartner.partner_id}
-              >
-                <Feather name="log-in" size={14} color="#ec4899" />
-                <Text style={[styles.simpleActionBtnText, { color: '#ec4899' }]}>
-                  {impersonatingId === selectedPartner.partner_id ? 'Logging in...' : 'Login'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* SECTION: PARTNER INFORMATION */}
-          <View style={styles.detailsCardSection}>
-            <View style={styles.sectionTitleRow}>
-              <Feather name="user-check" size={18} color={COLORS.primary} />
-              <Text style={styles.sectionTitleText}>Partner Information</Text>
-            </View>
-
-            <View style={styles.detailsGrid}>
-              <View style={styles.detailsGridItem}>
-                <Text style={styles.detailsGridLabel}>PARTNER NAME</Text>
-                <Text style={styles.detailsGridVal}>{selectedPartner.partner_name || '—'}</Text>
+              {/* PARTNERS UNDER THIS ADMIN — same table as the main Partners page */}
+              <View style={[styles.pdSection, { padding: 0, overflow: 'hidden' }]}>
+                <View style={[styles.pdSectionHead, { padding: 16, marginBottom: 0 }]}>
+                  <Feather name="git-merge" size={16} color="#0f172a" />
+                  <Text style={styles.pdSectionTitle}>Partners under {p.partner_name}</Text>
+                  {loadingAdminChildren ? <ActivityIndicator size="small" color={COLORS.primary} /> : null}
+                </View>
+                <PartnersTable
+                  list={adminChildren}
+                  loading={loadingAdminChildren && adminChildren.length === 0}
+                  isMobile={isMobile}
+                  emptyText={`${p.partner_name} has no partners under it yet.`}
+                  onOpen={(ch) => handleSelectPartner(ch, p)}
+                  onWallet={(ch) => handleOpenWallet(ch)}
+                  onToggleStatus={readOnly ? null : (ch) => setConfirmStatusPartner(ch)}
+                  onImpersonate={canImpersonate ? (ch) => handleImpersonatePartner(ch) : null}
+                  impersonatingId={impersonatingId}
+                  onResetPassword={readOnly ? null : (ch) => handleOpenPartnerResetPass(ch)}
+                />
               </View>
-              <View style={styles.detailsGridItem}>
-                <Text style={styles.detailsGridLabel}>COMPANY / NETWORK NAME</Text>
-                <Text style={styles.detailsGridVal}>{selectedPartner.company_name || '—'}</Text>
-              </View>
-              <View style={styles.detailsGridItem}>
-                <Text style={styles.detailsGridLabel}>MOBILE NUMBER</Text>
-                <Text style={styles.detailsGridVal}>{selectedPartner.partner_mobile || '—'}</Text>
-              </View>
-              <View style={styles.detailsGridItem}>
-                <Text style={styles.detailsGridLabel}>EMAIL ADDRESS</Text>
-                <Text style={styles.detailsGridVal}>{selectedPartner.partner_email || '—'}</Text>
-              </View>
-              <View style={styles.detailsGridItem}>
-                <Text style={styles.detailsGridLabel}>REGION / LOCATION</Text>
-                <Text style={styles.detailsGridVal}>{selectedPartner.partner_region || '—'}</Text>
-              </View>
-              <View style={styles.detailsGridItem}>
-                <Text style={styles.detailsGridLabel}>ACCOUNT USERNAME</Text>
-                <Text style={styles.detailsGridVal}>{selectedPartner.account_username || selectedPartner.login?.username || '—'}</Text>
-              </View>
-              <View style={styles.detailsGridItem}>
-                <Text style={styles.detailsGridLabel}>KYC PROVIDER MAPPING</Text>
-                <Text style={[styles.detailsGridVal, { color: COLORS.accentEmerald, fontWeight: '700' }]}>
-                  {selectedPartner.kyc_provider || 'Not Configured'}
-                </Text>
-              </View>
-              <View style={styles.detailsGridItem}>
-                <Text style={styles.detailsGridLabel}>IPTV BRANCH ID</Text>
-                <Text style={[styles.detailsGridVal, { color: '#8b5cf6', fontWeight: '700' }]}>
-                  {selectedPartner.iptv_branch_id || '—'}
-                </Text>
-              </View>
-            </View>
-          </View>
+            </>
+          )}
         </ScrollView>
         {renderResetPasswordModal()}
         {renderConfirmStatusModal()}
@@ -3499,7 +3524,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       >
         {/* Filter Controls Row */}
         <View style={[styles.filterRow, isMobile && { flexDirection: 'column', alignItems: 'stretch', gap: 10 }]}>
-          <View style={[styles.searchBox, isMobile && { maxWidth: '100%', width: '100%', height: 42 }]}>
+          <View style={[styles.searchBox, isMobile && { maxWidth: '100%', width: '100%', height: 42, flexGrow: 0, flexShrink: 0, flexBasis: 'auto' }]}>
             <Feather name="search" size={16} color={COLORS.textDim} />
             <TextInput
               style={[styles.searchInput, isMobile && { fontSize: 13 }]}
@@ -3512,10 +3537,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
 
           <View style={[
             { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', flex: 1, justifyContent: 'flex-end' },
-            isMobile && { width: '100%', flex: 0, justifyContent: 'space-between', marginTop: 4 }
+            isMobile && { width: '100%', flexGrow: 0, flexShrink: 0, flexBasis: 'auto', justifyContent: 'space-between', marginTop: 4 }
           ]}>
+            {!readOnly ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, width: isMobile ? '100%' : 'auto' }}>
-              {/* ADD OPERATOR BUTTON */}
+              {/* ADD PARTNER BUTTON (super admin only — admins are view-only) */}
               <TouchableOpacity
                 style={[
                   {
@@ -3532,11 +3558,13 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 onPress={() => handleOpenCreate('operator')}
               >
                 <Feather name="user-plus" size={14} color="#ffffff" />
-                <Text style={{ fontSize: 12, fontWeight: '700', color: '#ffffff' }}>Add Operator</Text>
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#ffffff' }}>Add Partner</Text>
               </TouchableOpacity>
 
             </View>
+            ) : null}
 
+            {!readOnly ? (
             <View style={[styles.roleFilters, isMobile && { width: '100%', justifyContent: 'space-between', marginTop: 4 }]}>
               {['', 'operator', 'admin'].map((role) => (
                 <TouchableOpacity
@@ -3549,303 +3577,28 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   onPress={() => setSelectedRole(role)}
                 >
                   <Text style={[styles.roleChipText, selectedRole === role && styles.roleChipTextActive]}>
-                    {role === '' ? 'All Roles' : role.toUpperCase()}
+                    {role === '' ? 'All' : role === 'operator' ? 'Operators' : 'Super Distributors'}
                   </Text>
                 </TouchableOpacity>
               ))}
             </View>
+            ) : null}
           </View>
         </View>
 
-        {/* STRUCTURED DATA TABLE VIEW */}
+        {/* PARTNERS TABLE — only this login's own level; deeper levels open from each admin */}
         <View style={styles.card}>
-          {loading ? (
-            <ActivityIndicator size="large" color={COLORS.primary} style={{ marginVertical: 40 }} />
-          ) : isMobile ? (
-            <View style={{ padding: 12, gap: 12 }}>
-              {filteredPartners.length === 0 ? (
-                <View style={styles.emptyContainer}>
-                  <Feather name="info" size={24} color={COLORS.textMuted} />
-                  <Text style={styles.emptyText}>No partner records matched your filter criteria.</Text>
-                </View>
-              ) : (
-                filteredPartners.map((item) => {
-                  const isEnabled = item.status === 'enabled';
-                  const iptvActive = item.active_iptv_accounts !== undefined && item.active_iptv_accounts !== null ? item.active_iptv_accounts : (item.iptv_active_count ?? 0);
-                  return (
-                    <View key={item.partner_id} style={styles.mobileCard}>
-                      <View style={styles.mobileCardHeader}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-                          <View style={styles.idBadge}>
-                            <Text style={styles.idText}>#{item.partner_id}</Text>
-                          </View>
-                          <TouchableOpacity onPress={() => handleSelectPartner(item)} style={{ flex: 1 }}>
-                            <Text style={styles.partnerNameText} numberOfLines={1}>{item.partner_name}</Text>
-                            <Text style={styles.companyNameText} numberOfLines={1}>{item.company_name}</Text>
-                          </TouchableOpacity>
-                        </View>
-                        <View
-                          style={[
-                            styles.roleBadge,
-                            item.account_role === 'admin' ? styles.roleBadgeAdmin : styles.roleBadgeOperator,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.roleBadgeText,
-                              item.account_role === 'admin' ? styles.roleBadgeTextAdmin : styles.roleBadgeTextOperator,
-                            ]}
-                          >
-                            {(item.account_role || 'operator').toUpperCase()}
-                          </Text>
-                        </View>
-                      </View>
-
-                      <View style={styles.mobileCardBody}>
-                        <View style={styles.contactRow}>
-                          <Feather name="phone" size={12} color={COLORS.textMuted} />
-                          <Text style={styles.contactText}>{item.partner_mobile || 'N/A'}</Text>
-                        </View>
-                        <View style={styles.contactRow}>
-                          <Feather name="mail" size={12} color={COLORS.textMuted} />
-                          <Text style={styles.contactText}>{item.partner_email || 'N/A'}</Text>
-                        </View>
-                        <View style={styles.contactRow}>
-                          <Feather name="map-pin" size={12} color={COLORS.textMuted} />
-                          <Text style={styles.contactText}>{item.partner_region || '—'}</Text>
-                        </View>
-
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4, alignItems: 'center' }}>
-                          <TouchableOpacity onPress={() => handleOpenWallet(item)}>
-                            <Text style={{ fontSize: 12, color: '#10b981', fontWeight: '700' }}>
-                              Wallet: ₹{(item.wallet_balance !== undefined && item.wallet_balance !== null ? item.wallet_balance : 0).toLocaleString('en-IN')}
-                            </Text>
-                          </TouchableOpacity>
-                          <Text style={styles.subMonoText}>
-                            Sessions: {item.active_sessions !== undefined ? item.active_sessions.toLocaleString() : '0'}
-                          </Text>
-                        </View>
-
-                        {/*  COUNTS & IPTV ACTIVE BADGE (ITEM 13) */}
-                        <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
-                          <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5 }}>
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>
-                              {item.active_internet_accounts !== undefined && item.active_internet_accounts !== null ? item.active_internet_accounts : 0} Active
-                            </Text>
-                          </View>
-                          <View style={{ backgroundColor: 'rgba(59, 130, 246, 0.12)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5 }}>
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6' }}>
-                              {item.online_internet_accounts !== undefined && item.online_internet_accounts !== null ? item.online_internet_accounts : 0} Online
-                            </Text>
-                          </View>
-                          <View style={{ backgroundColor: 'rgba(139, 92, 246, 0.12)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 5 }}>
-                            <Text style={{ fontSize: 11, fontWeight: '700', color: '#8b5cf6' }}>
-                              {iptvActive} IPTV Active
-                            </Text>
-                          </View>
-                        </View>
-                      </View>
-
-                      <View style={[styles.mobileCardFooter, { flexDirection: 'column', alignItems: 'stretch', gap: 10, paddingTop: 10, borderTopWidth: 1, borderTopColor: 'rgba(0,0,0,0.06)' }]}>
-                        {/* Status Row */}
-                        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                          <Text style={{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted }}>Operator Status:</Text>
-                          {/* ENABLE / DISABLE STATUS TOGGLE WITH ALERT CONFIRMATION (ITEM 14) */}
-                          <TouchableOpacity onPress={() => setConfirmStatusPartner(item)}>
-                            <View style={[styles.statusTag, isEnabled ? styles.tagEnabled : styles.tagDisabled]}>
-                              <View style={[styles.statusDot, isEnabled ? styles.dotEnabled : styles.dotDisabled]} />
-                              <Text style={[styles.tagText, isEnabled ? styles.tagTextEnabled : styles.tagTextDisabled]}>
-                                {isEnabled ? 'ENABLED' : 'DISABLED'}
-                              </Text>
-                            </View>
-                          </TouchableOpacity>
-                        </View>
-
-                        {/* Action buttons row with even distribution */}
-                        <View style={{ flexDirection: 'row', gap: 6, alignItems: 'center', width: '100%' }}>
-                          <TouchableOpacity
-                            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, borderRadius: 6, backgroundColor: 'rgba(139, 92, 246, 0.1)', borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.3)' }}
-                            onPress={() => {
-                              setEditingPartner(item);
-                              setEditForm({ ...item, iptv_branch_id: item.iptv_branch_id || '' });
-                            }}
-                          >
-                            <Feather name="git-branch" size={12} color="#8b5cf6" />
-                            <Text style={{ fontSize: 11, fontWeight: '600', color: '#8b5cf6' }}>IPTV Branch</Text>
-                          </TouchableOpacity>
-
-                          <TouchableOpacity
-                            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, borderRadius: 6, backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' }}
-                            onPress={() => handleOpenPartnerResetPass(item)}
-                          >
-                            <Feather name="key" size={12} color="#f59e0b" />
-                            <Text style={{ fontSize: 11, fontWeight: '600', color: '#f59e0b' }}>Reset Pass</Text>
-                          </TouchableOpacity>
-
-                          <TouchableOpacity
-                            style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, paddingVertical: 7, borderRadius: 6, backgroundColor: 'rgba(236, 72, 153, 0.1)', borderWidth: 1, borderColor: 'rgba(236, 72, 153, 0.3)' }}
-                            onPress={() => handleImpersonatePartner(item)}
-                            disabled={impersonatingId === item.partner_id}
-                          >
-                            <Feather name="log-in" size={12} color="#ec4899" />
-                            <Text style={{ fontSize: 11, fontWeight: '600', color: '#ec4899' }}>
-                              {impersonatingId === item.partner_id ? 'Wait...' : 'Login'}
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    </View>
-                  );
-                })
-              )}
-            </View>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: 1350, width: '100%' }}>
-              <View style={{ width: '100%' }}>
-                <View style={styles.tableHeader}>
-                  <Text style={[styles.th, { flex: 0.8, minWidth: 60 }]}>ID</Text>
-                  <Text style={[styles.th, { flex: 1.8, minWidth: 160 }]}>Partner & Company Name</Text>
-                  <Text style={[styles.th, { flex: 1.4, minWidth: 120 }]}>Region / Location</Text>
-                  <Text style={[styles.th, { flex: 1.6, minWidth: 130 }]}>Contact Info</Text>
-                  <Text style={[styles.th, { flex: 1.1, minWidth: 100 }]}>Wallet (₹)</Text>
-                  <Text style={[styles.th, { flex: 2.0, minWidth: 140 }]}>Active / Online</Text>
-                  <Text style={[styles.th, { flex: 2.0, minWidth: 110 }]}>IPTV Active</Text>
-                  <Text style={[styles.th, { flex: 0.9, minWidth: 80 }]}>Role</Text>
-                  <Text style={[styles.th, { flex: 1.0, minWidth: 90 }]}>Status</Text>
-                  <Text style={[styles.th, { flex: 2.0, minWidth: 180 }]}>Actions</Text>
-                </View>
-
-                {filteredPartners.length === 0 ? (
-                  <View style={styles.emptyContainer}>
-                    <Feather name="info" size={24} color={COLORS.textMuted} />
-                    <Text style={styles.emptyText}>No partner records matched your filter criteria.</Text>
-                  </View>
-                ) : (
-                  filteredPartners.map((item) => {
-                    const isEnabled = item.status === 'enabled';
-                    const iptvActive = item.active_iptv_accounts !== undefined && item.active_iptv_accounts !== null ? item.active_iptv_accounts : (item.iptv_active_count ?? 0);
-                    return (
-                      <View key={item.partner_id} style={styles.tr}>
-                        <View style={[{ flex: 0.8, minWidth: 60 }, styles.td]}>
-                          <View style={styles.idBadge}>
-                            <Text style={styles.idText}>#{item.partner_id}</Text>
-                          </View>
-                        </View>
-
-                        <View style={[{ flex: 1.8, minWidth: 160 }, styles.td]}>
-                          <TouchableOpacity onPress={() => handleSelectPartner(item)}>
-                            <Text style={styles.partnerNameText}>{item.partner_name}</Text>
-                            <Text style={styles.companyNameText}>{item.company_name}</Text>
-                          </TouchableOpacity>
-                        </View>
-
-                        {/* REGION / LOCATION COLUMN (ITEM 15) */}
-                        <View style={[{ flex: 1.4, minWidth: 120 }, styles.td]}>
-                          <View style={styles.contactRow}>
-                            <Feather name="map-pin" size={12} color={COLORS.textMuted} />
-                            <Text style={styles.contactText}>{item.partner_region || '—'}</Text>
-                          </View>
-                        </View>
-
-                        <View style={[{ flex: 1.6, minWidth: 130 }, styles.td]}>
-                          <View style={styles.contactRow}>
-                            <Feather name="phone" size={12} color={COLORS.textMuted} />
-                            <Text style={styles.contactText}>{item.partner_mobile || 'N/A'}</Text>
-                          </View>
-                        </View>
-
-                        <View style={[{ flex: 1.1, minWidth: 100 }, styles.td]}>
-                          <TouchableOpacity onPress={() => handleOpenWallet(item)}>
-                            <Text style={{ fontSize: 13, fontWeight: '700', color: '#10b981' }}>
-                              ₹{(item.wallet_balance !== undefined && item.wallet_balance !== null ? item.wallet_balance : 0).toLocaleString('en-IN')}
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-
-                        {/*  COUNTS & IPTV ACTIVE BADGE (ITEM 13) */}
-                        <View style={[{ flex: 2.0, minWidth: 140 }, styles.td]}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                            <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5 }}>
-                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#10b981' }}>
-                                {item.active_internet_accounts !== undefined && item.active_internet_accounts !== null ? item.active_internet_accounts : 0} Active
-                              </Text>
-                            </View>
-                            <View style={{ backgroundColor: 'rgba(59, 130, 246, 0.12)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5 }}>
-                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#3b82f6' }}>
-                                {item.online_internet_accounts !== undefined && item.online_internet_accounts !== null ? item.online_internet_accounts : 0} Online
-                              </Text>
-                            </View>
-                          </View>
-                        </View>
-
-                        {/*  COUNTS & IPTV ACTIVE BADGE (ITEM 13) */}
-                        <View style={[{ flex: 2.0, minWidth: 110 }, styles.td]}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
-                            <View style={{ backgroundColor: 'rgba(139, 92, 246, 0.12)', paddingHorizontal: 6, paddingVertical: 3, borderRadius: 5 }}>
-                              <Text style={{ fontSize: 11, fontWeight: '700', color: '#8b5cf6' }}>
-                                {iptvActive} IPTV
-                              </Text>
-                            </View>
-                          </View>
-                        </View>
-
-                        <View style={[{ flex: 0.9, minWidth: 80 }, styles.td]}>
-                          <View
-                            style={[
-                              styles.roleBadge,
-                              item.account_role === 'admin' ? styles.roleBadgeAdmin : styles.roleBadgeOperator,
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.roleBadgeText,
-                                item.account_role === 'admin' ? styles.roleBadgeTextAdmin : styles.roleBadgeTextOperator,
-                              ]}
-                            >
-                              {(item.account_role || 'operator').toUpperCase()}
-                            </Text>
-                          </View>
-                        </View>
-
-                        {/* ENABLE / DISABLE STATUS TOGGLE WITH ALERT CONFIRMATION (ITEM 14) */}
-                        <View style={[{ flex: 1.0, minWidth: 90 }, styles.td]}>
-                          <TouchableOpacity onPress={() => setConfirmStatusPartner(item)}>
-                            <View style={[styles.statusTag, isEnabled ? styles.tagEnabled : styles.tagDisabled]}>
-                              <View style={[styles.statusDot, isEnabled ? styles.dotEnabled : styles.dotDisabled]} />
-                              <Text style={[styles.tagText, isEnabled ? styles.tagTextEnabled : styles.tagTextDisabled]}>
-                                {isEnabled ? 'ENABLED' : 'DISABLED'}
-                              </Text>
-                            </View>
-                          </TouchableOpacity>
-                        </View>
-
-                        <View style={[{ flex: 2.0, minWidth: 180, flexDirection: 'row', gap: 6, alignItems: 'center' }, styles.td]}>
-                          <TouchableOpacity
-                            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, backgroundColor: 'rgba(245, 158, 11, 0.1)', borderWidth: 1, borderColor: 'rgba(245, 158, 11, 0.3)' }}
-                            onPress={() => handleOpenPartnerResetPass(item)}
-                          >
-                            <Feather name="key" size={12} color="#f59e0b" />
-                            <Text style={{ fontSize: 11, fontWeight: '600', color: '#f59e0b' }}>Reset Pass</Text>
-                          </TouchableOpacity>
-
-                          <TouchableOpacity
-                            style={{ flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 6, backgroundColor: 'rgba(236, 72, 153, 0.1)', borderWidth: 1, borderColor: 'rgba(236, 72, 153, 0.3)' }}
-                            onPress={() => handleImpersonatePartner(item)}
-                            disabled={impersonatingId === item.partner_id}
-                          >
-                            <Feather name="log-in" size={12} color="#ec4899" />
-                            <Text style={{ fontSize: 11, fontWeight: '600', color: '#ec4899' }}>
-                              {impersonatingId === item.partner_id ? 'Wait...' : 'Login'}
-                            </Text>
-                          </TouchableOpacity>
-                        </View>
-                      </View>
-                    );
-                  })
-                )}
-              </View>
-            </ScrollView>
-          )}
+          <PartnersTable
+            list={filteredPartners}
+            loading={loading}
+            isMobile={isMobile}
+            onOpen={(item) => handleSelectPartner(item)}
+            onWallet={(item) => handleOpenWallet(item)}
+            onToggleStatus={readOnly ? null : (item) => setConfirmStatusPartner(item)}
+            onImpersonate={canImpersonate ? (item) => handleImpersonatePartner(item) : null}
+            impersonatingId={impersonatingId}
+            onResetPassword={readOnly ? null : (item) => handleOpenPartnerResetPass(item)}
+          />
         </View>
 
         {renderResetPasswordModal()}
@@ -3859,6 +3612,26 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
 };
 
 const styles = StyleSheet.create({
+  rowBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: 'rgba(37,99,235,0.3)', backgroundColor: 'rgba(37,99,235,0.06)' },
+  rowBtnText: { fontSize: 11, fontWeight: '700' },
+  pdWallet: { padding: 12, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(16,185,129,0.3)', backgroundColor: 'rgba(16,185,129,0.06)', minWidth: 220 },
+  pdMini: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 5, borderRadius: 6 },
+  pdMiniText: { color: '#ffffff', fontSize: 11, fontWeight: '700' },
+  pdAccountRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 14 },
+  pdAction: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1 },
+  pdActionText: { fontSize: 12, fontWeight: '700' },
+  pdSection: { backgroundColor: '#ffffff', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)', padding: 16, marginBottom: 20 },
+  pdSectionHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  pdSectionTitle: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
+  pdStatRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  pdStat: { flexGrow: 1, flexBasis: 100, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0' },
+  pdStatNum: { fontSize: 20, fontWeight: '700' },
+  pdStatLbl: { fontSize: 11, color: '#64748b', fontWeight: '600', marginTop: 2 },
+  pdTileGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  pdTile: { flexGrow: 1, flexBasis: 240, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#ffffff' },
+  pdTileIcon: { width: 34, height: 34, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  pdTileLabel: { fontSize: 13, fontWeight: '700', color: '#0f172a' },
+  pdTileHint: { fontSize: 11, color: '#64748b', marginTop: 1 },
   container: {
     flex: 1,
     width: '100%',
@@ -4483,6 +4256,12 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: COLORS.textMain,
   },
+  comboTableCard: { backgroundColor: '#ffffff', borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0', overflow: 'hidden' },
+  comboTr: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  comboThRow: { backgroundColor: '#f8fafc', paddingVertical: 10 },
+  comboTh: { fontSize: 11, fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 },
+  comboTd: { fontSize: 13, color: COLORS.textMain },
+  comboSub: { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
   iptvGridContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',

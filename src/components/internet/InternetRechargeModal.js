@@ -68,6 +68,9 @@ export const InternetRechargeModal = ({ visible, onClose, account, advance, onCo
         if (curPlan && curSub) {
           setPlanId(curPlan.plan_id);
           setSubPlanId(curSub.sub_plan_id);
+        } else if (advance) {
+          // Advance renewal is only for the current package — nothing to pre-select.
+          setCurrentNotMapped(true);
         } else {
           setCurrentNotMapped(true);
           const p = curPlan || mapped[0];
@@ -129,7 +132,7 @@ export const InternetRechargeModal = ({ visible, onClose, account, advance, onCo
             kind="orange"
             onPress={confirm}
             loading={submitting}
-            disabled={!selectedSub || loading}
+            disabled={!selectedSub || loading || (advance && currentNotMapped)}
           />
         </>
       }
@@ -149,23 +152,41 @@ export const InternetRechargeModal = ({ visible, onClose, account, advance, onCo
       ) : plans.length === 0 ? (
         <Note text="No internet plans are mapped to this operator yet. Ask your admin to map plans before recharging." />
       ) : (
+        advance ? (
+          // ADVANCE RENEWAL: the current package only — no package / duration choice.
+          currentNotMapped || !selectedSub ? (
+            <Note
+              tone="error"
+              text="This account's current package is not in this operator's plan list, so it cannot be renewed in advance. Ask the admin to map the package, or recharge with a new package after the plan expires."
+            />
+          ) : (
+            <>
+              <View style={[styles.summary, { marginTop: 16 }]}>
+                <KV label="Renewing" value={`${selectedPlan.plan_name} · ${selectedSub.sub_plan_name}`} bold />
+                <KV label="Validity" value={`${selectedSub.plan_validity} days, added after the current expiry`} />
+                <KV label="Wallet debit" value={money(selectedSub.mapped_price ?? selectedSub.base_price)} bold />
+              </View>
+              <Note
+                tone="info"
+                text={`Advance renewal keeps the current package. The new period starts when the current one ends (${formatApiDate(account.expiration)}). To change the package, recharge after it expires.`}
+              />
+            </>
+          )
+        ) : (
         <>
-          {advance ? (
-            <Note tone="info" text="Package change is disabled during Advance Renewal. Renewal will apply to your current package." />
-          ) : currentNotMapped ? (
+          {currentNotMapped ? (
             <Note tone="info" text="The account's current plan is not mapped for this operator, so another plan has been pre-selected. Please confirm the package and sub plan." />
           ) : null}
 
           <Text style={styles.sectionLabel}>PACKAGE ({plans.length})</Text>
           <Dropdown
             value={planId}
-            disabled={submitting || advance}
+            disabled={submitting}
             options={plans.map((p) => ({
               value: p.plan_id,
               label: `${p.plan_name}${p.data ? ` · ${p.data}` : ''}${String(p.plan_id) === String(account.package_id) ? '  (current)' : ''}`,
             }))}
             onChange={(id) => {
-              if (advance) return;
               const p = plans.find((x) => x.plan_id === id);
               if (p) choosePlan(p);
             }}
@@ -179,7 +200,7 @@ export const InternetRechargeModal = ({ visible, onClose, account, advance, onCo
                 disabled={submitting}
                 options={selectedPlan.subplans.map((sp) => ({
                   value: sp.sub_plan_id,
-                  label: `${sp.sub_plan_name} — ${sp.plan_validity} days — ${money(sp.base_price)}${String(selectedPlan.plan_id) === String(account.package_id) && String(sp.sub_plan_id) === String(account.subplan_id) ? '  (current)' : ''}`,
+                  label: `${sp.sub_plan_name} — ${sp.plan_validity} days — ${money(sp.mapped_price ?? sp.base_price)}${String(selectedPlan.plan_id) === String(account.package_id) && String(sp.sub_plan_id) === String(account.subplan_id) ? '  (current)' : ''}`,
                 }))}
                 onChange={(id) => setSubPlanId(id)}
               />
@@ -190,23 +211,20 @@ export const InternetRechargeModal = ({ visible, onClose, account, advance, onCo
             <View style={[styles.summary, { marginTop: 16 }]}>
               <KV label="New plan" value={`${selectedPlan.plan_name} · ${selectedSub.sub_plan_name}`} bold />
               <KV label="Validity" value={`${selectedSub.plan_validity} days`} />
-              <KV label="Wallet debit" value={money(selectedSub.base_price)} bold />
-              {selectedSub.mapped_price !== null && selectedSub.mapped_price !== undefined && Number(selectedSub.mapped_price) !== Number(selectedSub.base_price) ? (
-                <KV label="Operator selling price" value={money(selectedSub.mapped_price)} />
-              ) : null}
+              <KV label="Wallet debit" value={money(selectedSub.mapped_price ?? selectedSub.base_price)} bold />
+
             </View>
           ) : null}
 
           <Note
             text={
-              (advance
-                ? `Advance renewal: renewing early while the current plan is still active (expires ${formatApiDate(account.expiration)}).`
-                : 'Recharge: the plan starts now.') +
+              'Recharge: the plan starts now.' +
               (isChange ? ' The account will be moved to the selected package.' : '') +
               ' The operator wallet is debited immediately.'
             }
           />
         </>
+        )
       )}
     </ModalShell>
   );

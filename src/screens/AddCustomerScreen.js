@@ -906,18 +906,6 @@ const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new'
   const applyVerificationResult = (data) => {
     setVerification(data);
     const c = data.customer || {};
-    try {
-      if (typeof window !== 'undefined') {
-        const stored = localStorage.getItem('onebss_verified_cust_ids');
-        const set = stored ? new Set(JSON.parse(stored)) : new Set();
-        if (existingUser?.id) set.add(String(existingUser.id));
-        if (existingUser?.cust_id) set.add(String(existingUser.cust_id));
-        if (existingUser?.username) set.add(String(existingUser.username));
-        if (c.mobile) set.add(String(c.mobile));
-        if (c.id) set.add(String(c.id));
-        localStorage.setItem('onebss_verified_cust_ids', JSON.stringify([...set]));
-      }
-    } catch (e) {}
     const nameParts = String(c.full_name || c.name || '').trim().split(/\s+/).filter(Boolean);
     const first = nameParts.shift() || '';
     const last = nameParts.join(' ');
@@ -1449,7 +1437,7 @@ const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new'
         <Text style={styles.subHeaderTitle}>{mode === 'link' ? 'Add Internet Account' : 'Add Internet Customer'}</Text>
         <View style={styles.operatorBadge}>
           <Feather name="shield" size={13} color={COLORS.primary} />
-          <Text style={styles.operatorBadgeText}>Operator ID: #{operatorId || user?.partner_id || '1114'}</Text>
+          <Text style={styles.operatorBadgeText}>Operator ID: #{operatorId || user?.partner_id || '—'}</Text>
         </View>
       </View>
     </View>

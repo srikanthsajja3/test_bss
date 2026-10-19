@@ -92,6 +92,29 @@ export const normaliseInternetAccount = (acc, index) => ({
   raw: acc,
 });
 
+export const normaliseOttAccount = (acc, index) => ({
+  kind: 'ott',
+  index,
+  key: `ott_${acc.id ?? index}`,
+  id: acc.id,
+  title: clean(acc.subscriber_id) ? `OTT ${acc.subscriber_id}` : `OTT #${acc.id}`,
+  subtitle: [clean(acc.franchise_id) ? `Franchise ${acc.franchise_id}` : '', `OTT #${acc.id}`].filter(Boolean).join(' · '),
+  statusText: clean(acc.status_text) || 'New',
+  statusColor: null,
+  online: false,
+  showOnline: false,
+  planLabel: clean(acc.package_name) || 'No package yet',
+  subplanLabel: clean(acc.duration) || '—',
+  planId: acc.plan_id,
+  subPlanId: acc.sub_plan_id,
+  expiration: acc.expiration,
+  lastSeenLabel: 'Started',
+  lastSeen: acc.start_date,
+  canRecharge: !!acc.id,
+  canRechargeAny: !!acc.id,
+  raw: acc,
+});
+
 export const normaliseIptvAccount = (acc, index) => ({
   kind: 'iptv',
   index,
@@ -131,92 +154,144 @@ const Pill = ({ text, tone }) => (
   </View>
 );
 
-const AccountCard = ({ account, isMobile, onInternetRecharge, onIptvRecharge, onVerify, onDetails }) => {
+const AccountCard = ({ account, isMobile, onInternetRecharge, onIptvRecharge, onOttRecharge, onOttDeactivate, onVerify, onDetails, onRecheck, readOnly }) => {
   const expiry = describeExpiry(account.expiration);
   const isInternet = account.kind === 'internet';
-  const accent = isInternet ? COLORS.primary : '#8b5cf6';
+  const accent = isInternet ? COLORS.primary : account.kind === 'ott' ? '#0ea5e9' : '#8b5cf6';
+  const isAdvance = defaultRechargeType(account) === 'advance';
+  const verified = !isInternet || isAccountVerified(account.raw);
 
   return (
     <View style={[styles.accCard, { borderTopColor: accent }, isMobile ? { width: '100%' } : null]}>
-      {/* Header */}
       <View style={styles.accHeader}>
-        <View style={[styles.accIcon, { backgroundColor: isInternet ? 'rgba(16,185,129,0.12)' : 'rgba(139,92,246,0.12)' }]}>
-          <Feather name={isInternet ? 'wifi' : 'tv'} size={18} color={accent} />
+        <View style={[styles.accIcon, { backgroundColor: isInternet ? 'rgba(16,185,129,0.12)' : account.kind === 'ott' ? 'rgba(14,165,233,0.12)' : 'rgba(139,92,246,0.12)' }]}>
+          <Feather name={isInternet ? 'wifi' : account.kind === 'ott' ? 'play-circle' : 'tv'} size={18} color={accent} />
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={styles.accTitle} numberOfLines={1}>{account.title}</Text>
-          <Text style={styles.accSubtitle} numberOfLines={1}>{account.subtitle}</Text>
+          {isInternet ? (
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
+              <View style={[styles.dot, { backgroundColor: account.online ? '#10b981' : '#94a3b8' }]} />
+              <Text style={[styles.accSubtitle, { color: account.online ? '#047857' : '#64748b' }]}>{account.online ? 'Online' : 'Offline'}</Text>
+            </View>
+          ) : (
+            <Text style={styles.accSubtitle} numberOfLines={1}>{account.subtitle}</Text>
+          )}
         </View>
         <Pill text={account.statusText} tone={statusTone(account.statusText, account.statusColor)} />
       </View>
 
-      {/* Body */}
       <View style={styles.accBody}>
-        <InfoRow label="Plan">{`${account.planLabel} · ${account.subplanLabel}`}</InfoRow>
+        <InfoRow label="Plan">{`${account.planLabel}${account.subplanLabel && account.subplanLabel !== '—' ? ` · ${account.subplanLabel}` : ''}`}</InfoRow>
         <InfoRow label="Expiry">
           <View style={{ alignItems: 'flex-end' }}>
-            {parseApiDate(account.expiration) ? <Text style={styles.infoValue}>{formatApiDate(account.expiration)}</Text> : null}
+            {parseApiDate(account.expiration) ? <Text style={styles.infoValue}>{formatApiDate(account.expiration, false)}</Text> : null}
             <Text style={[styles.expiryHint, { color: TONE[expiry.tone].fg }]}>{expiry.text}</Text>
           </View>
         </InfoRow>
-        {account.showOnline ? (
-          <InfoRow label="Connection">
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-              <View style={[styles.dot, { backgroundColor: account.online ? '#10b981' : '#94a3b8' }]} />
-              <Text style={[styles.infoValue, { color: account.online ? '#047857' : '#64748b' }]}>{account.online ? 'Online' : 'Offline'}</Text>
-            </View>
-          </InfoRow>
-        ) : (
-          <InfoRow label="Auto renew">{account.autoRenew ? 'On' : 'Off'}</InfoRow>
-        )}
-        <InfoRow label={account.lastSeenLabel}>{formatApiDate(account.lastSeen)}</InfoRow>
-        {isInternet ? (
-          <InfoRow label="Verification">
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-              <Feather name={isAccountVerified(account.raw) ? 'check-circle' : 'alert-circle'} size={12} color={isAccountVerified(account.raw) ? '#10b981' : '#d97706'} />
-              <Text style={[styles.infoValue, { color: isAccountVerified(account.raw) ? '#047857' : '#b45309' }]}>
-                {isAccountVerified(account.raw) ? 'Verified' : 'Not verified'}
-              </Text>
-            </View>
-          </InfoRow>
-        ) : null}
-        {account.balance !== undefined ? <InfoRow label="Balance">{formatMoney(account.balance)}</InfoRow> : null}
       </View>
 
-      {/* Actions */}
+      {(account.kind === 'internet' || account.kind === 'iptv') && account.raw?.customer_price !== null && account.raw?.customer_price !== undefined ? (
+        <View style={styles.custPriceRow}>
+          <Feather name="tag" size={12} color="#047857" />
+          <Text style={styles.custPriceText} numberOfLines={1}>
+            Customer price ₹{Number(account.raw.customer_price).toFixed(2)}
+            {account.kind === 'iptv' ? ' (base pack)' : ''}
+          </Text>
+        </View>
+      ) : null}
+
+      {account.raw?.open_recharge ? (
+        <View style={styles.recheckNote}>
+          <Feather name="alert-triangle" size={12} color="#b45309" />
+          <Text style={styles.recheckNoteText} numberOfLines={2}>
+            {account.raw.open_recharge.kind === 'combo' ? 'Combo recharge' : 'Last recharge'} not completed by the provider · ₹{Number(account.raw.open_recharge.amount || 0).toFixed(2)} paid
+            {account.raw.open_recharge.message ? ` · ${account.raw.open_recharge.message}` : ''}
+          </Text>
+        </View>
+      ) : null}
+
       <View style={styles.accActions}>
-        {isInternet ? (
-          !isAccountVerified(account.raw) ? (
-            // Customer verification is mandatory before Recharge / Advance Renewal
-            <>
-              <TouchableOpacity style={[styles.btn, styles.btnVerify]} onPress={() => onVerify(account.raw)}>
-                <Feather name="user-check" size={13} color="#ffffff" />
-                <Text style={styles.btnQuickText}>Verify Customer</Text>
-              </TouchableOpacity>
-              <Text style={styles.rechargeHint}>Required before recharge</Text>
-            </>
-          ) : (
-            <TouchableOpacity
-              style={[styles.btn, styles.btnQuick, !account.canRechargeAny && styles.btnDisabled]}
-              onPress={() => onInternetRecharge(account.raw, defaultRechargeType(account) === 'advance')}
-              disabled={!account.canRechargeAny}
-            >
-              <Feather name={defaultRechargeType(account) === 'advance' ? 'fast-forward' : 'refresh-cw'} size={13} color="#ffffff" />
-              <Text style={styles.btnQuickText}>{defaultRechargeType(account) === 'advance' ? 'Advance Renewal' : 'Recharge'}</Text>
-            </TouchableOpacity>
-          )
+        {readOnly ? null : account.raw?.open_recharge && onRecheck ? (
+          <TouchableOpacity style={[styles.btn, styles.btnRecheck]} onPress={() => onRecheck(account.raw)}>
+            <Feather name="rotate-ccw" size={13} color="#ffffff" />
+            <Text style={styles.btnQuickText}>Recheck</Text>
+          </TouchableOpacity>
+        ) : !verified ? (
+          // Customer verification is mandatory before Recharge / Advance Renewal
+          <TouchableOpacity style={[styles.btn, styles.btnVerify]} onPress={() => onVerify(account.raw)}>
+            <Feather name="user-check" size={13} color="#ffffff" />
+            <Text style={styles.btnQuickText}>Verify to recharge</Text>
+          </TouchableOpacity>
+        ) : account.kind === 'ott' ? (
+          <TouchableOpacity style={[styles.btn, styles.btnOtt]} onPress={() => onOttRecharge && onOttRecharge(account.raw)}>
+            <Feather name={isAdvance ? 'fast-forward' : 'play-circle'} size={13} color="#ffffff" />
+            <Text style={styles.btnQuickText}>{isAdvance ? 'Advance Renewal' : 'Recharge'}</Text>
+          </TouchableOpacity>
+        ) : isInternet ? (
+          <TouchableOpacity
+            style={[styles.btn, styles.btnQuick, !account.canRechargeAny && styles.btnDisabled]}
+            onPress={() => onInternetRecharge(account.raw, isAdvance)}
+            disabled={!account.canRechargeAny}
+          >
+            <Feather name={isAdvance ? 'fast-forward' : 'refresh-cw'} size={13} color="#ffffff" />
+            <Text style={styles.btnQuickText}>{isAdvance ? 'Advance Renewal' : 'Recharge'}</Text>
+          </TouchableOpacity>
         ) : (
           <TouchableOpacity style={[styles.btn, styles.btnIptv]} onPress={() => onIptvRecharge(account.raw)}>
-            <Feather name={defaultRechargeType(account) === 'advance' ? 'fast-forward' : 'refresh-cw'} size={13} color="#ffffff" />
-            <Text style={styles.btnQuickText}>{defaultRechargeType(account) === 'advance' ? 'Advance Renewal' : 'Recharge'}</Text>
+            <Feather name={isAdvance ? 'fast-forward' : 'refresh-cw'} size={13} color="#ffffff" />
+            <Text style={styles.btnQuickText}>{isAdvance ? 'Advance Renewal' : 'Recharge'}</Text>
           </TouchableOpacity>
         )}
-        <TouchableOpacity style={[styles.btn, styles.btnDetails]} onPress={() => onDetails(account)}>
-          <Text style={styles.btnDetailsText}>Details</Text>
-          <Feather name="chevron-right" size={14} color={COLORS.textMain} />
-        </TouchableOpacity>
+        {account.kind === 'ott' ? (
+          isAdvance && onOttDeactivate && !readOnly ? (
+            <TouchableOpacity style={[styles.btn, styles.btnDetails]} onPress={() => onOttDeactivate(account.raw)} title="Stop the current OTT package (no refund)">
+              <Feather name="slash" size={13} color="#b91c1c" />
+              <Text style={[styles.btnDetailsText, { color: '#b91c1c' }]}>Deactivate</Text>
+            </TouchableOpacity>
+          ) : null
+        ) : (
+          <TouchableOpacity style={[styles.btn, styles.btnDetails]} onPress={() => onDetails(account)}>
+            <Text style={styles.btnDetailsText}>Details</Text>
+            <Feather name="chevron-right" size={14} color={COLORS.textMain} />
+          </TouchableOpacity>
+        )}
       </View>
     </View>
+  );
+};
+
+// Small status line for the background provider sync of this customer.
+const SyncStatus = ({ syncState, onRetry }) => {
+  if (!syncState) return null;
+  const at = syncState.at ? syncState.at.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '';
+  if (syncState.state === 'syncing') {
+    return (
+      <View style={styles.syncChip}>
+        <ActivityIndicator size="small" color="#2563eb" />
+        <Text style={styles.syncChipText}>Updating from RADIUS & IPTV…</Text>
+      </View>
+    );
+  }
+  if (syncState.state === 'done') {
+    return (
+      <View style={[styles.syncChip, { backgroundColor: 'rgba(16,185,129,0.08)', borderColor: 'rgba(16,185,129,0.25)' }]}>
+        <Feather name="check" size={12} color="#047857" />
+        <Text style={[styles.syncChipText, { color: '#047857' }]}>Up to date · {at}</Text>
+      </View>
+    );
+  }
+  return (
+    <TouchableOpacity
+      onPress={onRetry}
+      style={[styles.syncChip, { backgroundColor: 'rgba(245,158,11,0.1)', borderColor: 'rgba(245,158,11,0.35)' }]}
+      title={syncState.message || ''}
+    >
+      <Feather name="alert-triangle" size={12} color="#b45309" />
+      <Text style={[styles.syncChipText, { color: '#b45309' }]} numberOfLines={1}>
+        {syncState.state === 'partial' ? 'Partly updated' : 'Could not update'} — showing saved data · Retry
+      </Text>
+    </TouchableOpacity>
   );
 };
 
@@ -267,7 +342,14 @@ export const defaultRechargeType = (account) => {
  *  onInternetRecharge(rawInternetAccount, advance)  opens the plan-picker recharge modal
  *  onVerify(rawInternetAccount)                     opens Verify Customer (required before recharge)
  */
-export const CustomerAccountsOverview = ({ customer, loading = false, syncing = false, onBack, onOpenDetails, onInternetRecharge, onIptvRecharge, onVerify, onRefresh, onModifyMobile, onAddIptv }) => {
+export const CustomerAccountsOverview = ({ customer, loading = false, syncing = false, syncState = null, onBack, onOpenDetails, onInternetRecharge, onIptvRecharge, onVerify, onRefresh, onModifyMobile: onModifyMobileProp, onAddIptv, onComboRecharge: onComboRechargeProp, onRecheck, onOttRecharge, onAddOtt: onAddOttProp, onOttDeactivate, readOnly = false, operatorNames = {} }) => {
+  // Admins (super distributor / distributor / sub distributor) only view: no recharge, edits or adds.
+  const onModifyMobile = readOnly ? null : onModifyMobileProp;
+  const onComboRecharge = readOnly ? null : onComboRechargeProp;
+  const onAddOtt = readOnly ? null : onAddOttProp;
+  // Online recharge switch per operator of this customer (customer_online_access.php).
+  const [onlineOverride, setOnlineOverride] = useState({});
+  const [savingOnline, setSavingOnline] = useState(null);
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
@@ -287,31 +369,11 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
 
   const internet = (customer.internet_accounts || []).map(normaliseInternetAccount);
   const iptv = (customer.iptv_accounts || []).map(normaliseIptvAccount);
-  const all = [...internet, ...iptv];
+  const ott = (customer.ott_accounts || []).map(normaliseOttAccount);
+  const all = [...internet, ...iptv, ...ott];
   const activeCount = all.filter((a) => a.statusText.toLowerCase() === 'active').length;
   const name = clean(customer.full_name) || [customer.first_name, customer.last_name].filter(Boolean).join(' ') || `Customer #${customer.cust_id}`;
   const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0].toUpperCase()).join('');
-
-  // Check IPTV sync status if 0 IPTV accounts
-  useEffect(() => {
-    const rawMobile = clean(customer?.mobile || customer?.MobileNumber || customer?.internet_accounts?.[0]?.mobile || '');
-    const digitsOnly = rawMobile.replace(/\D/g, '');
-    const finalMobile = digitsOnly.length >= 10 ? digitsOnly.slice(-10) : '';
-    if (iptv.length === 0 && finalMobile) {
-      OneBssApi.syncIptvCustomers(finalMobile).then((res) => {
-        const s = res?.data?.summary || res?.summary;
-        if ((res?.data?.success || res?.success) && s && Number(s.stbs_added || 0) === 0 && Number(s.stbs_skipped || 0) === 0) {
-          setIptvSyncStatus('no_devices');
-        } else {
-          setIptvSyncStatus(null);
-        }
-      }).catch(() => {
-        setIptvSyncStatus(null);
-      });
-    } else {
-      setIptvSyncStatus(null);
-    }
-  }, [customer?.cust_id, customer?.mobile, iptv.length]);
 
   const executeAddIptv = async (branchCode) => {
     if (!branchCode || !String(branchCode).trim()) {
@@ -346,13 +408,8 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
 
     setSubmittingIptv(true);
     try {
-      try {
-        await OneBssApi.addIptvCustomer(payload);
-      } catch (e) {
-        console.warn('OneBssApi.addIptvCustomer error:', e);
-      }
-
       if (onAddIptv) {
+        // the parent screen creates the IPTV customer and syncs it (one call, not two)
         const res = await onAddIptv({
           customer,
           name,
@@ -362,21 +419,18 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
           branchCode: cleanBranchCode,
           partnerId,
         });
+        if (res === false) return;
         if (res?.status === 'no_devices' || res === 'no_devices') {
           setIptvSyncStatus('no_devices');
         }
       } else {
+        const addRes = await OneBssApi.addIptvCustomer(payload);
+        if (!addRes.ok) {
+          toast.error(`Could not add IPTV account: ${addRes.data?.message || 'Pioneer rejected the request.'}`);
+          return;
+        }
         const syncRes = await OneBssApi.syncIptvCustomers(finalMobile);
         const syncData = syncRes?.data || {};
-        try {
-          await OneBssApi.updateIptvStbDetails({
-            stb_id: defaultStbId,
-            stb_mac: defaultMac,
-            name,
-            mobile: finalMobile,
-            status: 'active',
-          });
-        } catch (e) {}
         const s = syncData?.summary || syncRes?.summary;
         if (
           (syncData?.success || syncRes?.success) &&
@@ -386,8 +440,10 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
         ) {
           setIptvSyncStatus('no_devices');
           toast.info('customer registered successfully , No devices found');
-        } else {
+        } else if (syncRes.ok) {
           toast.success(`IPTV service provisioned successfully for ${name}!`);
+        } else {
+          toast.warn(`IPTV customer created, but the STB sync failed: ${syncData.message || 'unknown error'}.`);
         }
         if (onRefresh) onRefresh();
       }
@@ -494,6 +550,10 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
         onInternetRecharge={onInternetRecharge}
         onIptvRecharge={onIptvRecharge}
         onVerify={onVerify}
+        onRecheck={onRecheck}
+        onOttRecharge={onOttRecharge}
+        onOttDeactivate={onOttDeactivate}
+        readOnly={readOnly}
         onDetails={(a) => onOpenDetails(a.kind, a.index)}
       />
     ));
@@ -503,25 +563,12 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
       style={styles.container}
       contentContainerStyle={{ paddingHorizontal: isMobile ? 12 : 24, paddingVertical: isMobile ? 14 : 24, width: '100%' }}
     >
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 16 }}>
         <TouchableOpacity style={[styles.backBtn, { marginBottom: 0 }]} onPress={onBack}>
           <Feather name="arrow-left" size={16} color={COLORS.textMain} />
-          <Text style={styles.backBtnText}>Back to Subscribers List</Text>
+          <Text style={styles.backBtnText}>Back to Subscribers</Text>
         </TouchableOpacity>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          {syncing ? (
-            <View style={styles.syncChip}>
-              <ActivityIndicator size="small" color="#2563eb" />
-              <Text style={styles.syncChipText}>Syncing latest data…</Text>
-            </View>
-          ) : null}
-          {onRefresh ? (
-            <TouchableOpacity style={[styles.backBtn, { marginBottom: 0 }, (loading || syncing) && { opacity: 0.6 }]} onPress={onRefresh} disabled={loading || syncing}>
-              {loading && !syncing ? <ActivityIndicator size="small" color={COLORS.textMain} /> : <Feather name="refresh-cw" size={14} color={COLORS.textMain} />}
-              <Text style={styles.backBtnText}>Refresh</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
+        <SyncStatus syncState={syncState} onRetry={onRefresh} />
       </View>
 
       {/* CUSTOMER IDENTITY */}
@@ -581,7 +628,7 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
                     dest = encodeURIComponent(clean(customer.installation_address || customer.address));
                   }
                   if (!dest) {
-                    toast.warn('Please edit location or set address first.');
+                    toast.warn('No location or address yet — use “Set location” first.');
                     return;
                   }
                   const url = `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
@@ -606,9 +653,10 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
                 title="Open Google Maps Directions"
               >
                 <Feather name="navigation" size={11} color="#2563eb" />
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#2563eb' }}>Google Maps</Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#2563eb' }}>Directions</Text>
               </TouchableOpacity>
 
+              {!readOnly ? (
               <TouchableOpacity
                 onPress={() => setLocationModalVisible(true)}
                 style={{
@@ -626,8 +674,9 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
                 title="Edit Location & Pin GPS"
               >
                 <Feather name="edit-2" size={11} color="#8b5cf6" />
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#8b5cf6' }}>Edit Location</Text>
+                <Text style={{ fontSize: 11, fontWeight: '700', color: '#8b5cf6' }}>Set location</Text>
               </TouchableOpacity>
+              ) : null}
             </View>
           </View>
         </View>
@@ -635,9 +684,56 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
         <View style={styles.summaryRow}>
           <View style={styles.summaryBox}><Text style={styles.summaryNum}>{internet.length}</Text><Text style={styles.summaryLbl}>Internet</Text></View>
           <View style={styles.summaryBox}><Text style={styles.summaryNum}>{iptv.length}</Text><Text style={styles.summaryLbl}>IPTV</Text></View>
+          <View style={styles.summaryBox}><Text style={styles.summaryNum}>{ott.length}</Text><Text style={styles.summaryLbl}>OTT</Text></View>
           <View style={styles.summaryBox}><Text style={[styles.summaryNum, { color: '#047857' }]}>{activeCount}</Text><Text style={styles.summaryLbl}>Active</Text></View>
+          {onComboRecharge && internet.length > 0 && iptv.length > 0 ? (
+            <TouchableOpacity style={styles.comboBtn} onPress={() => onComboRecharge(customer)} title="Renew internet + IPTV together with a combo plan">
+              <Feather name="layers" size={15} color="#ffffff" />
+              <Text style={styles.comboBtnText}>Combo Recharge</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
+
       </View>
+
+        {/* Online recharge: off until the operator turns it on. The customer then pays the
+            operator's customer price of the package (set once per operator, Customer Prices). */}
+        {Array.isArray(customer.online_recharge) && customer.online_recharge.length > 0 ? (
+          <View style={{ gap: 6, marginBottom: 18 }}>
+            {customer.online_recharge.map((o) => {
+              const key = String(o.partner_id);
+              const on = onlineOverride[key] !== undefined ? onlineOverride[key] : !!o.enabled;
+              return (
+                <TouchableOpacity
+                  key={key}
+                  style={[styles.onlineRow, on && styles.onlineRowOn, (readOnly || savingOnline === key) && { opacity: readOnly ? 0.9 : 0.6 }]}
+                  disabled={readOnly || savingOnline === key}
+                  onPress={async () => {
+                    setSavingOnline(key);
+                    const res = await OneBssApi.setCustomerOnlineAccess(customer.cust_id, o.partner_id, !on);
+                    setSavingOnline(null);
+                    if (!res.ok) {
+                      toast.error(res.data?.message || 'Could not change online recharge.');
+                      return;
+                    }
+                    setOnlineOverride((prev) => ({ ...prev, [key]: !on }));
+                    toast.success(res.data?.message || (on ? 'Online recharge turned off.' : 'Online recharge turned on.'));
+                  }}
+                >
+                  <View style={[styles.switchTrack, { backgroundColor: on ? '#10b981' : '#cbd5e1', alignItems: on ? 'flex-end' : 'flex-start' }]}>
+                    <View style={styles.switchKnob} />
+                  </View>
+                  <Text style={[styles.onlineRowText, on && { color: '#047857' }]} numberOfLines={2}>
+                    Online recharge {on ? 'ON' : 'OFF'}
+                    {customer.online_recharge.length > 1 ? ` · ${operatorNames[key] || `operator #${key}`}` : ''}
+                    {on ? ' — Now the customer can use online recharge' : ''}
+                  </Text>
+                  {savingOnline === key ? <ActivityIndicator size="small" color="#10b981" /> : null}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : null}
 
       <Section title="Internet Accounts" icon="wifi" color={COLORS.primary} count={internet.length} loading={loading} emptyText="No internet accounts for this customer.">
         {renderCards(internet)}
@@ -666,7 +762,7 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
                     customer registered successfully , No devices found
                   </Text>
                 </View>
-              ) : (
+              ) : readOnly ? null : (
                 <TouchableOpacity
                   style={styles.addIptvBtn}
                   disabled={submittingIptv}
@@ -687,6 +783,43 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
         }
       >
         {renderCards(iptv)}
+      </Section>
+
+      <Section
+        title="OTT Accounts"
+        icon="play-circle"
+        color="#0ea5e9"
+        count={ott.length}
+        loading={loading}
+        emptyText="No OTT account for this customer."
+        headerAction={
+          onAddOtt && ott.length > 0 ? (
+            <TouchableOpacity style={[styles.addIptvBtn, { backgroundColor: '#0ea5e9' }]} onPress={() => onAddOtt(customer)}>
+              <Feather name="plus-circle" size={13} color="#ffffff" />
+              <Text style={styles.addIptvBtnText}>Add OTT</Text>
+            </TouchableOpacity>
+          ) : null
+        }
+        emptyContent={
+          <View style={styles.emptyBoxCustom}>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+              <View style={[styles.emptyIconBadge, { backgroundColor: 'rgba(14,165,233,0.12)' }]}>
+                <Feather name="play-circle" size={18} color="#0ea5e9" />
+              </View>
+              <Text style={styles.emptyPrimaryText}>No OTT account for this customer.</Text>
+            </View>
+            {onAddOtt ? (
+              <View style={{ marginTop: 12, alignItems: 'flex-start' }}>
+                <TouchableOpacity style={[styles.addIptvBtn, { backgroundColor: '#0ea5e9' }]} onPress={() => onAddOtt(customer)}>
+                  <Feather name="plus-circle" size={13} color="#ffffff" />
+                  <Text style={styles.addIptvBtnText}>Add OTT</Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+          </View>
+        }
+      >
+        {renderCards(ott)}
       </Section>
 
       {/* Edit Customer Location Popup Modal */}
@@ -825,7 +958,19 @@ const styles = StyleSheet.create({
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 6 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 0 },
   metaText: { fontSize: 12, color: '#4b5563', flexShrink: 1 },
-  summaryRow: { flexDirection: 'row', gap: 8 },
+  summaryRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
+  btnRecheck: { backgroundColor: '#d97706' },
+  recheckNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginHorizontal: 14, marginBottom: 8, padding: 8, borderRadius: 8, backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a' },
+  recheckNoteText: { flex: 1, fontSize: 11, color: '#92400e' },
+  custPriceRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 14, marginBottom: 8, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: 'rgba(16,185,129,0.06)', borderWidth: 1, borderColor: 'rgba(16,185,129,0.25)' },
+  custPriceText: { flex: 1, fontSize: 11.5, fontWeight: '600', color: '#047857' },
+  onlineRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0' },
+  onlineRowOn: { backgroundColor: 'rgba(16,185,129,0.07)', borderColor: 'rgba(16,185,129,0.3)' },
+  onlineRowText: { flex: 1, fontSize: 12, fontWeight: '600', color: '#64748b' },
+  switchTrack: { width: 34, height: 20, borderRadius: 10, padding: 2 },
+  switchKnob: { width: 16, height: 16, borderRadius: 8, backgroundColor: '#ffffff' },
+  comboBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: '#ec4899' },
+  comboBtnText: { fontSize: 13, fontWeight: '700', color: '#ffffff' },
   summaryBox: { minWidth: 72, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: COLORS.bgSecondary, borderWidth: 1, borderColor: COLORS.glassBorder, alignItems: 'center' },
   summaryNum: { fontSize: 18, fontWeight: '800', color: COLORS.textMain },
   summaryLbl: { fontSize: 10, fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.4 },
@@ -864,8 +1009,9 @@ const styles = StyleSheet.create({
   btnDisabled: { opacity: 0.45 },
   btnVerify: { backgroundColor: '#2563eb' },
   btnIptv: { backgroundColor: '#8b5cf6' },
-  syncChip: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe' },
-  syncChipText: { fontSize: 12, fontWeight: '600', color: '#1d4ed8' },
+  btnOtt: { backgroundColor: '#0ea5e9' },
+  syncChip: { flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%', flexShrink: 1, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe' },
+  syncChipText: { fontSize: 12, fontWeight: '600', color: '#1d4ed8', flexShrink: 1 },
   rechargeHint: { alignSelf: 'center', fontSize: 11, fontWeight: '600', color: '#64748b' },
 
   // IPTV Empty State & Direct Add styles

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'react-native';
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS_STYLE } from '../constants/theme';
-import { OneBssApi, setApiConfig, isJwtExpired } from '../services/oneBssApi';
+import { OneBssApi, getOriginalSession, popOriginalSession, switchSession } from '../services/oneBssApi';
 
 export const Header = ({
   title,
@@ -21,76 +21,41 @@ export const Header = ({
 
   const [liveWalletBalance, setLiveWalletBalance] = useState(user?.wallet_balance);
   const [hasSuperAdminSession, setHasSuperAdminSession] = useState(false);
+  const [returnTo, setReturnTo] = useState(null); // the account one level up
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const session = localStorage.getItem('onebss_super_admin_session');
-      setHasSuperAdminSession(!!session);
-    }
+    const prev = getOriginalSession();
+    setHasSuperAdminSession(!!prev);
+    setReturnTo(prev ? prev.user : null);
   }, [user]);
 
   useEffect(() => {
-    if (user?.partner_id) {
+    if (!user?.partner_id) return undefined;
+    const load = () =>
       OneBssApi.getWallet(user.partner_id).then((res) => {
-        if (res.data && res.data.wallet_balance !== undefined) {
+        if (res.ok && res.data && res.data.wallet_balance !== undefined) {
           setLiveWalletBalance(res.data.wallet_balance);
         }
-      }).catch(() => {});
-    }
+      });
+    load();
+    // refresh after a recharge or the top-bar Refresh
+    window.addEventListener('onebss:wallet-changed', load);
+    return () => window.removeEventListener('onebss:wallet-changed', load);
   }, [user?.partner_id, user?.wallet_balance]);
 
-  const handleReturnToSuperAdmin = async () => {
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('onebss_impersonate_token');
-      const sessionStr = localStorage.getItem('onebss_super_admin_session');
-      let superToken = '';
-      let superUser = null;
-
-      if (sessionStr) {
-        try {
-          const session = JSON.parse(sessionStr);
-          if (session?.token && !isJwtExpired(session.token)) {
-            superToken = session.token;
-            superUser = session.user;
-          }
-        } catch (e) {}
-      }
-
-      // If stored token is expired or was missing, automatically re-authenticate with Super Admin credentials
-      if (!superToken) {
-        try {
-          const res = await OneBssApi.login('onebss', 'onebss');
-          if (res.data?.token) {
-            superToken = res.data.token;
-            superUser = {
-              username: 'onebss',
-              role: 'superadmin',
-              partner_name: 'SuperAdmin',
-              partner_id: 1111,
-              token: superToken,
-            };
-          }
-        } catch (e) {}
-      }
-
-      if (superToken) {
-        localStorage.setItem('onebss_token', superToken);
-        setApiConfig(undefined, superToken);
-        const finalUser = superUser || {
-          username: 'onebss',
-          role: 'superadmin',
-          partner_name: 'SuperAdmin',
-          partner_id: 1111,
-          token: superToken,
-        };
-        localStorage.setItem('onebss_user', JSON.stringify(finalUser));
-      }
-
-      localStorage.removeItem('onebss_super_admin_session');
-      localStorage.removeItem('onebss_impersonate_token');
-      localStorage.setItem('onebss_active_tab', 'partners');
-      window.location.hash = '#partners';
-      window.location.reload();
+  // Return from an impersonation session to the account that started it.
+  // Uses ONLY the original token saved at impersonation time (sessionStorage).
+  // If it has expired, the user simply logs in again — no stored credentials.
+  // Goes back ONE level (operator -> admin -> super admin) and lands on the partner we left.
+  const handleReturnToSuperAdmin = () => {
+    if (typeof window === 'undefined') return;
+    const session = popOriginalSession();
+    if (session?.token && session?.user) {
+      const leftId = user?.partner_id;
+      switchSession(session.token, session.user, leftId ? `partners?partner_id=${leftId}` : 'partners', session.user.partner_name || '');
+    } else {
+      // every saved level expired -> back to the login screen
+      switchSession('', null, 'dashboard', 'login');
     }
   };
 
@@ -104,41 +69,43 @@ export const Header = ({
 
   return (
     <View style={[styles.headerContainer, { paddingHorizontal: isMobile ? 16 : 28 }]}>
-      <View style={styles.titleSection}>
+      <View style={[styles.titleSection, isMobile && { flex: 1, minWidth: 0 }]}>
         {isMobile && onToggleSidebar && (
           <TouchableOpacity style={styles.hamburgerBtn} onPress={onToggleSidebar}>
             <Feather name="menu" size={20} color={COLORS.textMain} />
           </TouchableOpacity>
         )}
-        <View>
-          <Text style={styles.headerTitle}>{title}</Text>
-          <Text style={styles.headerSubtitle}>{subtitle}</Text>
+        <View style={isMobile ? { flex: 1, minWidth: 0 } : null}>
+          <Text style={[styles.headerTitle, isMobile && { fontSize: 18 }]} numberOfLines={1}>{title}</Text>
+          {subtitle ? <Text style={styles.headerSubtitle} numberOfLines={1}>{subtitle}</Text> : null}
         </View>
       </View>
 
-      <View style={styles.actionSection}>
+      <View style={[styles.actionSection, isMobile && { gap: 6 }]}>
         {hasSuperAdminSession && (
           <TouchableOpacity style={styles.btnBackToSuperAdmin} onPress={handleReturnToSuperAdmin}>
             <Feather name="arrow-left-circle" size={16} color="#ffffff" />
-            <Text style={styles.btnBackToSuperAdminText}>Back to Super Admin Portal</Text>
+            <Text style={styles.btnBackToSuperAdminText} numberOfLines={1}>
+              {isMobile ? 'Back' : `Back to ${returnTo?.partner_name || 'previous account'}${returnTo?.role ? ` (${String(returnTo.role).toLowerCase() === 'superadmin' ? 'Super Admin' : String(returnTo.role).toLowerCase() === 'admin' ? 'Admin' : 'Operator'})` : ''}`}
+            </Text>
           </TouchableOpacity>
         )}
 
         {/* Wallet Balance Card Pill - Hidden for Super Admin and Admin, displayed for Operator */}
         {showWallet && (
-          <View style={styles.walletCard}>
-            <Ionicons name="wallet-outline" size={18} color={COLORS.primary} />
+          <View style={[styles.walletCard, isMobile && { paddingHorizontal: 8, paddingVertical: 4 }]}>
+            <Ionicons name="wallet-outline" size={isMobile ? 15 : 18} color={COLORS.primary} />
             <View style={{ marginLeft: 6 }}>
-              <Text style={styles.walletLbl}>WALLET BALANCE</Text>
+              <Text style={styles.walletLbl}>{isMobile ? 'WALLET' : 'WALLET BALANCE'}</Text>
               <Text style={styles.walletVal}>{formattedBalance}</Text>
             </View>
           </View>
         )}
 
         {onRefresh ? (
-          <TouchableOpacity style={styles.btnHeaderRefresh} onPress={onRefresh} title="Refresh data">
+          <TouchableOpacity style={[styles.btnHeaderRefresh, isMobile && { paddingHorizontal: 9 }]} onPress={onRefresh} title="Refresh data" accessibilityLabel="Refresh">
             <Feather name="refresh-cw" size={14} color="#2563eb" />
-            <Text style={styles.btnHeaderRefreshText}>Refresh</Text>
+            {isMobile ? null : <Text style={styles.btnHeaderRefreshText}>Refresh</Text>}
           </TouchableOpacity>
         ) : null}
 

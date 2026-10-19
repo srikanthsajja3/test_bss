@@ -404,6 +404,205 @@ export const SessionHistoryModal = ({ visible, onClose, internetId, username }) 
 };
 
 // =====================================================================
+// AUTHENTICATION LOGS — RADIUS Access-Accept / Access-Reject attempts
+// =====================================================================
+const AUTH_PAGE = 50;
+const AUTH_COLS = [
+  { key: 'authdate', label: 'Time', flex: 1.4 },
+  { key: 'reply', label: 'Result', flex: 1.1 },
+  { key: 'reason', label: 'Reason', flex: 2.2 },
+  { key: 'mac', label: 'MAC', flex: 1.4 },
+  { key: 'nasipaddress', label: 'NAS IP', flex: 1.2 },
+  { key: 'nasportid', label: 'NAS Port', flex: 1.2 },
+  { key: 'framedipaddress', label: 'Framed IP', flex: 1.1 },
+  { key: 'username_org', label: 'Username sent', flex: 1.3 },
+];
+const AUTH_FILTERS = [
+  { id: 'all', label: 'All' },
+  { id: 'accept', label: 'Accepted' },
+  { id: 'reject', label: 'Rejected' },
+];
+
+const ResultPill = ({ log }) => {
+  const ok = !!log.accepted;
+  return (
+    <View style={[styles.pill, { backgroundColor: ok ? '#dcfce7' : '#fee2e2' }]}>
+      <Feather name={ok ? 'check-circle' : 'x-circle'} size={11} color={ok ? '#15803d' : '#b91c1c'} />
+      <Text style={[styles.pillText, { color: ok ? '#15803d' : '#b91c1c' }]}>{ok ? 'ACCEPT' : log.reply ? 'REJECT' : '—'}</Text>
+    </View>
+  );
+};
+
+export const AuthLogsModal = ({ visible, onClose, internetId, username }) => {
+  const [loading, setLoading] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [summary, setSummary] = useState(null);
+  const [loadError, setLoadError] = useState('');
+  const [filter, setFilter] = useState('all');
+  const [search, setSearch] = useState('');
+  const [shown, setShown] = useState(AUTH_PAGE);
+  const [selected, setSelected] = useState(null);
+
+  const load = async () => {
+    setLoading(true);
+    setLoadError('');
+    setSelected(null);
+    try {
+      const res = await OneBssApi.getInternetAuthLogs(internetId);
+      if (okRes(res)) {
+        setLogs(Array.isArray(res.data.results?.logs) ? res.data.results.logs : []);
+        setSummary(res.data.results?.summary || null);
+      } else {
+        setLogs([]);
+        setSummary(null);
+        setLoadError(errMsg(res, 'Unable to load authentication logs'));
+      }
+    } catch (e) {
+      setLoadError('Unable to load authentication logs');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (visible) {
+      setLogs([]);
+      setSummary(null);
+      setFilter('all');
+      setSearch('');
+      setShown(AUTH_PAGE);
+      load();
+    }
+  }, [visible, internetId]);
+  useEffect(() => setShown(AUTH_PAGE), [filter, search]);
+
+  const needle = search.trim().toLowerCase();
+  const filtered = logs.filter((l) => {
+    if (filter === 'accept' && !l.accepted) return false;
+    if (filter === 'reject' && l.accepted) return false;
+    if (!needle) return true;
+    return [l.reason, l.mac, l.nasipaddress, l.nasportid, l.framedipaddress, l.username_org, l.authdate].some((v) => String(v || '').toLowerCase().includes(needle));
+  });
+  const visibleRows = filtered.slice(0, shown);
+  const latest = logs[0] || null;
+  const counts = { all: logs.length, accept: summary?.accepted ?? 0, reject: summary?.rejected ?? 0 };
+
+  return (
+    <ModalShell
+      visible={visible}
+      title={`Authentication Logs — ${username || ''}`}
+      icon="shield"
+      onClose={onClose}
+      maxWidth={1150}
+      footer={
+        <>
+          <Btn label={loading ? 'Loading…' : 'Refresh'} icon="refresh-cw" kind="ghost" onPress={load} disabled={loading} />
+          <Btn label="Close" onPress={onClose} />
+        </>
+      }
+    >
+      <View style={styles.statRow}>
+        {[
+          ['Attempts', String(summary?.total ?? logs.length)],
+          ['Accepted', String(summary?.accepted ?? 0)],
+          ['Rejected', String(summary?.rejected ?? 0)],
+          ['Last attempt', latest?.authdate || '—'],
+        ].map(([l, v]) => (
+          <View key={l} style={styles.stat}>
+            <Text style={styles.statLabel}>{l}</Text>
+            <Text style={[styles.statValue, l === 'Last attempt' && { fontSize: 14 }]}>{v}</Text>
+          </View>
+        ))}
+      </View>
+
+      {latest && !loading ? (
+        <Note
+          tone={latest.accepted ? 'success' : 'error'}
+          text={latest.accepted ? `Last login was accepted at ${latest.authdate}.` : `Last login was rejected at ${latest.authdate}${latest.reason ? ` — ${latest.reason}` : ''}`}
+        />
+      ) : null}
+      {loadError ? <Note tone="error" text={loadError} /> : null}
+
+      <View style={[styles.toolbar, { alignItems: 'center', marginTop: 4 }]}>
+        <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
+          {AUTH_FILTERS.map((f) => (
+            <TouchableOpacity key={f.id} style={[styles.chip, filter === f.id && styles.chipOn]} onPress={() => setFilter(f.id)}>
+              <Text style={[styles.chipText, filter === f.id && { color: '#ffffff' }]}>{f.label} ({counts[f.id]})</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <View style={styles.searchBox}>
+          <Feather name="search" size={14} color="#94a3b8" />
+          <TextInput
+            style={styles.searchInput}
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Search reason, MAC, NAS…"
+            placeholderTextColor="#94a3b8"
+          />
+        </View>
+      </View>
+
+      {selected ? (
+        <View style={styles.detailBox}>
+          <TouchableOpacity style={styles.backLink} onPress={() => setSelected(null)}>
+            <Feather name="arrow-left" size={14} color={COLORS.primary} />
+            <Text style={styles.backLinkText}>Back to logs</Text>
+          </TouchableOpacity>
+          {[
+            ['Time', selected.authdate], ['Result', selected.reply], ['Reason', selected.reason], ['MAC', selected.mac],
+            ['NAS IP', selected.nasipaddress], ['NAS Port', selected.nasportid], ['Framed IP', selected.framedipaddress],
+            ['Called Station', selected.calledstationid], ['Username sent', selected.username_org],
+          ].map(([l, v]) => <KV key={l} label={l} value={v || '—'} />)}
+        </View>
+      ) : loading && logs.length === 0 ? (
+        <ActivityIndicator size="small" color={COLORS.primary} style={{ marginVertical: 20 }} />
+      ) : (
+        <View style={styles.table}>
+          <ScrollView horizontal showsHorizontalScrollIndicator>
+            <View style={{ minWidth: 1040, width: '100%' }}>
+              <View style={[styles.tr, styles.thRow]}>
+                {AUTH_COLS.map((c) => <Text key={c.key} style={[styles.th, { flex: c.flex }]}>{c.label}</Text>)}
+                <Text style={[styles.th, { flex: 0.6 }]}> </Text>
+              </View>
+              {filtered.length === 0 ? (
+                <Text style={[styles.emptyText, { padding: 16, textAlign: 'center' }]}>
+                  {logs.length === 0 ? 'No authentication attempts found.' : 'No attempts match this filter.'}
+                </Text>
+              ) : (
+                visibleRows.map((l, i) => (
+                  <View key={`${l.authdate}_${i}`} style={[styles.tr, !l.accepted && { backgroundColor: '#fffafa' }]}>
+                    {AUTH_COLS.map((c) =>
+                      c.key === 'reply' ? (
+                        <View key={c.key} style={{ flex: c.flex }}><ResultPill log={l} /></View>
+                      ) : (
+                        <Text key={c.key} style={[styles.td, { flex: c.flex }, c.key === 'reason' && !l.accepted && { color: '#b91c1c' }]} numberOfLines={2}>
+                          {l[c.key] || '—'}
+                        </Text>
+                      )
+                    )}
+                    <View style={{ flex: 0.6 }}>
+                      <TouchableOpacity style={styles.smallGhost} onPress={() => setSelected(l)}>
+                        <Text style={styles.smallGhostText}>View</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                ))
+              )}
+            </View>
+          </ScrollView>
+        </View>
+      )}
+      {!selected && filtered.length > shown ? (
+        <View style={{ alignItems: 'center', marginTop: 10 }}>
+          <Btn label={`Show more (${filtered.length - shown} left)`} kind="ghost" onPress={() => setShown((n) => n + AUTH_PAGE)} />
+        </View>
+      ) : null}
+    </ModalShell>
+  );
+};
+
+// =====================================================================
 // VERIFY CUSTOMER — required before Recharge / Advance Renewal
 // =====================================================================
 export const VerifyCustomerModal = ({ visible, onClose, internetId, username, customerName, onVerified }) => {
@@ -556,4 +755,12 @@ const styles = StyleSheet.create({
   docThumbIcon: { justifyContent: 'center', alignItems: 'center', gap: 6 },
   docExt: { fontSize: 11, fontWeight: '700', color: '#94a3b8' },
   docLabel: { fontSize: 13, fontWeight: '700', color: COLORS.textMain },
+
+  pill: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 },
+  pillText: { fontSize: 10, fontWeight: '800' },
+  chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: '#f1f5f9' },
+  chipOn: { backgroundColor: COLORS.primary },
+  chipText: { fontSize: 12, fontWeight: '700', color: '#334155' },
+  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, height: 36, minWidth: 220, flexGrow: 1, maxWidth: 360, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#f8fafc' },
+  searchInput: { flex: 1, minWidth: 0, fontSize: 13, color: COLORS.textMain, outlineStyle: 'none' },
 });

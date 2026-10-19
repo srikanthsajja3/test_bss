@@ -9,6 +9,7 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
     ? [
         { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
         { id: 'customers', label: 'Subscribers', icon: 'users' },
+        { id: 'customer_prices', label: 'Customer Prices', icon: 'tag' },
       ]
     : [
         { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
@@ -42,7 +43,7 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
       <View style={styles.menuList}>
         {menuItems.map((item) => {
           const isActive = item.id === 'customers'
-            ? (activeTab === 'customers' || activeTab === 'iptv_customers')
+            ? (activeTab === 'customers' || activeTab === 'iptv_customers' || activeTab === 'ott_customers')
             : activeTab === item.id;
           return (
             <React.Fragment key={item.id}>
@@ -112,6 +113,17 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
                       ]}
                     >
                       IPTV Users
+                    </Text>
+                  </TouchableOpacity>
+
+                  {/* Tree branch 3: OTT Users */}
+                  <TouchableOpacity
+                    style={[styles.treeSubItem, activeTab === 'ott_customers' && { backgroundColor: 'rgba(14,165,233,0.1)' }]}
+                    onPress={() => onSelectTab('ott_customers')}
+                  >
+                    <Feather name="play-circle" size={13} color={activeTab === 'ott_customers' ? '#0ea5e9' : COLORS.textMuted} />
+                    <Text style={[styles.treeSubText, activeTab === 'ott_customers' && { color: '#0ea5e9', fontWeight: '700' }]}>
+                      OTT Users
                     </Text>
                   </TouchableOpacity>
                 </View>
