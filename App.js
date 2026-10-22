@@ -9,6 +9,7 @@ import { PartnerScreen } from './src/screens/PartnerScreen';
 import { CustomerPricesPage } from './src/components/plans/CustomerPricesPage';
 import { CustomerScreen } from './src/screens/CustomerScreen';
 import { OttSubscribersScreen } from './src/screens/OttSubscribersScreen';
+import { InventoryScreen } from './src/screens/InventoryScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { ToastContainer, toast } from 'react-toastify';
 import { createPortal } from 'react-dom';
@@ -39,7 +40,7 @@ export default function App() {
           const [routePart] = hash.split('&');
           const [rawTab, rawFilter] = routePart.split('?filter=');
           const tab = rawTab ? rawTab.split('?')[0] : '';
-          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices'].includes(tab)) {
+          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory'].includes(tab)) {
             const filter = rawFilter ? rawFilter.split('?')[0].split('&')[0] : 'all';
             const rangeMatch = hash.match(/[?&]range=([a-z0-9_]+)/);
             return { tab, filter, range: rangeMatch ? rangeMatch[1] : '' };
@@ -47,7 +48,7 @@ export default function App() {
         }
         const savedTab = localStorage.getItem('onebss_active_tab');
         const savedFilter = localStorage.getItem('onebss_filter');
-        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices'].includes(savedTab)) {
+        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory'].includes(savedTab)) {
           return { tab: savedTab, filter: savedFilter || 'all', range: '' };
         }
       }
@@ -333,6 +334,8 @@ export default function App() {
       case 'customer_prices':
         // operators: one customer price per package for all their customers
         return <CustomerPricesPage key={`cp_${globalRefreshKey}`} partnerId={user?.partner_id} partnerName={user?.partner_name} readOnly={String(user?.role || '').toLowerCase() !== 'operator'} />;
+      case 'inventory':
+        return <InventoryScreen user={user} refreshSignal={globalRefreshKey} />;
       default:
         return <DashboardScreen user={user} refreshSignal={globalRefreshKey} onNavigateToCustomers={handleNavigateToCustomers} onNavigateToPartners={handleNavigateToPartners} />;
     }
@@ -355,6 +358,8 @@ export default function App() {
         return { title: 'OTT Subscribers' };
       case 'customer_prices':
         return { title: 'Customer Prices', subtitle: 'What your customers pay, per package' };
+      case 'inventory':
+        return { title: 'ONU Inventory' };
       default:
         return { title: 'OneBSS Platform', subtitle: 'Management Portal' };
     }

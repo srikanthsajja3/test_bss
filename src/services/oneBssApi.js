@@ -776,4 +776,34 @@ export const OneBssApi = {
   // Dashboard — partnerId is optional (omit for the caller's own scope).
   // ------------------------------------------------------------------
   getDashboard: async (partnerId) => get(`/dashboard.php${partnerId ? `?partner_id=${q(partnerId)}` : ''}`),
+
+  // ------------------------------------------------------------------
+  // ONU Inventory (Superadmin)
+  // ------------------------------------------------------------------
+  getInventoryStats: async () => get('/inventory/get_inventory_stats.php'),
+
+  getInventoryVendorsAndModels: async () => get('/inventory/get_vendors_models.php'),
+
+  getInventoryOnus: async (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.status && params.status !== 'all') qs.set('status', params.status);
+    if (params.vendor_id) qs.set('vendor_id', params.vendor_id);
+    if (params.model_id) qs.set('model_id', params.model_id);
+    if (params.type && params.type !== 'all') qs.set('type', params.type);
+    if (params.search) qs.set('search', params.search);
+    if (params.limit) qs.set('limit', params.limit);
+    if (params.offset !== undefined) qs.set('offset', params.offset);
+    const queryStr = qs.toString();
+    return get(`/inventory/get_onus.php${queryStr ? `?${queryStr}` : ''}`);
+  },
+
+  addInventoryOnu: async (payload) => post('/inventory/add_onu.php', payload),
+
+  addInventoryVendor: async (payload) => post('/inventory/add_vendor.php', payload),
+
+  addInventoryModel: async (payload) => post('/inventory/add_model.php', payload),
+
+  updateInventoryOnu: async (id, fields) => post(`/inventory/update_onu.php?id=${id}`, fields),
+
+  deleteInventoryOnu: async (id) => post(`/inventory/delete_onu.php?id=${id}`, {}),
 };

@@ -2,9 +2,11 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
+import { isSuperAdmin } from './internet/shared';
 
 export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, onToggleCollapse, onMouseEnter, onMouseLeave }) => {
   const isOperator = user?.role === 'operator';
+  const isSuper = isSuperAdmin(user);
   const menuItems = isOperator
     ? [
         { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
@@ -15,6 +17,7 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
         { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
         { id: 'customers', label: 'Subscribers', icon: 'users' },
         { id: 'partners', label: 'Partners', icon: 'briefcase' },
+        ...(isSuper ? [{ id: 'inventory', label: 'Inventory', icon: 'box' }] : []),
       ];
 
   return (
