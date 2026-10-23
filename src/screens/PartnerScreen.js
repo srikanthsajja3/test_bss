@@ -3502,7 +3502,6 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         {renderResetPasswordModal()}
         {renderConfirmStatusModal()}
         {renderKycProvidersModal()}
-        {renderAssignBranchesModal()}
         {renderComboModal()}
       </View>
     );
@@ -3604,7 +3603,6 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         {renderResetPasswordModal()}
         {renderConfirmStatusModal()}
         {renderKycProvidersModal()}
-        {renderAssignBranchesModal()}
         {renderComboModal()}
       </ScrollView>
     </View>

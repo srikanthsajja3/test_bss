@@ -243,6 +243,7 @@ const request = async (endpoint, options = {}) => {
   const headers = {
     ...(isFormData ? {} : { 'Content-Type': 'application/json' }),
     ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+    ...(options.headers || {}),
   };
 
   const startTime = Date.now();
@@ -250,6 +251,9 @@ const request = async (endpoint, options = {}) => {
     const res = await fetch(url, { ...options, headers });
     const duration = Date.now() - startTime;
     const text = await res.text();
+    if (!res.ok) {
+      console.error(`OneBSS API Error [HTTP ${res.status}] ${url}:`, text);
+    }
     let data;
     try {
       data = JSON.parse(text);
@@ -282,12 +286,12 @@ const request = async (endpoint, options = {}) => {
   }
 };
 
-const get = (endpoint) => request(endpoint, { method: 'GET' });
-const post = (endpoint, body) =>
-  request(endpoint, { method: 'POST', body: body === undefined ? '' : JSON.stringify(body) });
-const put = (endpoint, body) => request(endpoint, { method: 'PUT', body: JSON.stringify(body || {}) });
-const del = (endpoint, body) =>
-  request(endpoint, { method: 'DELETE', ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+const get = (endpoint, options = {}) => request(endpoint, { method: 'GET', ...options });
+const post = (endpoint, body, options = {}) =>
+  request(endpoint, { method: 'POST', body: body === undefined ? '' : JSON.stringify(body), ...options });
+const put = (endpoint, body, options = {}) => request(endpoint, { method: 'PUT', body: JSON.stringify(body || {}), ...options });
+const del = (endpoint, body, options = {}) =>
+  request(endpoint, { method: 'DELETE', ...(body !== undefined ? { body: JSON.stringify(body) } : {}), ...options });
 const q = encodeURIComponent;
 
 /** A fresh id for one recharge attempt. */
@@ -602,12 +606,14 @@ export const OneBssApi = {
     return get(`/wallet.php?partner_id=${q(partnerId)}&page=${page}&limit=${limit}`);
   },
 
-  topupWallet: async (partnerId, amount, remark = 'Wallet top-up') => {
+  topupWallet: async (partnerId, amount, remark = 'Wallet top-up', customToken = null) => {
     const amt = Number(amount);
     if (!(amt > 0)) return clientError('Enter an amount greater than 0.');
     const err = requireArg(partnerId, 'partner_id');
     if (err) return clientError(err);
-    return post('/wallet_credit_debit.php', { partner_id: toNum(partnerId), amount: amt, type: 'credit', remark: String(remark || 'Wallet top-up') });
+    const cleanRemark = String(remark || 'Wallet top-up').replace(/[^a-zA-Z0-9 ]/g, ' ').trim().slice(0, 45);
+    const options = customToken ? { headers: { Authorization: `Bearer ${customToken}` } } : {};
+    return post('/wallet_credit_debit.php', { partner_id: toNum(partnerId), amount: amt, type: 'credit', remark: cleanRemark }, options);
   },
 
   debitWallet: async (partnerId, amount, remark = 'Wallet debit') => {
@@ -615,7 +621,8 @@ export const OneBssApi = {
     if (!(amt > 0)) return clientError('Enter an amount greater than 0.');
     const err = requireArg(partnerId, 'partner_id');
     if (err) return clientError(err);
-    return post('/wallet_credit_debit.php', { partner_id: toNum(partnerId), amount: amt, type: 'debit', remark: String(remark || 'Wallet debit') });
+    const cleanRemark = String(remark || 'Wallet debit').replace(/[^a-zA-Z0-9 ]/g, ' ').trim().slice(0, 45);
+    return post('/wallet_credit_debit.php', { partner_id: toNum(partnerId), amount: amt, type: 'debit', remark: cleanRemark });
   },
 
   // ------------------------------------------------------------------

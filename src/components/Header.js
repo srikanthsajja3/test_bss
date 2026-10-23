@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'r
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS_STYLE } from '../constants/theme';
 import { OneBssApi, getOriginalSession, popOriginalSession, switchSession } from '../services/oneBssApi';
+import { OperatorWalletTopupModal } from './OperatorWalletTopupModal';
 
 export const Header = ({
   title,
@@ -22,6 +23,7 @@ export const Header = ({
   const [liveWalletBalance, setLiveWalletBalance] = useState(user?.wallet_balance);
   const [hasSuperAdminSession, setHasSuperAdminSession] = useState(false);
   const [returnTo, setReturnTo] = useState(null); // the account one level up
+  const [showTopupModal, setShowTopupModal] = useState(false);
 
   useEffect(() => {
     const prev = getOriginalSession();
@@ -99,6 +101,14 @@ export const Header = ({
               <Text style={styles.walletLbl}>{isMobile ? 'WALLET' : 'WALLET BALANCE'}</Text>
               <Text style={styles.walletVal}>{formattedBalance}</Text>
             </View>
+            <TouchableOpacity
+              style={[styles.btnHeaderTopup, isMobile && { paddingHorizontal: 6, paddingVertical: 3, marginLeft: 6 }]}
+              onPress={() => setShowTopupModal(true)}
+              title="Top up operator wallet online via PayU"
+            >
+              <Feather name="plus-circle" size={12} color="#ffffff" />
+              <Text style={styles.btnHeaderTopupText}>Top Up</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -116,6 +126,13 @@ export const Header = ({
           </TouchableOpacity>
         ) : null} */}
       </View>
+
+      <OperatorWalletTopupModal
+        visible={showTopupModal}
+        onClose={() => setShowTopupModal(false)}
+        partner={user ? { ...user, wallet_balance: balanceVal } : null}
+        user={user}
+      />
     </View>
   );
 };
@@ -193,6 +210,22 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: COLORS.accentEmerald,
+  },
+  btnHeaderTopup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 5,
+    borderRadius: 6,
+    backgroundColor: '#10b981',
+    marginLeft: 10,
+    cursor: 'pointer',
+  },
+  btnHeaderTopupText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#ffffff',
   },
   iconBtn: {
     padding: 10,

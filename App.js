@@ -13,6 +13,7 @@ import { InventoryScreen } from './src/screens/InventoryScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { ToastContainer, toast } from 'react-toastify';
 import { createPortal } from 'react-dom';
+import { recordPayUWalletTopup } from './src/services/payuService';
 
 // react-native-web renders <Modal> in a portal on <body> (z-index 9999), while every RN View
 // is `position:relative; z-index:0` — a stacking context the toasts can't escape from inside
@@ -112,8 +113,47 @@ export default function App() {
       if (!currentHash) {
         window.history.replaceState(null, '', `#${initialNav.tab}`);
       }
+
+      // Check for PayU redirected callback on hash (e.g. #payu_status=success&txnid=...&amt=...)
+      if (currentHash.includes('payu_status=success')) {
+        const params = new URLSearchParams(currentHash.replace(/^[^?#]*[?#]/, ''));
+        const txnid = params.get('txnid');
+        const amt = params.get('amt');
+
+        let pending = null;
+        try {
+          const raw = localStorage.getItem('onebss_pending_payu_txn');
+          if (raw) pending = JSON.parse(raw);
+        } catch (e) {}
+
+        const partnerId = pending?.partner_id || user?.partner_id;
+        const amountNum = Number(amt || pending?.amount || 0);
+
+        if (partnerId && amountNum > 0) {
+          recordPayUWalletTopup({
+            partnerId,
+            amount: amountNum,
+            txnid: txnid || pending?.txnid || Date.now(),
+          }).then((res) => {
+            if (res.ok) {
+              toast.success(`₹${amountNum.toLocaleString('en-IN')} added to operator wallet via PayU!`);
+            }
+          }).catch(() => {});
+        }
+
+        try {
+          localStorage.removeItem('onebss_pending_payu_txn');
+          window.location.hash = 'dashboard';
+        } catch (e) {}
+      } else if (currentHash.includes('payu_status=failure')) {
+        toast.error('PayU transaction failed or was cancelled.');
+        try {
+          localStorage.removeItem('onebss_pending_payu_txn');
+          window.location.hash = 'dashboard';
+        } catch (e) {}
+      }
     }
-  }, []);
+  }, [user]);
 
   const handleOpenCreateRole = (role) => {
     setPartnerCreateRole(role);

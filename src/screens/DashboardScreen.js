@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, ActivityIndicator, TouchableOpacity, useWindowDimensions, TextInput } from 'react-native';
-import { Feather, MaterialIcons } from '@expo/vector-icons';
+import { Feather, MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi, setApiConfig } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
+import { OperatorWalletTopupModal } from '../components/OperatorWalletTopupModal';
 
 export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartners, refreshSignal = 0 }) => {
   const { width } = useWindowDimensions();
@@ -24,6 +25,22 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
   const [allPartners, setAllPartners] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchResults, setSearchResults] = useState({ customers: [], partners: [] });
+  const [showTopupModal, setShowTopupModal] = useState(false);
+  const [walletBalance, setWalletBalance] = useState(user?.wallet_balance);
+
+  useEffect(() => {
+    if (!user?.partner_id) return undefined;
+    const loadWallet = () => {
+      OneBssApi.getWallet(user.partner_id).then((res) => {
+        if (res.ok && res.data && res.data.wallet_balance !== undefined) {
+          setWalletBalance(res.data.wallet_balance);
+        }
+      }).catch(() => {});
+    };
+    loadWallet();
+    window.addEventListener('onebss:wallet-changed', loadWallet);
+    return () => window.removeEventListener('onebss:wallet-changed', loadWallet);
+  }, [user?.partner_id, user?.wallet_balance]);
 
   const loadDateSummary = async () => {
     try {
@@ -415,6 +432,35 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
         </View>
       )}
 
+      {/* OPERATOR WALLET TOP-UP CARD (PAYU INTEGRATION) */}
+      {isOperator && (
+        <View style={styles.operatorWalletCard}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, flex: 1, minWidth: 240, flexWrap: 'wrap' }}>
+            <View style={styles.operatorWalletIconBox}>
+              <Ionicons name="wallet-outline" size={26} color="#10b981" />
+            </View>
+            <View>
+              <Text style={styles.operatorWalletLabel}>CURRENT OPERATOR WALLET BALANCE</Text>
+              <Text style={styles.operatorWalletVal}>
+                ₹{(walletBalance !== null && walletBalance !== undefined ? Number(walletBalance) : Number(user?.wallet_balance || 0)).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+              </Text>
+              <Text style={styles.operatorWalletSub}>
+                Powered by PayU Payment Gateway · Instant Credit via UPI, Cards & Net Banking
+              </Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={styles.btnOperatorTopup}
+            onPress={() => setShowTopupModal(true)}
+            activeOpacity={0.8}
+          >
+            <Feather name="plus-circle" size={16} color="#ffffff" />
+            <Text style={styles.btnOperatorTopupText}>Top Up Wallet (PayU)</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {/* INTERNET GRID */}
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
         <Feather name="wifi" size={18} color={COLORS.primary} />
@@ -630,11 +676,73 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
           </View>
         ))}
       </View>
+
+      <OperatorWalletTopupModal
+        visible={showTopupModal}
+        onClose={() => setShowTopupModal(false)}
+        partner={user ? { ...user, wallet_balance: walletBalance } : null}
+        user={user}
+      />
     </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
+  operatorWalletCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderRadius: 14,
+    backgroundColor: '#ffffff',
+    borderWidth: 1.5,
+    borderColor: '#10b981',
+    marginBottom: 20,
+    gap: 14,
+    flexWrap: 'wrap',
+    boxShadow: '0 4px 15px rgba(16, 185, 129, 0.12)',
+    elevation: 3,
+  },
+  operatorWalletIconBox: {
+    width: 48,
+    height: 48,
+    borderRadius: 12,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  operatorWalletLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#059669',
+    letterSpacing: 0.5,
+  },
+  operatorWalletVal: {
+    fontSize: 24,
+    fontWeight: '800',
+    color: '#0f172a',
+    marginTop: 2,
+  },
+  operatorWalletSub: {
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  btnOperatorTopup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 10,
+    backgroundColor: '#10b981',
+    cursor: 'pointer',
+  },
+  btnOperatorTopupText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
   bgSyncBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, backgroundColor: 'rgba(37,99,235,0.06)', borderWidth: 1, borderColor: 'rgba(37,99,235,0.2)', marginBottom: 16 },
   bgSyncBarWarn: { backgroundColor: 'rgba(245,158,11,0.08)', borderColor: 'rgba(245,158,11,0.3)' },
   bgSyncText: { flex: 1, fontSize: 12, color: '#1e3a8a', fontWeight: '600' },
