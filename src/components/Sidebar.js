@@ -2,19 +2,25 @@ import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
+import { isSuperAdmin } from './internet/shared';
 
 export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, onToggleCollapse, onMouseEnter, onMouseLeave }) => {
   const isOperator = user?.role === 'operator';
+  const isSuper = isSuperAdmin(user);
   const menuItems = isOperator
     ? [
         { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
         { id: 'customers', label: 'Subscribers', icon: 'users' },
         { id: 'customer_prices', label: 'Customer Prices', icon: 'tag' },
+        { id: 'wallet', label: 'Wallet', icon: 'credit-card' },
       ]
     : [
         { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
         { id: 'customers', label: 'Subscribers', icon: 'users' },
         { id: 'partners', label: 'Partners', icon: 'briefcase' },
+        ...(isSuper ? [{ id: 'inventory', label: 'Inventory', icon: 'box' }] : []),
+        ...(isSuper ? [{ id: 'iptv_renewals', label: 'IPTV Auto-Renewals', icon: 'repeat' }] : []),
+        ...(isSuper ? [{ id: 'payu_payments', label: 'Online Payments', icon: 'credit-card' }] : []),
       ];
 
   return (

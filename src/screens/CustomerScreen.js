@@ -16,6 +16,7 @@ import { AddOttModal } from '../components/ott/AddOttModal';
 import { CustomerAccountsOverview, defaultRechargeType, formatApiDate, normaliseInternetAccount, normaliseIptvAccount } from '../components/CustomerAccountsOverview';
 import { CustomerLocationModal } from '../components/CustomerLocationModal';
 import { CustomerDevicesModal } from '../components/CustomerDevicesModal';
+import { OnlineSessionPanel } from '../components/internet/OnlineSessionPanel';
 
 const calculateBalanceDays = (expiryDateStr) => {
   if (!expiryDateStr || expiryDateStr === '—' || expiryDateStr === 'N/A') {
@@ -123,9 +124,6 @@ const mapCustomersListToBroadbandRow = (item, index, accIndex = 0) => {
     stb_id: resolveApiField(item.stb_id),
     stb_mac: resolveApiField(item.stb_mac),
     kyc: item.aadhar_verified ? 'Aadhaar Verified' : resolveApiField(item.kyc),
-    invoiceAmount: intAcc.total_bill_amount !== undefined ? intAcc.total_bill_amount : (item.total_bill_amount !== undefined ? item.total_bill_amount : null),
-    totalPaid: intAcc.paid_amount !== undefined ? intAcc.paid_amount : (item.paid_amount !== undefined ? item.paid_amount : null),
-    dueAmount: intAcc.balance !== undefined ? intAcc.balance : (item.balance !== undefined ? item.balance : null),
     dueDate: resolveApiField(item.due_date, intAcc.due_date),
     expiryDate: expiration,
     address: resolveApiField(item.installation_address, item.billing_address, item.address),
@@ -139,6 +137,9 @@ const mapCustomersListToBroadbandRow = (item, index, accIndex = 0) => {
     subplan_id: intAcc.subplan_id !== undefined ? intAcc.subplan_id : null,
     activation_date: resolveApiField(intAcc.activation_date),
     last_logoff: resolveApiField(intAcc.last_loff_off),
+    renewal_date: resolveApiField(intAcc.renewal_date),
+    ip_address: resolveApiField(intAcc.ip_address),
+    status_color: intAcc.status_color,
     customer_type: resolveApiField(intAcc.customer_type),
     simultaneous_use: resolveApiField(intAcc.simultanious_use),
     subscription_type: intAcc.subscription_type,
@@ -146,6 +147,20 @@ const mapCustomersListToBroadbandRow = (item, index, accIndex = 0) => {
     aadhar_verified_date: resolveApiField(item.aadhar_verified_date),
     mobile_verified: !!item.mobile_verified,
   };
+};
+
+// "12 days left" / "Expires today" / "Expired 3 days ago" / "Not activated" (no amounts)
+const validityLeft = (expiry) => {
+  const s = String(expiry || '').trim();
+  const d = s ? new Date(s.replace(' ', 'T')) : null;
+  if (!d || isNaN(d.getTime()) || d.getFullYear() < 2000) return { text: 'Not activated', color: '#64748b' };
+  const days = Math.ceil((d.getTime() - Date.now()) / 86400000);
+  if (d.getTime() <= Date.now()) {
+    const ago = Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
+    return { text: ago === 0 ? 'Expired today' : `Expired ${ago} day${ago === 1 ? '' : 's'} ago`, color: '#ef4444' };
+  }
+  if (days <= 1) return { text: 'Expires today', color: '#f59e0b' };
+  return { text: `${days} days left`, color: days <= 5 ? '#f59e0b' : '#10b981' };
 };
 
 // Map API customers_list entities directly to IPTV Table Rows
@@ -161,7 +176,10 @@ const mapCustomersListToIptvRow = (item, index, accIndex = 0) => {
   const username = resolveApiField(item.username, iptvAcc.username, intAcc.username);
   const packageName = resolveApiField(item.package_name, iptvAcc.package_name, intAcc.package_name, iptvAcc.plan_id) || 'Pioneer Premium Ultra HD';
   const subplanName = resolveApiField(item.subplan_name, iptvAcc.subplan_name, intAcc.subplan_name) || '1 Month';
-  const expiration = resolveApiField(item.expiration, iptvAcc.expiration, iptvAcc.expriration, intAcc.expiration);
+  const realExpiry = resolveApiField(item.expiration, iptvAcc.expiration, iptvAcc.expriration, intAcc.expiration);
+  // IPTV: show the paid-till date (expected expiry) when it is later than Pioneer's real expiry
+  const paidTill = resolveApiField(item.expected_expiry, iptvAcc.expected_expiry);
+  const expiration = paidTill && realExpiry && new Date(String(paidTill).replace(' ', 'T')) > new Date(String(realExpiry).replace(' ', 'T')) ? paidTill : realExpiry || paidTill;
   const partnerName = resolveApiField(item.partner_name, iptvAcc.partner_name, intAcc.partner_name, item.partner, item.partner_title, item.partner_id);
   const partnerId = resolveApiField(item.partner_id, iptvAcc.partner_id, intAcc.partner_id, item.operator_id, item.partner);
   const passwordVal = item.password !== undefined ? item.password : (iptvAcc.password !== undefined ? iptvAcc.password : (intAcc.password !== undefined ? intAcc.password : (item.pass !== undefined ? item.pass : iptvAcc.pass)));
@@ -193,9 +211,6 @@ const mapCustomersListToIptvRow = (item, index, accIndex = 0) => {
     isOnline: isOnline,
     ip: resolveApiField(item.ip, iptvAcc.ip, intAcc.ip),
     kyc: item.aadhar_verified ? 'Aadhaar Verified' : resolveApiField(item.kyc),
-    invoiceAmount: iptvAcc.total_bill_amount !== undefined ? iptvAcc.total_bill_amount : (intAcc.total_bill_amount !== undefined ? intAcc.total_bill_amount : null),
-    totalPaid: iptvAcc.paid_amount !== undefined ? iptvAcc.paid_amount : (intAcc.paid_amount !== undefined ? intAcc.paid_amount : null),
-    dueAmount: iptvAcc.balance !== undefined ? iptvAcc.balance : (intAcc.balance !== undefined ? intAcc.balance : null),
     dueDate: resolveApiField(item.due_date, iptvAcc.due_date, intAcc.due_date),
     expiryDate: expiration,
     address: resolveApiField(item.installation_address, item.billing_address, item.address),
@@ -322,7 +337,7 @@ const ACCOUNT_LEVEL_KEYS = [
 ];
 
 export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all', initialRange = '', initialSearch = '', onSwitchMode, onAutoCloseSidebar, refreshSignal = 0 }) => {
-  const { width } = useWindowDimensions();
+  const { width, height: winHeight } = useWindowDimensions();
   const isMobile = width < 768;
 
   const isOperatorRole = String(user?.role || user?.account_role || '').toLowerCase() === 'operator';
@@ -1037,7 +1052,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   // timeout, server error without our own result) we do NOT report "failed" — the provider may
   // already have renewed. We ask recharge_status.php until we know what really happened.
   // Returns true when the dialog can close.
-  const runRecharge = async ({ kind, id, planId, subPlanId, subPlanIds, label }, type = 'recharge') => {
+  const runRecharge = async ({ kind, id, planId, subPlanId, subPlanIds, label, internetId }, type = 'recharge') => {
     const hasPlan = kind === 'iptv' ? Array.isArray(subPlanIds) && subPlanIds.length > 0 : kind === 'ott' ? !!subPlanId : !!planId;
     if (!id || !hasPlan) {
       toast.error(`Cannot recharge ${label}: plan details missing on this account.`);
@@ -1059,7 +1074,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     let res;
     try {
       res = kind === 'iptv'
-        ? await OneBssApi.rechargeIptvAccount(id, subPlanIds, clientRef)
+        ? await OneBssApi.rechargeIptvAccount(id, subPlanIds, clientRef, internetId)
         : kind === 'ott'
         ? await OneBssApi.rechargeOtt(id, subPlanId, clientRef)
         : await OneBssApi.rechargeInternetAccount(id, planId, subPlanId, clientRef);
@@ -1140,6 +1155,15 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [sessionReq, setSessionReq] = useState(null); // raw internet account
   const [authLogsReq, setAuthLogsReq] = useState(null); // raw internet account
   const [documentsOpen, setDocumentsOpen] = useState(false);
+  // internet account page: the selected tab (Basic Info first)
+  const [internetTab, setInternetTab] = useState('basic');
+  // live online state from the Online Session tab (RADIUS), shown in the header right away
+  // instead of waiting for the account to be synced again
+  const [onlineOverride, setOnlineOverride] = useState(null);
+  useEffect(() => {
+    setInternetTab('basic');
+    setOnlineOverride(null);
+  }, [activeAccountSel?.kind, activeAccountSel?.index, activeCustomerId]);
   const canSeeDocuments = isSuperAdmin(user);
 
   // ---- Recheck: a recharge that was paid but not completed by the provider ----
@@ -1242,13 +1266,14 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
   // ---- IPTV recharge (DPO + Broadcaster / A-la-carte package set) ----
   const [iptvRechargeReq, setIptvRechargeReq] = useState(null); // raw iptv account
-  const confirmIptvRecharge = (subPlanIds) => {
+  const confirmIptvRecharge = (subPlanIds, opts = {}) => {
     const acc = iptvRechargeReq;
     if (!acc) return Promise.resolve(false);
     return runRecharge({
       kind: 'iptv',
       id: acc.id,
       subPlanIds,
+      internetId: opts.internetId || null, // the internet account the IPTV dates follow
       label: acc.pioneer_stb_id ? `STB ${acc.pioneer_stb_id}` : `IPTV #${acc.id}`,
     });
   };
@@ -2017,8 +2042,20 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   }
 
   if (activeSubProfile) {
-    const isOnline = activeSubProfile.online === 'ONLINE' || activeSubProfile.isOnline;
+    const isOnline = onlineOverride !== null && activeAccountSel?.kind === 'internet' ? onlineOverride : (activeSubProfile.online === 'ONLINE' || activeSubProfile.isOnline);
     const isAccountActive = (activeSubProfile.status || activeSubProfile.status_text || '').toLowerCase() === 'active';
+    // admins (super distributor / distributor / sub distributor) only view customers
+    const readOnlyViewer = String(user?.role || user?.account_role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'admin';
+    const internetTabs = [
+      { id: 'basic', label: 'Basic Info', short: 'Basic', icon: 'user' },
+      { id: 'online', label: 'Online Session', short: 'Online', icon: 'wifi', color: isOnline ? '#059669' : undefined, disabled: !isOnline || !currentInternetAccount, hint: 'Available while the customer is online' },
+      { id: 'password', label: 'Password', short: 'Password', icon: 'key', disabled: !currentInternetAccount },
+      { id: 'mac', label: 'MAC Bindings', short: 'MAC', icon: 'globe', disabled: !currentInternetAccount },
+      { id: 'sessions', label: 'Session History', short: 'Sessions', icon: 'list', disabled: !currentInternetAccount },
+      { id: 'auth', label: 'Authentication Logs', short: 'Auth logs', icon: 'shield', disabled: !currentInternetAccount },
+      { id: 'onu', label: 'ONU Details', short: 'ONU', icon: 'hard-drive', disabled: !currentInternetAccount },
+      ...(canSeeDocuments ? [{ id: 'documents', label: 'Documents', short: 'Docs', icon: 'file-text' }] : []),
+    ];
 
     return (
       <ScrollView
@@ -2074,12 +2111,20 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
           {/* RIGHT STATUS BADGES */}
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: isOnline ? 'rgba(16, 185, 129, 0.1)' : 'rgba(100, 116, 139, 0.1)' }}>
+            {/* ONLINE opens the Online Session tab */}
+            <TouchableOpacity
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: isOnline ? 'rgba(16, 185, 129, 0.1)' : 'rgba(100, 116, 139, 0.1)' }}
+              onPress={() => isOnline && currentInternetAccount && setInternetTab('online')}
+              disabled={!isOnline || !currentInternetAccount}
+              title={isOnline ? 'View the online session' : undefined}
+              accessibilityRole={isOnline ? 'button' : undefined}
+            >
               <View style={{ width: 8, height: 8, borderRadius: 4, backgroundColor: isOnline ? '#10b981' : '#64748b' }} />
               <Text style={{ fontSize: 12, fontWeight: '700', color: isOnline ? '#10b981' : '#ef4444' }}>
                 {isOnline ? 'ONLINE' : 'OFFLINE'}
               </Text>
-            </View>
+              {isOnline && currentInternetAccount ? <Feather name="chevron-right" size={13} color="#10b981" /> : null}
+            </TouchableOpacity>
 
             <View style={{ paddingHorizontal: 14, paddingVertical: 5, borderRadius: 20, backgroundColor: isAccountActive ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)' }}>
               <Text style={{ fontSize: 12, fontWeight: '700', color: isAccountActive ? '#10b981' : '#ef4444' }}>
@@ -2087,96 +2132,95 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </Text>
             </View>
           </View>
-        </View>
-
-        {/* QUICK ACTION TOOLBAR ROW */}
-        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 20 }}>
-          {currentInternetAccount && !currentInternetAccount.open_recharge && !isAccountVerified(currentInternetAccount) ? (
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#2563eb', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}
-              onPress={() => setVerifyReq(currentInternetAccount)}
-            >
-              <Feather name="user-check" size={14} color="#ffffff" />
-              <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>Verify Customer</Text>
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity
-              style={[{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f97316', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }, !currentInternetAccount && { opacity: 0.5 }]}
-              onPress={() => currentInternetAccount && openInternetRecharge(currentInternetAccount, defaultRechargeType({ expiration: currentInternetAccount.expiration }) === 'advance')}
-              disabled={!currentInternetAccount}
-            >
-              <Feather name={isAccountActive ? 'fast-forward' : 'refresh-cw'} size={14} color="#ffffff" />
-              <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>
-                {currentInternetAccount?.open_recharge
-                  ? `Recheck Recharge · ₹${Number(currentInternetAccount.open_recharge.amount || 0).toFixed(2)}`
-                  : currentInternetAccount && defaultRechargeType({ expiration: currentInternetAccount.expiration }) === 'advance' ? 'Advance Renewal' : 'Recharge'}
-              </Text>
-            </TouchableOpacity>
+          {/* RECHARGE / VERIFY */}
+          {readOnlyViewer ? null : (
+            <View style={{ flexDirection: 'row' }}>
+              {currentInternetAccount && !currentInternetAccount.open_recharge && !isAccountVerified(currentInternetAccount) ? (
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#2563eb', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}
+                  onPress={() => setVerifyReq(currentInternetAccount)}
+                >
+                  <Feather name="user-check" size={14} color="#ffffff" />
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>Verify Customer</Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  style={[{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f97316', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }, !currentInternetAccount && { opacity: 0.5 }]}
+                  onPress={() => currentInternetAccount && openInternetRecharge(currentInternetAccount, defaultRechargeType({ expiration: currentInternetAccount.expiration }) === 'advance')}
+                  disabled={!currentInternetAccount}
+                >
+                  <Feather name={isAccountActive ? 'fast-forward' : 'refresh-cw'} size={14} color="#ffffff" />
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>
+                    {currentInternetAccount?.open_recharge
+                      ? `Recheck Recharge · ₹${Number(currentInternetAccount.open_recharge.amount || 0).toFixed(2)}`
+                      : currentInternetAccount && defaultRechargeType({ expiration: currentInternetAccount.expiration }) === 'advance' ? 'Advance Renewal' : 'Recharge'}
+                  </Text>
+                </TouchableOpacity>
+              )}
+            </View>
           )}
-
-          <TouchableOpacity
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
-            onPress={() => currentInternetAccount && setPasswordReq(currentInternetAccount)}
-          >
-            <Feather name="key" size={14} color="#000000" />
-            <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Password</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
-            onPress={() => currentInternetAccount && setMacReq(currentInternetAccount)}
-          >
-            <Feather name="globe" size={14} color="#000000" />
-            <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Remove MAC</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
-            onPress={() => currentInternetAccount && setSessionReq(currentInternetAccount)}
-          >
-            <Feather name="list" size={14} color="#000000" />
-            <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Session History</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
-            onPress={() => currentInternetAccount && setAuthLogsReq(currentInternetAccount)}
-          >
-            <Feather name="shield" size={14} color="#000000" />
-            <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Authentication Logs</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
-            onPress={() => currentInternetAccount && setSelectedDevicesCustomer({ ...currentInternetAccount, full_name: activeSubProfile?.name })}
-          >
-            <Feather name="hard-drive" size={14} color="#000000" />
-            <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>ONU Details</Text>
-          </TouchableOpacity>
-
-          {canSeeDocuments ? (
-            <TouchableOpacity
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
-              onPress={() => setDocumentsOpen(true)}
-            >
-              <Feather name="file-text" size={14} color="#000000" />
-              <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Documents</Text>
-            </TouchableOpacity>
-          ) : null}
-
-          {/* <TouchableOpacity
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 8 }}
-            onPress={() => handleOpenEdit(activeSubProfile)}
-          >
-            <Feather name="edit-3" size={14} color="#000000" />
-            <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>Edit Profile</Text>
-          </TouchableOpacity> */}
         </View>
 
-        {/* 3-COLUMN DETAIL CARDS GRID */}
-        <View style={{ flexDirection: isMobile ? 'column' : 'row', gap: 16, marginBottom: 16 }}>
+        {/* TABS (vertical on PC, a horizontal scrollable strip on phones) + SELECTED TAB */}
+        <View style={{ flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 12 : 16, alignItems: isMobile ? 'stretch' : 'flex-start' }}>
+          <ScrollView
+            horizontal={isMobile}
+            style={[styles.tabRail, isMobile ? { width: '100%' } : { width: 210, maxHeight: Math.max(260, (winHeight || 700) - 140) }]}
+            contentContainerStyle={isMobile ? { padding: 5, gap: 4, flexDirection: 'row' } : { padding: 6, gap: 4 }}
+            showsVerticalScrollIndicator={false}
+            showsHorizontalScrollIndicator={false}
+          >
+            {internetTabs.map((t) => {
+              const on = internetTab === t.id;
+              return (
+                <TouchableOpacity
+                  key={t.id}
+                  style={[isMobile ? styles.tabItemSm : styles.tabItem, on && styles.tabItemOn, t.disabled && { opacity: 0.4 }]}
+                  onPress={() => !t.disabled && setInternetTab(t.id)}
+                  disabled={t.disabled}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: on, disabled: !!t.disabled }}
+                  title={t.disabled ? t.hint : t.label}
+                >
+                  <Feather name={t.icon} size={isMobile ? 14 : 15} color={on ? '#ffffff' : t.color || '#334155'} />
+                  <Text style={[isMobile ? styles.tabTextSm : styles.tabText, on && { color: '#ffffff' }]} numberOfLines={1}>{t.label}</Text>
+                  {t.id === 'online' && isOnline && !on ? <View style={styles.tabLiveDot} /> : null}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          <View style={{ flex: 1, minWidth: 0, gap: 16 }}>
+        {internetTab === 'online' && currentInternetAccount ? (
+          <OnlineSessionPanel
+            internetId={currentInternetAccount.internet_id}
+            username={activeSubProfile.username}
+            readOnly={readOnlyViewer}
+            onStatus={(online) => setOnlineOverride(!!online)}
+            onRefreshAccount={async () => {
+              await handleAccountDetailSync(currentInternetAccount.internet_id, true);
+              await fetchCustomerDetails(activeCustomerId, true);
+            }}
+          />
+        ) : internetTab === 'password' && currentInternetAccount ? (
+          <PasswordModal inline visible internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} onClose={() => setInternetTab('basic')} />
+        ) : internetTab === 'mac' && currentInternetAccount ? (
+          <MacBindingsModal inline visible internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} onClose={() => setInternetTab('basic')} />
+        ) : internetTab === 'sessions' && currentInternetAccount ? (
+          <SessionHistoryModal inline visible internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} onClose={() => setInternetTab('basic')} />
+        ) : internetTab === 'auth' && currentInternetAccount ? (
+          <AuthLogsModal inline visible internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} onClose={() => setInternetTab('basic')} />
+        ) : internetTab === 'onu' && currentInternetAccount ? (
+          <CustomerDevicesModal inline visible customer={{ ...currentInternetAccount, full_name: activeSubProfile?.name }} onClose={() => setInternetTab('basic')} />
+        ) : internetTab === 'documents' && canSeeDocuments ? (
+          <DocumentsModal inline visible customer={activeCustomer} onClose={() => setInternetTab('basic')} />
+        ) : (
+          <>
+
+        {/* BASIC INFO: account, package, connection + address */}
+        <View style={{ flexDirection: isMobile ? 'column' : 'row', flexWrap: isMobile ? 'nowrap' : 'wrap', gap: 16 }}>
           {/* CARD 1: ACCOUNT DETAILS */}
-          <View style={{ flex: 1, backgroundColor: '#ffffff', borderRadius: 14, padding: 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' }}>
+          <View style={{ flex: 1, flexBasis: isMobile ? 'auto' : 280, minWidth: isMobile ? 0 : 260, backgroundColor: '#ffffff', borderRadius: 14, padding: isMobile ? 14 : 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
               <Feather name="user" size={16} color="#000000" />
               <Text style={{ fontSize: 15, fontWeight: '700', color: '#000000' }}>Account Details</Text>
@@ -2243,7 +2287,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           </View>
 
           {/* CARD 2: PACKAGE DETAILS */}
-          <View style={{ flex: 1, backgroundColor: '#ffffff', borderRadius: 14, padding: 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' }}>
+          <View style={{ flex: 1, flexBasis: isMobile ? 'auto' : 280, minWidth: isMobile ? 0 : 260, backgroundColor: '#ffffff', borderRadius: 14, padding: isMobile ? 14 : 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
               <Feather name="package" size={16} color="#000000" />
               <Text style={{ fontSize: 15, fontWeight: '700', color: '#000000' }}>Package Details</Text>
@@ -2266,8 +2310,16 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ fontSize: 12, color: '#64748b' }}>Balance</Text>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>₹ {activeSubProfile.dueAmount !== null && activeSubProfile.dueAmount !== undefined ? activeSubProfile.dueAmount : '0.00'} (Balance)</Text>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Validity</Text>
+                {(() => {
+                  const v = validityLeft(activeSubProfile.expiration || activeSubProfile.expiryDate);
+                  return <Text style={{ fontSize: 13, fontWeight: '700', color: v.color }}>{v.text}</Text>;
+                })()}
+              </View>
+
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Last Renewal</Text>
+                <Text style={{ fontSize: 12, fontWeight: '500', color: '#000000' }}>{formatApiDate(activeSubProfile.renewal_date)}</Text>
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2276,19 +2328,14 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ fontSize: 12, color: '#64748b' }}>Invoice</Text>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>₹ {activeSubProfile.invoiceAmount !== null && activeSubProfile.invoiceAmount !== undefined ? activeSubProfile.invoiceAmount : '0.00'}</Text>
-              </View>
-
-              <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ fontSize: 12, color: '#64748b' }}>Paid</Text>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>₹ {activeSubProfile.totalPaid !== null && activeSubProfile.totalPaid !== undefined ? activeSubProfile.totalPaid : '0.00'}</Text>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Operator</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000', flexShrink: 1, textAlign: 'right' }} numberOfLines={1}>{activeSubProfile.partner_name || '—'}</Text>
               </View>
             </View>
           </View>
 
           {/* CARD 3: CONNECTION DETAILS */}
-          <View style={{ flex: 1, backgroundColor: '#ffffff', borderRadius: 14, padding: 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' }}>
+          <View style={{ flex: 1, flexBasis: isMobile ? 'auto' : 280, minWidth: isMobile ? 0 : 260, backgroundColor: '#ffffff', borderRadius: 14, padding: isMobile ? 14 : 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' }}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' }}>
               <Feather name="globe" size={16} color="#000000" />
               <Text style={{ fontSize: 15, fontWeight: '700', color: '#000000' }}>Connection Details</Text>
@@ -2311,8 +2358,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ fontSize: 12, color: '#64748b' }}>State</Text>
-                <Text style={{ fontSize: 13, fontWeight: '500', color: '#000000' }}>Andhra Pradesh</Text>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>IP Address</Text>
+                <Text style={{ fontSize: 13, fontWeight: '500', color: '#000000' }}>{activeSubProfile.ip_address || 'Dynamic'}</Text>
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -2350,6 +2397,10 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               <Text style={{ fontSize: 11, fontWeight: '700', color: '#64748b', letterSpacing: 0.5, marginBottom: 6 }}>INSTALLATION ADDRESS</Text>
               <Text style={{ fontSize: 13, color: '#000000', lineHeight: 20 }}>{activeSubProfile.installation_address || activeSubProfile.address || '—'}</Text>
             </View>
+          </View>
+        </View>
+          </>
+        )}
           </View>
         </View>
         {accountActionModals}
@@ -2973,7 +3024,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                           {cust.username || '—'}
                         </Text>
                       </TouchableOpacity>
-                      <Text style={[styles.tdSub, { color: usernameColor }]}>{(badge.label === '—' ? (cust.status_text || '') : badge.label)}</Text>
                     </View>
 
                     {/* Connectivity */}
@@ -3049,6 +3099,13 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 };
 
 const styles = StyleSheet.create({
+  tabRail: { flexGrow: 0, backgroundColor: '#ffffff', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' },
+  tabItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 11, borderRadius: 10 },
+  tabItemSm: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 9 },
+  tabItemOn: { backgroundColor: COLORS.primary },
+  tabText: { flex: 1, fontSize: 13.5, fontWeight: '600', color: '#334155' },
+  tabTextSm: { fontSize: 13, fontWeight: '600', color: '#334155' },
+  tabLiveDot: { position: 'absolute', top: 5, right: 5, width: 7, height: 7, borderRadius: 4, backgroundColor: '#10b981' },
   rowActionBtn: {
     flexDirection: 'row',
     alignItems: 'center',

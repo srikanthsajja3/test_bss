@@ -21,7 +21,7 @@ const copy = (text, what) => {
 // =====================================================================
 // PASSWORD — view current RADIUS password + set a new one
 // =====================================================================
-export const PasswordModal = ({ visible, onClose, internetId, username }) => {
+export const PasswordModal = ({ visible, onClose, internetId, username, inline = false }) => {
   const [loading, setLoading] = useState(false);
   const [current, setCurrent] = useState('');
   const [loadError, setLoadError] = useState('');
@@ -80,13 +80,14 @@ export const PasswordModal = ({ visible, onClose, internetId, username }) => {
   return (
     <ModalShell
       visible={visible}
-      title={`Password — ${username || ''}`}
+      title={inline ? 'Password' : `Password — ${username || ''}`}
       icon="key"
       onClose={onClose}
       busy={saving}
+      inline={inline}
       footer={
         <>
-          <Btn label="Close" kind="ghost" onPress={onClose} disabled={saving} />
+          {inline ? null : <Btn label="Close" kind="ghost" onPress={onClose} disabled={saving} />}
           <Btn label="Change Password" onPress={save} loading={saving} disabled={!pw || !pw2 || mismatch} />
         </>
       }
@@ -125,7 +126,7 @@ export const PasswordModal = ({ visible, onClose, internetId, username }) => {
 // =====================================================================
 // MAC BINDINGS — list + remove
 // =====================================================================
-export const MacBindingsModal = ({ visible, onClose, internetId, username }) => {
+export const MacBindingsModal = ({ visible, onClose, internetId, username, inline = false }) => {
   const [loading, setLoading] = useState(false);
   const [bindings, setBindings] = useState([]);
   const [loadError, setLoadError] = useState('');
@@ -175,15 +176,16 @@ export const MacBindingsModal = ({ visible, onClose, internetId, username }) => 
   return (
     <ModalShell
       visible={visible}
-      title={`MAC Bindings — ${username || ''}`}
+      title={inline ? 'MAC Bindings' : `MAC Bindings — ${username || ''}`}
       icon="globe"
       onClose={onClose}
       maxWidth={600}
       busy={!!removing}
+      inline={inline}
       footer={
         <>
           <Btn label="Refresh" kind="ghost" icon="refresh-cw" onPress={load} disabled={loading || !!removing} />
-          <Btn label="Close" onPress={onClose} disabled={!!removing} />
+          {inline ? null : <Btn label="Close" onPress={onClose} disabled={!!removing} />}
         </>
       }
     >
@@ -282,7 +284,7 @@ const SESSION_COLS = [
   { key: 'termination_call', label: 'Reason', flex: 1.4 },
 ];
 
-export const SessionHistoryModal = ({ visible, onClose, internetId, username }) => {
+export const SessionHistoryModal = ({ visible, onClose, internetId, username, inline = false }) => {
   const today = new Date();
   const monthAgo = new Date();
   monthAgo.setDate(monthAgo.getDate() - 30);
@@ -328,7 +330,7 @@ export const SessionHistoryModal = ({ visible, onClose, internetId, username }) 
   );
 
   return (
-    <ModalShell visible={visible} title={`Session History — ${username || ''}`} icon="list" onClose={onClose} maxWidth={1100} footer={<Btn label="Close" onPress={onClose} />}>
+    <ModalShell visible={visible} inline={inline} title={inline ? 'Session History' : `Session History — ${username || ''}`} icon="list" onClose={onClose} maxWidth={1100} footer={inline ? null : <Btn label="Close" onPress={onClose} />}>
       <View style={styles.toolbar}>
         <View>
           <Text style={sharedStyles.label}>FROM</Text>
@@ -433,7 +435,7 @@ const ResultPill = ({ log }) => {
   );
 };
 
-export const AuthLogsModal = ({ visible, onClose, internetId, username }) => {
+export const AuthLogsModal = ({ visible, onClose, internetId, username, inline = false }) => {
   const [loading, setLoading] = useState(false);
   const [logs, setLogs] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -490,14 +492,15 @@ export const AuthLogsModal = ({ visible, onClose, internetId, username }) => {
   return (
     <ModalShell
       visible={visible}
-      title={`Authentication Logs — ${username || ''}`}
+      title={inline ? 'Authentication Logs' : `Authentication Logs — ${username || ''}`}
       icon="shield"
       onClose={onClose}
       maxWidth={1150}
+      inline={inline}
       footer={
         <>
           <Btn label={loading ? 'Loading…' : 'Refresh'} icon="refresh-cw" kind="ghost" onPress={load} disabled={loading} />
-          <Btn label="Close" onPress={onClose} />
+          {inline ? null : <Btn label="Close" onPress={onClose} />}
         </>
       }
     >
@@ -654,12 +657,12 @@ export const VerifyCustomerModal = ({ visible, onClose, internetId, username, cu
 // =====================================================================
 // DOCUMENTS — Super Admin only (gated by the caller)
 // =====================================================================
-export const DocumentsModal = ({ visible, onClose, customer }) => {
+export const DocumentsModal = ({ visible, onClose, customer, inline = false }) => {
   const docs = (Array.isArray(customer?.documents) ? customer.documents : [])
     .map((d) => ({ ...d, url: fixDocUrl(d.url) }))
     .filter((d) => d.url);
   return (
-    <ModalShell visible={visible} title="Customer Documents" icon="file-text" onClose={onClose} maxWidth={760} footer={<Btn label="Close" onPress={onClose} />}>
+    <ModalShell visible={visible} inline={inline} title="Customer Documents" icon="file-text" onClose={onClose} maxWidth={760} footer={inline ? null : <Btn label="Close" onPress={onClose} />}>
       <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
         <View style={[styles.kycTag, { backgroundColor: customer?.aadhar_verified ? 'rgba(16,185,129,0.12)' : 'rgba(245,158,11,0.14)' }]}>
           <Text style={{ fontSize: 11, fontWeight: '700', color: customer?.aadhar_verified ? '#047857' : '#b45309' }}>

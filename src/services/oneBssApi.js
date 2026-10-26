@@ -11,7 +11,7 @@
 //   3. Only the logged-in user's own token is ever sent. The original token kept
 //      during impersonation is used ONLY to return to that account.
 
-const DEFAULT_BASE_URL = 'https://demo.onebss.in/b_bss';
+const DEFAULT_BASE_URL = 'https://demo.onebss.in/b_bss' // 'https://crm.polfibernet.in/api';
 
 // Set EXPO_PUBLIC_API_BASE_URL at build time to point at another backend
 // (Expo inlines process.env.EXPO_PUBLIC_* — keep this exact expression).
@@ -601,6 +601,15 @@ export const OneBssApi = {
     if (err) return clientError(err);
     return get(`/wallet.php?partner_id=${q(partnerId)}&page=${page}&limit=${limit}`);
   },
+  /** Wallet ledger with filters: { page, limit, type: 'credit' | 'debit', q } */
+  getWalletHistory: async (partnerId, { page = 1, limit = 20, type = '', q: search = '' } = {}) => {
+    const err = requireArg(partnerId, 'partner_id');
+    if (err) return clientError(err);
+    const qs = new URLSearchParams({ partner_id: String(partnerId), page: String(page), limit: String(limit) });
+    if (type) qs.set('type', type);
+    if (search) qs.set('q', search);
+    return get(`/wallet.php?${qs.toString()}`);
+  },
 
   topupWallet: async (partnerId, amount, remark = 'Wallet top-up') => {
     const amt = Number(amount);
@@ -634,11 +643,13 @@ export const OneBssApi = {
     }),
 
   // subPlanIds: exactly one DPO + any Broadcaster / A-la-carte sub_plan_ids.
-  rechargeIptvAccount: async (iptvId, subPlanIds, clientRef) =>
+  // internetId: the customer's internet account the IPTV dates follow (when it has several)
+  rechargeIptvAccount: async (iptvId, subPlanIds, clientRef, internetId = null) =>
     post('/iptv_recharge.php', {
       iptv_id: toNum(iptvId),
       sub_plan_ids: (subPlanIds || []).map(toNum),
       ...(clientRef ? { client_ref: clientRef } : {}),
+      ...(internetId ? { internet_id: toNum(internetId) } : {}),
     }),
 
   // Combo: one internet account + one STB of the same customer, renewed with a combo plan
@@ -685,7 +696,8 @@ export const OneBssApi = {
     return post(`/iptv_bulk_customer_sync.php?partner_id=${q(partnerId)}`);
   },
 
-  getIptvRechargePlans: async (iptvId) => get(`/iptv_recharge_plans.php?iptv_id=${q(iptvId)}`),
+  getIptvRechargePlans: async (iptvId, internetId = null) =>
+    get(`/iptv_recharge_plans.php?iptv_id=${q(iptvId)}${internetId ? `&internet_id=${q(internetId)}` : ''}`),
 
   syncIptvBranches: async (partnerId, key = '') =>
     post('/iptv_branch_sync.php', { partner_id: toNum(partnerId), key: String(key || '') }),
@@ -712,6 +724,10 @@ export const OneBssApi = {
 
   // dates: 'YYYY-MM-DD'
   getInternetAuthLogs: async (internetId) => get(`/internet_auth_logs.php?internet_id=${q(internetId)}`),
+  /** Live RADIUS session of an internet account: { online, session } */
+  getInternetOnlineSession: async (internetId) => get(`/internet_online_session.php?internet_id=${q(internetId)}`),
+  /** Disconnects the account's current RADIUS session. */
+  logoutInternetSession: async (internetId) => post('/internet_online_session.php', { internet_id: toNum(internetId), action: 'logout' }),
   getInternetSessionHistory: async (internetId, startDate, endDate) =>
     get(`/internet_session_history.php?internet_id=${q(internetId)}&start_date=${q(startDate)}&end_date=${q(endDate)}`),
 
@@ -776,4 +792,80 @@ export const OneBssApi = {
   // Dashboard — partnerId is optional (omit for the caller's own scope).
   // ------------------------------------------------------------------
   getDashboard: async (partnerId) => get(`/dashboard.php${partnerId ? `?partner_id=${q(partnerId)}` : ''}`),
+
+  
+  // ------------------------------------------------------------------
+  // ONU Inventory (Superadmin)
+  // ------------------------------------------------------------------
+  getInventoryStats: async () => get('/inventory/get_inventory_stats.php'),
+
+  // ------------------------------------------------------------------
+  // IPTV auto-renewal monitor (Superadmin)
+  // ------------------------------------------------------------------
+  getIptvRenewalMonitor: async (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.view) qs.set('view', params.view);
+    if (params.status !== undefined) qs.set('status', params.status);
+    if (params.q) qs.set('q', params.q);
+    if (params.page) qs.set('page', params.page);
+    if (params.limit) qs.set('limit', params.limit);
+    const s = qs.toString();
+    return get(`/iptv_renewal_monitor.php${s ? `?${s}` : ''}`);
+  },
+  /** One customer (STB): info, recharges with packs, every month and every try. */
+  getIptvRenewalCustomer: async (iptvId) => get(`/iptv_renewal_monitor.php?iptv_id=${q(iptvId)}`),
+  getIptvRenewalTries: async ({ scheduleId, runId }) =>
+    get(`/iptv_renewal_monitor.php?${scheduleId ? `schedule_id=${q(scheduleId)}` : `run_id=${q(runId)}`}`),
+  iptvRenewalAction: async (action, id) => post('/iptv_renewal_monitor.php', { action, id }),
+
+  // ------------------------------------------------------------------
+  // PayU wallet top-up (pg/). The server makes the order and the hash; the
+  // wallet is credited only after the server confirms the payment with PayU.
+  // ------------------------------------------------------------------
+  payuInitiate: async (amount, remark = '') => {
+    const amt = Number(amount);
+    if (!(amt > 0)) return clientError('Enter an amount greater than 0.');
+    return post('/pg/payu_initiate.php', { amount: amt, remark: String(remark || '').trim() });
+  },
+  /** One payment; check=true asks PayU now if it isn't final yet (and credits once if paid). */
+  payuPayment: async (txnid, check = true) =>
+    get(`/pg/payu_payments.php?txnid=${q(txnid)}${check ? '&check=1' : ''}`),
+  payuPayments: async (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.status) qs.set('status', params.status);
+    if (params.q) qs.set('q', params.q);
+    if (params.page) qs.set('page', params.page);
+    if (params.limit) qs.set('limit', params.limit);
+    const s = qs.toString();
+    return get(`/pg/payu_payments.php${s ? `?${s}` : ''}`);
+  },
+  payuRecheck: async (txnid) => post('/pg/payu_payments.php', { action: 'recheck', txnid }),
+  /** Super admin: checks PAYU_ENV / PAYU_KEY / PAYU_SALT with PayU (no payment). */
+  payuCheckSetup: async () => get('/pg/payu_payments.php?check_setup=1'),
+
+  getInventoryVendorsAndModels: async () => get('/inventory/get_vendors_models.php'),
+
+  getInventoryOnus: async (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.status && params.status !== 'all') qs.set('status', params.status);
+    if (params.vendor_id) qs.set('vendor_id', params.vendor_id);
+    if (params.model_id) qs.set('model_id', params.model_id);
+    if (params.type && params.type !== 'all') qs.set('type', params.type);
+    if (params.search) qs.set('search', params.search);
+    if (params.limit) qs.set('limit', params.limit);
+    if (params.offset !== undefined) qs.set('offset', params.offset);
+    const queryStr = qs.toString();
+    return get(`/inventory/get_onus.php${queryStr ? `?${queryStr}` : ''}`);
+  },
+
+  addInventoryOnu: async (payload) => post('/inventory/add_onu.php', payload),
+
+  addInventoryVendor: async (payload) => post('/inventory/add_vendor.php', payload),
+
+  addInventoryModel: async (payload) => post('/inventory/add_model.php', payload),
+
+  updateInventoryOnu: async (id, fields) => post(`/inventory/update_onu.php?id=${id}`, fields),
+
+  deleteInventoryOnu: async (id) => post(`/inventory/delete_onu.php?id=${id}`, {}),
 };
+

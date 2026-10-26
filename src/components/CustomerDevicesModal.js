@@ -45,7 +45,7 @@ const Block = ({ icon, title, children }) => (
   </View>
 );
 
-export const CustomerDevicesModal = ({ visible, onClose, customer }) => {
+export const CustomerDevicesModal = ({ visible, onClose, customer, inline = false }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
   const [loading, setLoading] = useState(false);
@@ -101,10 +101,19 @@ export const CustomerDevicesModal = ({ visible, onClose, customer }) => {
   const onuOnline = String(onu.status || '').toLowerCase();
   const isUp = ['online', 'up', 'working', 'active'].includes(onuOnline);
 
-  return (
+  // inline: a card inside the account page (ONU Details tab); otherwise a modal
+  const wrap = (children) => (inline ? (
+    <View style={[styles.card, { width: '100%', maxHeight: undefined, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' }]}>{children}</View>
+  ) : (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={styles.overlay}>
-        <View style={[styles.card, { width: isMobile ? '96%' : 640 }]}>
+        <View style={[styles.card, { width: isMobile ? '96%' : 640 }]}>{children}</View>
+      </View>
+    </Modal>
+  ));
+
+  return wrap(
+    <>
           <View style={styles.header}>
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1, minWidth: 0 }}>
               <View style={styles.headerIcon}><Feather name="hard-drive" size={18} color="#0284c7" /></View>
@@ -113,10 +122,10 @@ export const CustomerDevicesModal = ({ visible, onClose, customer }) => {
                 <Text style={styles.sub} numberOfLines={1}>{title}{data?.mac ? ` · MAC ${data.mac}` : ''}</Text>
               </View>
             </View>
-            <TouchableOpacity onPress={onClose} style={styles.closeBtn}><Feather name="x" size={20} color="#64748b" /></TouchableOpacity>
+            {inline ? null : <TouchableOpacity onPress={onClose} style={styles.closeBtn}><Feather name="x" size={20} color="#64748b" /></TouchableOpacity>}
           </View>
 
-          <ScrollView style={styles.body}>
+          <ScrollView style={[styles.body, inline && { maxHeight: undefined }]}>
             {loading && !data ? (
               <View style={styles.center}><ActivityIndicator size="small" color="#0284c7" /><Text style={styles.muted}>Looking up the ONU…</Text></View>
             ) : notMapped ? (
@@ -186,13 +195,13 @@ export const CustomerDevicesModal = ({ visible, onClose, customer }) => {
               {loading ? <ActivityIndicator size="small" color="#ffffff" /> : <Feather name="refresh-cw" size={13} color="#ffffff" />}
               <Text style={styles.btnPrimaryText}>{loading ? 'Reading…' : 'Read live from OLT'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={onClose}>
-              <Text style={styles.btnGhostText}>Close</Text>
-            </TouchableOpacity>
+            {inline ? null : (
+              <TouchableOpacity style={[styles.btn, styles.btnGhost]} onPress={onClose}>
+                <Text style={styles.btnGhostText}>Close</Text>
+              </TouchableOpacity>
+            )}
           </View>
-        </View>
-      </View>
-    </Modal>
+    </>
   );
 };
 

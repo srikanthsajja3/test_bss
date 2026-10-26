@@ -115,6 +115,19 @@ export const normaliseOttAccount = (acc, index) => ({
   raw: acc,
 });
 
+// IPTV: the date shown to the operator / customer is the date the STB is PAID till
+// (expected_expiry — includes months still to be renewed automatically); the real Pioneer
+// expiry (expriration) is shown next to it when it differs.
+const laterDate = (a, b) => {
+  const da = parseApiDate(a);
+  const db = parseApiDate(b);
+  if (!da) return b;
+  if (!db) return a;
+  return da.getTime() >= db.getTime() ? a : b;
+};
+export const iptvShownExpiry = (acc) => laterDate(acc?.expected_expiry, acc?.expriration || acc?.expiration);
+export const iptvRealExpiry = (acc) => acc?.expriration || acc?.expiration || null;
+
 export const normaliseIptvAccount = (acc, index) => ({
   kind: 'iptv',
   index,
@@ -130,7 +143,8 @@ export const normaliseIptvAccount = (acc, index) => ({
   subplanLabel: clean(acc.subplan_name) || (acc.subplan_id ? `Sub plan #${acc.subplan_id}` : '—'),
   planId: acc.plan_id,
   subPlanId: acc.subplan_id,
-  expiration: acc.expriration || acc.expiration, // API spells it "expriration"
+  expiration: iptvShownExpiry(acc), // paid till (expected expiry); falls back to Pioneer's
+  realExpiration: iptvRealExpiry(acc), // API spells it "expriration"
   lastSeenLabel: 'Next invoice',
   lastSeen: acc.nxt_inv_date,
   balance: acc.balance,
@@ -187,6 +201,7 @@ const AccountCard = ({ account, isMobile, onInternetRecharge, onIptvRecharge, on
           <View style={{ alignItems: 'flex-end' }}>
             {parseApiDate(account.expiration) ? <Text style={styles.infoValue}>{formatApiDate(account.expiration, false)}</Text> : null}
             <Text style={[styles.expiryHint, { color: TONE[expiry.tone].fg }]}>{expiry.text}</Text>
+
           </View>
         </InfoRow>
       </View>
@@ -223,6 +238,14 @@ const AccountCard = ({ account, isMobile, onInternetRecharge, onIptvRecharge, on
             <Feather name="user-check" size={13} color="#ffffff" />
             <Text style={styles.btnQuickText}>Verify to recharge</Text>
           </TouchableOpacity>
+        ) : (isInternet || account.kind === 'iptv') && account.raw?.combo_lock ? (
+          // on a running combo: only Combo Recharge (same combo) until internet and IPTV have both expired
+          <View style={styles.comboLock}>
+            <Feather name="layers" size={13} color="#be185d" />
+            <Text style={styles.comboLockText} numberOfLines={2}>
+              On combo "{account.raw.combo_lock.combo_name}" till {formatApiDate(account.raw.combo_lock.until, false)} — use Combo Recharge
+            </Text>
+          </View>
         ) : account.kind === 'ott' ? (
           <TouchableOpacity style={[styles.btn, styles.btnOtt]} onPress={() => onOttRecharge && onOttRecharge(account.raw)}>
             <Feather name={isAdvance ? 'fast-forward' : 'play-circle'} size={13} color="#ffffff" />
@@ -269,7 +292,7 @@ const SyncStatus = ({ syncState, onRetry }) => {
     return (
       <View style={styles.syncChip}>
         <ActivityIndicator size="small" color="#2563eb" />
-        <Text style={styles.syncChipText}>Updating from RADIUS & IPTV…</Text>
+        <Text style={styles.syncChipText}>Updating…</Text>
       </View>
     );
   }
@@ -289,7 +312,7 @@ const SyncStatus = ({ syncState, onRetry }) => {
     >
       <Feather name="alert-triangle" size={12} color="#b45309" />
       <Text style={[styles.syncChipText, { color: '#b45309' }]} numberOfLines={1}>
-        {syncState.state === 'partial' ? 'Partly updated' : 'Could not update'} — showing saved data · Retry
+        {syncState.state === 'partial' ? 'Refresh' : 'Refresh'}
       </Text>
     </TouchableOpacity>
   );
@@ -994,6 +1017,9 @@ const styles = StyleSheet.create({
   infoValueWrap: { flexShrink: 1, alignItems: 'flex-end' },
   infoValue: { fontSize: 12, fontWeight: '600', color: COLORS.textMain, textAlign: 'right' },
   expiryHint: { fontSize: 11, fontWeight: '700', marginTop: 1 },
+  realExpiry: { fontSize: 10.5, color: '#64748b', marginTop: 1 },
+  comboLock: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: 'rgba(236,72,153,0.08)', borderWidth: 1, borderColor: 'rgba(236,72,153,0.3)' },
+  comboLockText: { fontSize: 11.5, fontWeight: '600', color: '#9d174d', flexShrink: 1 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   pill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
   pillText: { fontSize: 11, fontWeight: '700' },

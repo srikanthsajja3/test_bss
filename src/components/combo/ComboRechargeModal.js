@@ -3,9 +3,10 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../../constants/theme';
 import { OneBssApi } from '../../services/oneBssApi';
-import { ModalShell, Btn, KV, Note, isAccountVerified } from '../internet/shared';
+import { ModalShell, Btn, KV, Note, isAccountVerified, SearchBox, matchesSearch } from '../internet/shared';
 import { parseApiDate, formatApiDate } from '../CustomerAccountsOverview';
 import { FtaIncluded } from '../iptv/FtaIncluded';
+import { pickFta, ownedChannels, overlapReason, selectedConflicts } from '../iptv/packRules';
 
 const COMBO = '#ec4899';
 const IPTV = '#8b5cf6';
@@ -34,23 +35,41 @@ const AccountOption = ({ on, title, sub, active, onPress, disabled }) => (
   </TouchableOpacity>
 );
 
-const AddonList = ({ packs, selected, onToggle, disabled, emptyText }) =>
-  packs.length === 0 ? (
-    <Text style={[styles.muted, { padding: 12, textAlign: 'center' }]}>{emptyText}</Text>
-  ) : (
+const AddonList = ({ packs, selected, onToggle, disabled, emptyText, blockReason, conflictOf, searchLabel = 'packs' }) => {
+  const [q, setQ] = useState('');
+  const shown = useMemo(() => packs.filter((p) => matchesSearch(q, p.plan_name)), [packs, q]);
+  if (packs.length === 0) return <Text style={[styles.muted, { padding: 12, textAlign: 'center' }]}>{emptyText}</Text>;
+  return (
+    <>
+    {packs.length > 1 ? <SearchBox value={q} onChange={setQ} placeholder={`Search ${searchLabel}…`} count={shown.length} /> : null}
     <ScrollView style={styles.addonList} nestedScrollEnabled>
-      {packs.map((p) => {
+      {shown.length === 0 ? <Text style={[styles.muted, { padding: 12, textAlign: 'center' }]}>No package matches “{q.trim()}”.</Text> : null}
+      {shown.map((p) => {
         const on = selected.has(p.sub_plan_id);
+        // not selectable: one of its channels is already in the DPO / FTA / another add-on
+        const blocked = !on && blockReason ? blockReason(p) : null;
+        const clash = on && conflictOf ? conflictOf(p) : null;
         return (
-          <TouchableOpacity key={p.sub_plan_id} style={[styles.addonRow, on && { backgroundColor: '#f5f3ff' }]} onPress={() => !disabled && onToggle(p.sub_plan_id)} disabled={disabled}>
+          <TouchableOpacity
+            key={p.sub_plan_id}
+            style={[styles.addonRow, on && { backgroundColor: '#f5f3ff' }, blocked && { backgroundColor: '#f8fafc' }, clash && { backgroundColor: '#fef2f2' }]}
+            onPress={() => !disabled && !blocked && onToggle(p.sub_plan_id)}
+            disabled={disabled || !!blocked}
+          >
             <View style={[styles.checkbox, on && { backgroundColor: IPTV, borderColor: IPTV }]}>{on ? <Feather name="check" size={12} color="#ffffff" /> : null}</View>
-            <Text style={[styles.addonName, on && { color: '#5b21b6', fontWeight: '700' }]} numberOfLines={1}>{p.plan_name}</Text>
-            <Text style={styles.addonPrice}>{money(p.price)}</Text>
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[styles.addonName, on && { color: '#5b21b6', fontWeight: '700' }, blocked && { color: '#94a3b8' }]} numberOfLines={1}>{p.plan_name}</Text>
+              {blocked ? <Text style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }} numberOfLines={2}>{blocked}</Text> : null}
+              {clash ? <Text style={{ fontSize: 11, color: '#b91c1c', fontWeight: '600', marginTop: 2 }} numberOfLines={2}>{clash} — remove it</Text> : null}
+            </View>
+            <Text style={[styles.addonPrice, blocked && { color: '#94a3b8' }]}>{money(p.price)}</Text>
           </TouchableOpacity>
         );
       })}
     </ScrollView>
+    </>
   );
+};
 
 /**
  * Combo Recharge: renews one internet account and one STB of this customer with an operator
@@ -75,6 +94,7 @@ export const ComboRechargeModal = ({ visible, onClose, customer, onConfirm }) =>
   const [comboId, setComboId] = useState(null);
   const [addons, setAddons] = useState(new Set());
   const [tab, setTab] = useState('A-la-carte');
+  const [comboSearch, setComboSearch] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
   // open: auto-select when there is only one account of a kind
@@ -87,6 +107,7 @@ export const ComboRechargeModal = ({ visible, onClose, customer, onConfirm }) =>
     setComboId(null);
     setAddons(new Set());
     setTab('A-la-carte');
+    setComboSearch('');
   }, [visible, customer?.cust_id]);
 
   const internetAcc = internetAccounts.find((a) => String(a.internet_id) === String(internetId)) || null;
@@ -126,8 +147,24 @@ export const ComboRechargeModal = ({ visible, onClose, customer, onConfirm }) =>
   const combo = combos.find((c) => c.combo_id === comboId) || null;
   const addonPacks = useMemo(() => [...(opts?.addons?.['A-la-carte'] || []), ...(opts?.addons?.Broadcaster || [])], [opts]);
   const chosenAddons = addonPacks.filter((p) => addons.has(p.sub_plan_id));
-  const addonTotal = chosenAddons.reduce((s, p) => s + Number(p.price || 0), 0);
-  const total = combo ? Number(combo.price) + addonTotal : 0;
+  // IPTV months = the combo's internet months (3 / 6 / 12-month combos); FTA and add-ons are
+  // monthly prices, so they are charged x months. IPTV: first part now, the rest automatically.
+  const months = combo ? Math.max(1, Number(combo.months || 1)) : 1;
+  const xMonths = (v) => Math.round(Number(v || 0) * months * 100) / 100;
+  const addonTotal = chosenAddons.reduce((s, p) => s + xMonths(p.price), 0);
+  // FTA base pack: goes with the combo's DPO. Its price is INSIDE the combo price
+  // (combo.fta_included); only an old, not-migrated combo charges it on top.
+  const ftaPack = pickFta(opts?.fta);
+  const ftaPrice = ftaPack ? xMonths(ftaPack.price) : 0;
+  const ftaOnTop = !!combo && combo.fta_included === false && !ftaPack?.included;
+  const total = combo ? Number(combo.price) + (ftaOnTop ? ftaPrice : 0) + addonTotal : 0;
+  const iptvParts = combo?.iptv_period?.parts || [];
+  const pendingMonths = (opts?.pending_schedule || []).filter((r) => r.status === 'waiting');
+  // add-ons repeating a channel of the DPO / FTA / another add-on can't be taken
+  const comboDpo = combo ? { plan_name: combo.iptv.plan_name, channel_ids: combo.iptv.channel_ids } : null;
+  const basePacks = [comboDpo, ftaPack].filter(Boolean);
+  const owned = ownedChannels([...basePacks, ...chosenAddons]);
+  const conflicts = selectedConflicts(basePacks, chosenAddons);
   const addonsLocked = !!opts?.iptv?.is_active;
   const wallet = opts?.wallet_balance;
   const shortWallet = combo && wallet !== undefined && wallet !== null && Number(wallet) < total;
@@ -158,6 +195,9 @@ export const ComboRechargeModal = ({ visible, onClose, customer, onConfirm }) =>
   if (opts?.iptv?.is_active) pairNotes.push(`The STB is active until ${formatApiDate(opts.iptv.expiration)} — advance renewal keeps its current DPO and add-ons.`);
 
   // ---------- combo table ----------
+  const shownCombos = combos.filter((c) =>
+    matchesSearch(comboSearch, c.combo_name, c.internet?.plan_name, c.internet?.sub_plan_name, c.iptv?.plan_name, Number(c.months) > 1 ? `${c.months} months` : `${c.internet?.validity} days`)
+  );
   const comboRows = (
       <View style={{ flex: 1 }}>
         <View style={[styles.tr, styles.thRow]}>
@@ -170,8 +210,10 @@ export const ComboRechargeModal = ({ visible, onClose, customer, onConfirm }) =>
         </View>
         {combos.length === 0 ? (
           <Text style={[styles.muted, { padding: 14 }]}>No combo plans are set up for this operator yet. Ask your admin to create them under Partners › Combo Plans.</Text>
+        ) : shownCombos.length === 0 ? (
+          <Text style={[styles.muted, { padding: 14 }]}>No combo matches “{comboSearch.trim()}”.</Text>
         ) : (
-          combos.map((c) => {
+          shownCombos.map((c) => {
             const on = c.combo_id === comboId;
             return (
               <TouchableOpacity
@@ -193,9 +235,16 @@ export const ComboRechargeModal = ({ visible, onClose, customer, onConfirm }) =>
                 </View>
                 <View style={{ flex: 1.5, minWidth: 0, paddingRight: 8 }}>
                   <Text style={styles.td} numberOfLines={1}>{c.iptv.plan_name}</Text>
-                  <FtaIncluded compact />
+                  {/* FTA goes with the DPO */}
+                  {!ftaPack ? (
+                    <FtaIncluded compact fta={null} />
+                  ) : c.fta_included === false && !ftaPack.included ? (
+                    <Text style={styles.tdSub}>+ FTA {money(Number(ftaPack.price) * Math.max(1, Number(c.months || 1)))}</Text>
+                  ) : (
+                    <Text style={[styles.tdSub, { color: '#6d28d9', fontWeight: '700' }]}>FTA included</Text>
+                  )}
                 </View>
-                <Text style={[styles.td, { width: 70 }]}>{c.iptv.validity_days} days</Text>
+                <Text style={[styles.td, { width: 70 }]}>{Number(c.months) > 1 ? `${c.months} months` : `${c.internet.validity} days`}</Text>
                 <View style={{ width: 110, alignItems: 'flex-end' }}>
                   <Text style={[styles.td, { fontWeight: '800', color: on ? '#9d174d' : COLORS.textMain }]}>{money(c.price)}</Text>
                   {c.saving > 0 ? <Text style={styles.save}>Save {money(c.saving)}</Text> : null}
@@ -243,6 +292,9 @@ export const ComboRechargeModal = ({ visible, onClose, customer, onConfirm }) =>
         selected={addons}
         onToggle={toggle}
         disabled={addonsLocked || submitting}
+        blockReason={combo ? (p) => overlapReason(p, owned) : null}
+        conflictOf={(p) => conflicts.get(p.sub_plan_id) || null}
+        searchLabel={tab === 'Broadcaster' ? 'broadcasters' : 'channels'}
         emptyText={`No ${tab === 'Broadcaster' ? 'broadcaster packs' : 'a-la-carte channels'} are assigned to this operator.`}
       />
       {addonsLocked ? <Text style={[styles.muted, { marginTop: 6 }]}>Locked to the STB's current add-ons (advance renewal).</Text> : null}
@@ -262,15 +314,22 @@ export const ComboRechargeModal = ({ visible, onClose, customer, onConfirm }) =>
             <Text style={styles.billPrice}>{money(combo.price)}</Text>
           </View>
           <Text style={styles.billSub}>Internet: {combo.internet.plan_name} · {combo.internet.sub_plan_name}</Text>
-          <Text style={styles.billSub}>IPTV: {combo.iptv.plan_name} (DPO)</Text>
-          <View style={{ marginTop: 8 }}>
-            <FtaIncluded fta={opts?.fta} />
-          </View>
+          <Text style={styles.billSub}>IPTV: {combo.iptv.plan_name} (DPO){ftaPack && !ftaOnTop ? ` + ${ftaPack.plan_name} (FTA)` : ''}{months > 1 ? ` × ${months} months` : ''}</Text>
+          {ftaPack && ftaOnTop ? (
+            <View style={[styles.billRow, { marginTop: 6 }]}>
+              <Text style={styles.billName} numberOfLines={1}>FTA: {ftaPack.plan_name}{months > 1 ? ` × ${months}` : ''}</Text>
+              <Text style={styles.billPrice}>{money(ftaPrice)}</Text>
+            </View>
+          ) : ftaPack ? null : (
+            <View style={{ marginTop: 8 }}>
+              <FtaIncluded fta={null} />
+            </View>
+          )}
           {chosenAddons.length ? <Text style={styles.groupLabel}>Add-ons ({chosenAddons.length})</Text> : null}
           {chosenAddons.map((p) => (
             <View key={p.sub_plan_id} style={styles.billRow}>
-              <Text style={styles.billName} numberOfLines={1}>{p.plan_name}</Text>
-              <Text style={styles.billPrice}>{money(p.price)}</Text>
+              <Text style={styles.billName} numberOfLines={1}>{p.plan_name}{months > 1 ? ` × ${months}` : ''}</Text>
+              <Text style={styles.billPrice}>{money(xMonths(p.price))}</Text>
             </View>
           ))}
           <View style={[styles.billRow, styles.billTotal]}>
@@ -279,7 +338,8 @@ export const ComboRechargeModal = ({ visible, onClose, customer, onConfirm }) =>
           </View>
           {wallet !== undefined && wallet !== null ? <KV label="Wallet balance" value={money(wallet)} /> : null}
           <KV label="Internet" value={opts?.internet?.is_active ? 'Advance renewal' : 'Recharge from today'} />
-          <KV label="IPTV" value={opts?.iptv?.is_active ? `Advance from ${formatApiDate(opts.iptv.expiration)}` : 'Recharge from today'} />
+          <KV label="IPTV" value={combo?.iptv_period?.from ? `Advance from ${formatApiDate(combo.iptv_period.from)}` : opts?.iptv?.is_active ? `Advance from ${formatApiDate(opts.iptv.expiration)}` : 'Recharge from today'} />
+          {iptvParts.length ? <KV label="IPTV till" value={formatApiDate(iptvParts[iptvParts.length - 1].end)} /> : null}
         </>
       )}
     </View>
@@ -304,7 +364,7 @@ export const ComboRechargeModal = ({ visible, onClose, customer, onConfirm }) =>
             kind="orange"
             onPress={confirm}
             loading={submitting}
-            disabled={!combo || !ready || !verified || loading || shortWallet}
+            disabled={!combo || !ready || !verified || loading || shortWallet || !ftaPack || conflicts.size > 0}
           />
         </>
       }
@@ -378,13 +438,23 @@ export const ComboRechargeModal = ({ visible, onClose, customer, onConfirm }) =>
           <View style={{ flexDirection: wide ? 'row' : 'column', alignItems: wide ? 'flex-start' : 'stretch', marginTop: 14 }}>
             <View style={wide ? { flex: 1, minWidth: 0 } : null}>
               <Text style={styles.sectionTitle}>Combo plan</Text>
+              {combos.length > 1 ? (
+                <SearchBox value={comboSearch} onChange={setComboSearch} placeholder="Search combo, internet or DPO package…" disabled={submitting} count={shownCombos.length} />
+              ) : null}
               <View style={styles.tableBox}>{comboTable}</View>
               {combo ? addonPanel : null}
             </View>
             {summary}
           </View>
           {shortWallet ? <Note tone="error" text={`Wallet balance ${money(wallet)} is less than the total ${money(total)}.`} /> : null}
-          <Note text="Internet is renewed first, then IPTV. If IPTV fails, only the internet part is charged and you can recharge the STB on its own." />
+          {opts?.combo_lock ? (
+            <Note
+              tone="info"
+              text={`This customer is on the combo "${opts.combo_lock.combo_name}" till ${formatApiDate(opts.combo_lock.until)}. Only this combo can be renewed now (same package); internet and IPTV can be recharged on their own after both have expired.`}
+            />
+          ) : null}
+          {conflicts.size > 0 ? <Note tone="error" text="Some selected add-ons repeat channels the customer already gets from the DPO / FTA / another add-on (marked in red). Remove them to continue." /> : null}
+          <Note text="The wallet is debited when the recharge starts. If internet or IPTV is not confirmed, the account shows Recheck." />
         </>
       ) : null}
     </ModalShell>

@@ -10,7 +10,8 @@ import { PlanPriceTable } from './PlanPriceTable';
  * durations) are listed in a price table (PlanPriceTable) — select, super admin price, one margin
  * per level above the operator, operator price.
  *
- * groups: [{ key, title, meta, typeLabel?, rows: [PlanPriceTable plan rows] }]
+ * groups: [{ key, title, meta, typeLabel?, note?, rows: [PlanPriceTable plan rows] }]
+ *   note: a highlighted price line under the title (e.g. IPTV DPO: "DPO ₹150 + FTA ₹35.40 = ₹185.40")
  * expandedKeys / onToggleExpand: controlled expand state (omit both to let the list keep its own)
  * forceExpanded: open every card (e.g. while searching)
  * The other props are passed to PlanPriceTable (mode, chain, viewerId, selectedIds, onToggle,
@@ -84,6 +85,11 @@ export const PlanCardList = ({
                   </View>
                   {g.meta ? (
                     <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }} numberOfLines={2}>{g.meta}</Text>
+                  ) : null}
+                  {g.note ? (
+                    <View style={{ alignSelf: 'flex-start', marginTop: 6, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, backgroundColor: `${accent}12`, borderWidth: 1, borderColor: `${accent}33` }}>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: accent }}>{g.note}</Text>
+                    </View>
                   ) : null}
                 </View>
               </View>

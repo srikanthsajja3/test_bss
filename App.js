@@ -9,6 +9,10 @@ import { PartnerScreen } from './src/screens/PartnerScreen';
 import { CustomerPricesPage } from './src/components/plans/CustomerPricesPage';
 import { CustomerScreen } from './src/screens/CustomerScreen';
 import { OttSubscribersScreen } from './src/screens/OttSubscribersScreen';
+import { InventoryScreen } from './src/screens/InventoryScreen';
+import { IptvRenewalsScreen } from './src/screens/IptvRenewalsScreen';
+import { PayuPaymentsScreen } from './src/screens/PayuPaymentsScreen';
+import { WalletScreen } from './src/screens/WalletScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { ToastContainer, toast } from 'react-toastify';
 import { createPortal } from 'react-dom';
@@ -39,7 +43,7 @@ export default function App() {
           const [routePart] = hash.split('&');
           const [rawTab, rawFilter] = routePart.split('?filter=');
           const tab = rawTab ? rawTab.split('?')[0] : '';
-          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices'].includes(tab)) {
+          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'iptv_renewals', 'payu_payments', 'wallet'].includes(tab)) {
             const filter = rawFilter ? rawFilter.split('?')[0].split('&')[0] : 'all';
             const rangeMatch = hash.match(/[?&]range=([a-z0-9_]+)/);
             return { tab, filter, range: rangeMatch ? rangeMatch[1] : '' };
@@ -47,7 +51,7 @@ export default function App() {
         }
         const savedTab = localStorage.getItem('onebss_active_tab');
         const savedFilter = localStorage.getItem('onebss_filter');
-        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices'].includes(savedTab)) {
+        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'iptv_renewals', 'payu_payments', 'wallet'].includes(savedTab)) {
           return { tab: savedTab, filter: savedFilter || 'all', range: '' };
         }
       }
@@ -92,6 +96,31 @@ export default function App() {
   const [user, setUserState] = useState(getInitialUserState());
   const [partnerCreateRole, setPartnerCreateRole] = useState(null);
   const [partnerInitialRole, setPartnerInitialRole] = useState('');
+
+  // Back from PayU's checkout (pg/payu_callback.php sends the browser to #payu=<txnid>), or the
+  // Wallet page reloaded right after leaving for PayU (browser Back): the Wallet page checks that
+  // payment — success goes to the dashboard, anything else is shown on the Wallet page.
+  const [payuResumeTxn, setPayuResumeTxn] = useState(() => {
+    try {
+      if (typeof window === 'undefined') return null;
+      const m = window.location.hash.match(/^#payu=([A-Za-z0-9]{6,40})/);
+      if (m) return m[1];
+      if (/^#wallet/.test(window.location.hash)) {
+        const raw = localStorage.getItem('onebss_pending_payu_txn');
+        const pending = raw ? JSON.parse(raw) : null;
+        if (pending?.txnid && Date.now() - Number(pending.at || 0) < 30 * 60 * 1000) return pending.txnid;
+      }
+    } catch (e) {}
+    return null;
+  });
+  React.useEffect(() => {
+    if (!payuResumeTxn || typeof window === 'undefined') return;
+    window.history.replaceState(null, '', '#wallet');
+    setActiveTabState('wallet');
+    try {
+      localStorage.setItem('onebss_active_tab', 'wallet');
+    } catch (e) {}
+  }, [payuResumeTxn]);
 
   const handleNavigateToPartners = (role = '') => {
     setPartnerInitialRole(role || '');
@@ -333,6 +362,38 @@ export default function App() {
       case 'customer_prices':
         // operators: one customer price per package for all their customers
         return <CustomerPricesPage key={`cp_${globalRefreshKey}`} partnerId={user?.partner_id} partnerName={user?.partner_name} readOnly={String(user?.role || '').toLowerCase() !== 'operator'} />;
+      case 'inventory':
+        // super admin only (the API answers 403 to everyone else)
+        if (String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin') {
+          return <DashboardScreen user={user} refreshSignal={globalRefreshKey} onNavigateToCustomers={handleNavigateToCustomers} onNavigateToPartners={handleNavigateToPartners} />;
+        }
+        return <InventoryScreen user={user} refreshSignal={globalRefreshKey} />;
+      case 'iptv_renewals':
+        // super admin only (the API answers 403 to everyone else)
+        if (String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin') {
+          return <DashboardScreen user={user} refreshSignal={globalRefreshKey} onNavigateToCustomers={handleNavigateToCustomers} onNavigateToPartners={handleNavigateToPartners} />;
+        }
+        return <IptvRenewalsScreen refreshSignal={globalRefreshKey} />;
+      case 'payu_payments':
+        // super admin only
+        if (String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin') {
+          return <DashboardScreen user={user} refreshSignal={globalRefreshKey} onNavigateToCustomers={handleNavigateToCustomers} onNavigateToPartners={handleNavigateToPartners} />;
+        }
+        return <PayuPaymentsScreen refreshSignal={globalRefreshKey} />;
+      case 'wallet':
+        // operator's own wallet: add money (PayU) + transactions
+        if (String(user?.role || '').toLowerCase() !== 'operator') {
+          return <DashboardScreen user={user} refreshSignal={globalRefreshKey} onNavigateToCustomers={handleNavigateToCustomers} onNavigateToPartners={handleNavigateToPartners} />;
+        }
+        return (
+          <WalletScreen
+            user={user}
+            refreshSignal={globalRefreshKey}
+            resumeTxnid={payuResumeTxn}
+            onResumeHandled={() => setPayuResumeTxn(null)}
+            onPaid={() => setActiveTab('dashboard')}
+          />
+        );
       default:
         return <DashboardScreen user={user} refreshSignal={globalRefreshKey} onNavigateToCustomers={handleNavigateToCustomers} onNavigateToPartners={handleNavigateToPartners} />;
     }
@@ -355,6 +416,14 @@ export default function App() {
         return { title: 'OTT Subscribers' };
       case 'customer_prices':
         return { title: 'Customer Prices', subtitle: 'What your customers pay, per package' };
+      case 'inventory':
+        return { title: 'Inventory', subtitle: 'ONU stock, vendors and models' };
+      case 'iptv_renewals':
+        return { title: 'IPTV Auto-Renewals', subtitle: 'Paid IPTV months renewed on Pioneer by the hourly cron' };
+      case 'payu_payments':
+        return { title: 'Online Payments', subtitle: 'Operator wallet top-ups through PayU' };
+      case 'wallet':
+        return { title: 'Wallet', subtitle: 'Add money and see your transactions' };
       default:
         return { title: 'OneBSS Platform', subtitle: 'Management Portal' };
     }
@@ -429,6 +498,7 @@ export default function App() {
             }}
             onOpenCreate={() => handleOpenCreateRole('operator')}
             onToggleSidebar={toggleSidebarCollapse}
+            onOpenWallet={() => setActiveTab('wallet')}
             user={user}
           />
 

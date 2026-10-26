@@ -415,6 +415,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
         </View>
       )}
 
+
       {/* INTERNET GRID */}
       <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 8 }}>
         <Feather name="wifi" size={18} color={COLORS.primary} />
@@ -630,11 +631,13 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
           </View>
         ))}
       </View>
+
     </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
+
   bgSyncBar: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 10, backgroundColor: 'rgba(37,99,235,0.06)', borderWidth: 1, borderColor: 'rgba(37,99,235,0.2)', marginBottom: 16 },
   bgSyncBarWarn: { backgroundColor: 'rgba(245,158,11,0.08)', borderColor: 'rgba(245,158,11,0.3)' },
   bgSyncText: { flex: 1, fontSize: 12, color: '#1e3a8a', fontWeight: '600' },

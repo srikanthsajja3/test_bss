@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, Modal, Image, ScrollView, Platform, useWindowDimensions } from 'react-native';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, Modal, Image, ScrollView, Platform, useWindowDimensions, TextInput } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../../constants/theme';
 
@@ -73,8 +73,23 @@ export const CustomerPhoto = ({ uri, size = 56, radius = 14, initials = '', dark
 };
 
 // Generic modal frame used by all account-action modals
-export const ModalShell = ({ visible, title, icon, iconColor = COLORS.primary, onClose, maxWidth = 480, children, footer, busy = false }) => {
+export const ModalShell = ({ visible, title, icon, iconColor = COLORS.primary, onClose, maxWidth = 480, children, footer, busy = false, inline = false }) => {
   const { height } = useWindowDimensions();
+  // inline: the same panel as a card inside the page (account detail tabs) — no overlay, no close
+  if (inline) {
+    return (
+      <View style={styles.inlineCard}>
+        <View style={styles.header}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+            {icon ? <Feather name={icon} size={18} color={iconColor} /> : null}
+            <Text style={styles.title} numberOfLines={1}>{title}</Text>
+          </View>
+        </View>
+        <View style={{ padding: 18 }}>{children}</View>
+        {footer ? <View style={styles.footer}>{footer}</View> : null}
+      </View>
+    );
+  }
   return (
     <Modal visible={visible} transparent animationType="fade" onRequestClose={() => !busy && onClose()}>
       <View style={styles.overlay}>
@@ -139,6 +154,198 @@ export const Note = ({ text, tone = 'warn' }) => {
 // Dropdown: native <select> on web (keyboard type-ahead, handles long lists),
 // a scrollable picker sheet elsewhere.
 // options: [{ value, label }]
+// Search field used by the recharge popups to filter package lists.
+export const SearchBox = ({ value, onChange, placeholder = 'Search…', disabled, count, style }) => (
+  <View style={[styles.searchBox, disabled && { opacity: 0.6 }, style]}>
+    <Feather name="search" size={14} color="#94a3b8" />
+    <TextInput
+      style={styles.searchInput}
+      value={value}
+      onChangeText={onChange}
+      placeholder={placeholder}
+      placeholderTextColor="#94a3b8"
+      editable={!disabled}
+      autoCorrect={false}
+      autoCapitalize="none"
+    />
+    {value && typeof count === 'number' ? <Text style={styles.searchCount}>{count} found</Text> : null}
+    {value ? (
+      <TouchableOpacity onPress={() => onChange('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+        <Feather name="x" size={14} color="#64748b" />
+      </TouchableOpacity>
+    ) : null}
+  </View>
+);
+
+/** True when every word of q appears in one of the texts (case-insensitive). */
+export const matchesSearch = (q, ...texts) => {
+  const words = String(q || '').trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return true;
+  const hay = texts.filter((t) => t !== null && t !== undefined).join(' ').toLowerCase();
+  return words.every((w) => hay.includes(w));
+};
+
+/**
+ * SearchSelect: a dropdown with a search box at the top of its list.
+ * options: [{ value, label, sub?, search?, disabled? }]
+ *   sub    — a grey second line under the label
+ *   search — extra text to match on (not shown)
+ * Keyboard (web): type to filter, ↑ / ↓ to move, Enter to pick, Esc to close.
+ */
+export const SearchSelect = ({
+  value,
+  options = [],
+  onChange,
+  disabled,
+  placeholder = 'Select…',
+  searchPlaceholder = 'Search…',
+  emptyText = 'No match',
+  accent = '#f97316',
+}) => {
+  const triggerRef = useRef(null);
+  const listRef = useRef(null);
+  const inputRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [hi, setHi] = useState(0);
+  const [pos, setPos] = useState(null);
+  const { width: winW, height: winH } = useWindowDimensions();
+  const selected = options.find((o) => String(o.value) === String(value));
+  const shown = useMemo(() => options.filter((o) => matchesSearch(q, o.label, o.sub, o.search)), [options, q]);
+
+  // focus the search box once the list is on screen (autoFocus is unreliable inside Modal on web)
+  useEffect(() => {
+    if (!open) return undefined;
+    const t = setTimeout(() => inputRef.current?.focus?.(), 30);
+    return () => clearTimeout(t);
+  }, [open, pos]);
+
+  useEffect(() => {
+    if (!open) return;
+    const i = shown.findIndex((o) => String(o.value) === String(value) && !o.disabled);
+    setHi(i >= 0 ? i : Math.max(0, shown.findIndex((o) => !o.disabled)));
+  }, [open, q]);
+
+  const openMenu = () => {
+    if (disabled) return;
+    const show = (x, y, w, h) => {
+      setPos({ x, y, w, h });
+      setQ('');
+      setOpen(true);
+    };
+    if (triggerRef.current?.measureInWindow) triggerRef.current.measureInWindow(show);
+    else show(16, 120, Math.min(420, winW - 32), 42);
+  };
+  const close = () => setOpen(false);
+  const pick = (o) => {
+    if (!o || o.disabled) return;
+    onChange(o.value);
+    setOpen(false);
+  };
+  const move = (dir) => {
+    if (!shown.length) return;
+    let i = hi;
+    for (let n = 0; n < shown.length; n += 1) {
+      i = (i + dir + shown.length) % shown.length;
+      if (!shown[i].disabled) break;
+    }
+    setHi(i);
+    listRef.current?.scrollTo?.({ y: Math.max(0, i * 46 - 92), animated: false });
+  };
+  const onKey = (e) => {
+    const k = e.nativeEvent?.key;
+    if (k === 'ArrowDown') { e.preventDefault?.(); move(1); }
+    else if (k === 'ArrowUp') { e.preventDefault?.(); move(-1); }
+    else if (k === 'Enter') { e.preventDefault?.(); pick(shown[hi]); }
+    else if (k === 'Escape') close();
+  };
+
+  // place the list under the field, or above it when there is no room below
+  let panel = null;
+  if (pos) {
+    const width = Math.min(Math.max(pos.w, 260), winW - 16);
+    const left = Math.max(8, Math.min(pos.x, winW - width - 8));
+    const below = winH - (pos.y + pos.h) - 12;
+    const above = pos.y - 12;
+    const up = below < 240 && above > below;
+    const maxH = Math.max(160, Math.min(360, up ? above : below));
+    panel = up ? { left, width, bottom: winH - pos.y + 4, maxHeight: maxH } : { left, width, top: pos.y + pos.h + 4, maxHeight: maxH };
+  }
+
+  return (
+    <>
+      <TouchableOpacity
+        ref={triggerRef}
+        activeOpacity={0.8}
+        style={[styles.ssTrigger, open && { borderColor: accent }, disabled && { opacity: 0.6, backgroundColor: '#f1f5f9' }]}
+        onPress={openMenu}
+        disabled={disabled}
+      >
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={{ fontSize: 14, color: selected ? COLORS.textMain : '#94a3b8' }} numberOfLines={1}>
+            {selected ? selected.label : placeholder}
+          </Text>
+          {selected?.sub ? <Text style={styles.ssSub} numberOfLines={1}>{selected.sub}</Text> : null}
+        </View>
+        <Feather name={open ? 'chevron-up' : 'chevron-down'} size={16} color="#64748b" />
+      </TouchableOpacity>
+      <Modal visible={open} transparent animationType="none" onRequestClose={close}>
+        <TouchableOpacity style={StyleSheet.absoluteFill} activeOpacity={1} onPress={close} />
+        {panel ? (
+          <View style={[styles.ssPanel, panel]}>
+            <View style={styles.ssSearch}>
+              <Feather name="search" size={14} color="#94a3b8" />
+              <TextInput
+                ref={inputRef}
+                style={styles.searchInput}
+                value={q}
+                onChangeText={setQ}
+                placeholder={searchPlaceholder}
+                placeholderTextColor="#94a3b8"
+                autoFocus
+                autoCorrect={false}
+                autoCapitalize="none"
+                onKeyPress={onKey}
+                onSubmitEditing={() => pick(shown[hi])}
+              />
+              {q ? (
+                <TouchableOpacity onPress={() => setQ('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Feather name="x" size={14} color="#64748b" />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+            <ScrollView ref={listRef} keyboardShouldPersistTaps="handled" style={{ flexGrow: 0 }}>
+              {shown.length === 0 ? (
+                <Text style={{ padding: 14, fontSize: 13, color: '#64748b', textAlign: 'center' }}>{emptyText}</Text>
+              ) : (
+                shown.map((o, i) => {
+                  const sel = String(o.value) === String(value);
+                  return (
+                    <TouchableOpacity
+                      key={String(o.value)}
+                      disabled={o.disabled}
+                      onPress={() => pick(o)}
+                      onMouseEnter={() => !o.disabled && setHi(i)}
+                      style={[styles.ssItem, i === hi && { backgroundColor: '#f8fafc' }, sel && { backgroundColor: `${accent}14` }, o.disabled && { opacity: 0.45 }]}
+                    >
+                      <View style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={{ fontSize: 13, color: sel ? accent : COLORS.textMain, fontWeight: sel ? '700' : '500' }} numberOfLines={2}>{o.label}</Text>
+                        {o.sub ? <Text style={styles.ssSub} numberOfLines={1}>{o.sub}</Text> : null}
+                      </View>
+                      {sel ? <Feather name="check" size={15} color={accent} /> : null}
+                    </TouchableOpacity>
+                  );
+                })
+              )}
+            </ScrollView>
+            {q && shown.length ? <Text style={styles.ssCount}>{shown.length} of {options.length}</Text> : null}
+          </View>
+        ) : null}
+      </Modal>
+    </>
+  );
+};
+
 export const Dropdown = ({ value, options, onChange, disabled, placeholder = 'Select…' }) => {
   const [open, setOpen] = useState(false);
   const selected = options.find((o) => String(o.value) === String(value));
@@ -206,6 +413,7 @@ export const sharedStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
+  inlineCard: { backgroundColor: '#ffffff', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)', overflow: 'hidden', width: '100%' },
   overlay: { flex: 1, backgroundColor: 'rgba(15,23,42,0.55)', justifyContent: 'center', alignItems: 'center', padding: 20 },
   card: { width: '100%', backgroundColor: '#ffffff', borderRadius: 14, overflow: 'hidden', boxShadow: '0 10px 30px rgba(0,0,0,0.2)', elevation: 8 },
   header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
@@ -218,4 +426,13 @@ const styles = StyleSheet.create({
   kvValue: { fontSize: 12, fontWeight: '600', color: COLORS.textMain, textAlign: 'right', flexShrink: 1 },
   note: { flexDirection: 'row', gap: 8, padding: 10, borderRadius: 8, borderWidth: 1, marginTop: 12 },
   noteText: { flex: 1, fontSize: 12, lineHeight: 17 },
+  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)', borderRadius: 8, paddingHorizontal: 10, height: 38, backgroundColor: '#ffffff', marginBottom: 8 },
+  searchInput: { flex: 1, minWidth: 0, fontSize: 13, color: COLORS.textMain, outlineStyle: 'none', height: 36 },
+  searchCount: { fontSize: 11, fontWeight: '600', color: '#64748b' },
+  ssTrigger: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: 'rgba(0,0,0,0.18)', borderRadius: 8, backgroundColor: '#ffffff' },
+  ssPanel: { position: 'absolute', backgroundColor: '#ffffff', borderRadius: 10, borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', overflow: 'hidden', boxShadow: '0 12px 32px rgba(15,23,42,0.18)', elevation: 10 },
+  ssSearch: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, height: 42, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  ssItem: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, paddingVertical: 10, minHeight: 46, borderBottomWidth: 1, borderBottomColor: '#f8fafc' },
+  ssSub: { fontSize: 11, color: '#64748b', marginTop: 2 },
+  ssCount: { fontSize: 11, color: '#64748b', paddingHorizontal: 12, paddingVertical: 6, borderTopWidth: 1, borderTopColor: '#f1f5f9', backgroundColor: '#fafafa' },
 });

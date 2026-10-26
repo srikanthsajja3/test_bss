@@ -14,6 +14,7 @@ export const Header = ({
   onOpenCreateAdmin,
   onOpenCreateOperator,
   onToggleSidebar,
+  onOpenWallet,
   user,
 }) => {
   const { width } = useWindowDimensions();
@@ -93,21 +94,25 @@ export const Header = ({
 
         {/* Wallet Balance Card Pill - Hidden for Super Admin and Admin, displayed for Operator */}
         {showWallet && (
-          <View style={[styles.walletCard, isMobile && { paddingHorizontal: 8, paddingVertical: 4 }]}>
+          // the whole pill opens the Wallet page (add money + transactions)
+          <TouchableOpacity
+            style={[styles.walletCard, activeView === 'wallet' && styles.walletCardActive, isMobile && { paddingHorizontal: 8, paddingVertical: 4 }]}
+            onPress={onOpenWallet}
+            disabled={!onOpenWallet}
+            title="Wallet — add money and see transactions"
+            accessibilityRole="button"
+            accessibilityLabel={`Wallet balance ${formattedBalance}. Open wallet`}
+          >
             <Ionicons name="wallet-outline" size={isMobile ? 15 : 18} color={COLORS.primary} />
             <View style={{ marginLeft: 6 }}>
               <Text style={styles.walletLbl}>{isMobile ? 'WALLET' : 'WALLET BALANCE'}</Text>
               <Text style={styles.walletVal}>{formattedBalance}</Text>
             </View>
-          </View>
-        )}
-
-        {onRefresh ? (
-          <TouchableOpacity style={[styles.btnHeaderRefresh, isMobile && { paddingHorizontal: 9 }]} onPress={onRefresh} title="Refresh data" accessibilityLabel="Refresh">
-            <Feather name="refresh-cw" size={14} color="#2563eb" />
-            {isMobile ? null : <Text style={styles.btnHeaderRefreshText}>Refresh</Text>}
+            <View style={[styles.btnHeaderTopup, isMobile && { width: 20, height: 20, marginLeft: 6 }]}>
+              <Feather name="plus" size={isMobile ? 12 : 14} color="#ffffff" />
+            </View>
           </TouchableOpacity>
-        ) : null}
+        )}
 
         {/* {!isOperator && handleAddClick ? (
           <TouchableOpacity style={styles.btnOperator} onPress={handleAddClick}>
@@ -193,6 +198,19 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     color: COLORS.accentEmerald,
+  },
+  walletCardActive: {
+    borderColor: '#10b981',
+    backgroundColor: 'rgba(16, 185, 129, 0.16)',
+  },
+  btnHeaderTopup: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#10b981',
+    marginLeft: 10,
   },
   iconBtn: {
     padding: 10,

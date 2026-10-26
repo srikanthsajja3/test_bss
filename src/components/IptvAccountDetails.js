@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Image, Act
 import { Feather } from '@expo/vector-icons';
 import { toast } from 'react-toastify';
 import { COLORS } from '../constants/theme';
-import { parseApiDate, defaultRechargeType, normaliseIptvAccount } from './CustomerAccountsOverview';
+import { parseApiDate, defaultRechargeType, normaliseIptvAccount, iptvShownExpiry } from './CustomerAccountsOverview';
 import { fixDocUrl } from './internet/shared';
 
 const IPTV = '#8b5cf6';
@@ -105,7 +105,8 @@ export const IptvAccountDetails = ({ customer, account, accountIndex, operatorNa
   const mobile = clean(customer.mobile);
   const sts = pick(account.sts, account.status) || 'Unknown';
   const stsStyle = statusStyle(sts);
-  const expiryValue = pick(account.expriration, account.expiration);
+  // paid-till date (expected expiry) is what the operator / customer sees; Pioneer's real expiry below it
+  const expiryValue = iptvShownExpiry(account);
   const hint = expiryHint(expiryValue);
   const userType = pick(account.user_type, account.customer_type, customer.customer_type, customer.internet_accounts?.[0]?.customer_type);
   const autoRenew = String(account.auto_renew) === '1';
@@ -180,6 +181,7 @@ export const IptvAccountDetails = ({ customer, account, accountIndex, operatorNa
               <View style={{ alignItems: 'flex-end', flexShrink: 1 }}>
                 <Text style={styles.expiryDate}>{formatLongDate(expiryValue)}</Text>
                 <Text style={[styles.expiryHint, { color: hint.color }]}>{hint.text}</Text>
+
               </View>
             </View>
           </View>

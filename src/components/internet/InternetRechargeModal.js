@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { View, Text, StyleSheet, ActivityIndicator } from 'react-native';
 import { COLORS } from '../../constants/theme';
 import { OneBssApi } from '../../services/oneBssApi';
-import { ModalShell, Btn, KV, Note, Dropdown } from './shared';
+import { ModalShell, Btn, KV, Note, SearchSelect } from './shared';
 import { formatApiDate } from '../CustomerAccountsOverview';
 
 const money = (v) => {
@@ -179,15 +179,20 @@ export const InternetRechargeModal = ({ visible, onClose, account, advance, onCo
           ) : null}
 
           <Text style={styles.sectionLabel}>PACKAGE ({plans.length})</Text>
-          <Dropdown
+          <SearchSelect
             value={planId}
             disabled={submitting}
+            placeholder="Choose a package…"
+            searchPlaceholder="Search package or speed…"
+            emptyText="No package matches"
             options={plans.map((p) => ({
               value: p.plan_id,
-              label: `${p.plan_name}${p.data ? ` · ${p.data}` : ''}${String(p.plan_id) === String(account.package_id) ? '  (current)' : ''}`,
+              label: `${p.plan_name}${String(p.plan_id) === String(account.package_id) ? '  (current)' : ''}`,
+              sub: [p.data, `${p.subplans.length} sub plan${p.subplans.length === 1 ? '' : 's'}`].filter(Boolean).join(' · '),
+              search: p.subplans.map((sp) => `${sp.sub_plan_name} ${sp.plan_validity} days`).join(' '),
             }))}
             onChange={(id) => {
-              const p = plans.find((x) => x.plan_id === id);
+              const p = plans.find((x) => String(x.plan_id) === String(id));
               if (p) choosePlan(p);
             }}
           />
@@ -195,14 +200,21 @@ export const InternetRechargeModal = ({ visible, onClose, account, advance, onCo
           {selectedPlan ? (
             <>
               <Text style={styles.sectionLabel}>SUB PLAN ({selectedPlan.subplans.length})</Text>
-              <Dropdown
+              <SearchSelect
                 value={subPlanId}
                 disabled={submitting}
+                placeholder="Choose a sub plan…"
+                searchPlaceholder="Search sub plan or days…"
+                emptyText="No sub plan matches"
                 options={selectedPlan.subplans.map((sp) => ({
                   value: sp.sub_plan_id,
-                  label: `${sp.sub_plan_name} — ${sp.plan_validity} days — ${money(sp.mapped_price ?? sp.base_price)}${String(selectedPlan.plan_id) === String(account.package_id) && String(sp.sub_plan_id) === String(account.subplan_id) ? '  (current)' : ''}`,
+                  label: `${sp.sub_plan_name}${String(selectedPlan.plan_id) === String(account.package_id) && String(sp.sub_plan_id) === String(account.subplan_id) ? '  (current)' : ''}`,
+                  sub: `${sp.plan_validity} days · ${money(sp.mapped_price ?? sp.base_price)}`,
                 }))}
-                onChange={(id) => setSubPlanId(id)}
+                onChange={(id) => {
+                  const sp = selectedPlan.subplans.find((x) => String(x.sub_plan_id) === String(id));
+                  if (sp) setSubPlanId(sp.sub_plan_id);
+                }}
               />
             </>
           ) : null}

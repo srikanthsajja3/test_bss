@@ -18,10 +18,14 @@ import { CustomerPricesPage } from '../components/plans/CustomerPricesPage';
 import { PartnerDevices } from '../components/partners/PartnerDevices';
 import { OttPlansPage } from '../components/ott/OttPlansPage';
 import { PlanCardList } from '../components/plans/PlanCardList';
+import { PlanPriceTable } from '../components/plans/PlanPriceTable';
 import { OperatorPlansView } from '../components/plans/OperatorPlansView';
 import { CreateAccountModal } from '../components/CreateAccountModal';
-import { Dropdown } from '../components/internet/shared';
+import { SearchSelect } from '../components/internet/shared';
 import { toast } from 'react-toastify';
+
+// IPTV months a combo carries: its internet plan's validity in 30-day months (3 / 6 / 12-month combos)
+const comboMonthsOf = (internetValidityDays) => Math.max(1, Math.round(Number(internetValidityDays || 30) / 30));
 
 const flattenComboOptions = (options) => {
   const inetList = [];
@@ -62,12 +66,19 @@ const flattenComboOptions = (options) => {
         p.subplans.forEach((s) => {
           const subName = s.sub_plan_name || s.name || '';
           const validity = s.validity_days || s.validity || 30;
+          // FTA goes with every DPO: price shown and used = DPO + FTA per month
+          const fta = Number(s.fta_price || 0);
+          const withFta = s.price_with_fta !== undefined && s.price_with_fta !== null ? Number(s.price_with_fta) : Number(s.price || 0) + fta;
+          const ftaNote = options?.fta_in_dpo_price ? ' (DPO + FTA)' : fta ? ` (DPO ₹${Number(s.price || 0).toFixed(2)} + FTA ₹${fta.toFixed(2)})` : '';
           iptvList.push({
             sub_plan_id: s.sub_plan_id || s.id,
-            display_name: `${planName}${subName ? ' - ' + subName : ''} (${validity} Days) - ₹${s.price || 0}`,
+            display_name: `${planName}${subName ? ' - ' + subName : ''} (${validity} Days) - ₹${withFta.toFixed(2)}${ftaNote}`,
+            fta_in_dpo: !!options?.fta_in_dpo_price,
             plan_name: planName,
             sub_plan_name: subName,
-            price: Number(s.price || 0),
+            dpo_price: Number(s.price || 0),
+            fta_price: fta,
+            price: withFta,
             validity: validity,
           });
         });
@@ -110,6 +121,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   const [inetMargins, setInetMargins] = useState({}); // { subPlanId: { adminId: '20' } }
   const [iptvAdminChain, setIptvAdminChain] = useState([]);
   const [iptvMargins, setIptvMargins] = useState({});
+  const [iptvFtaInDpo, setIptvFtaInDpo] = useState(false);
   const [bulkMargins, setBulkMargins] = useState({}); // { adminId: '10' } — "apply to all selected"
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
@@ -758,6 +770,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   };
   const captureIptvMargins = (res, rows) => {
     setIptvAdminChain(Array.isArray(res?.data?.admin_chain) ? res.data.admin_chain : []);
+    // DPO prices include FTA (after the migration): FTA goes with the DPO and isn't charged on its own
+    setIptvFtaInDpo(!!res?.data?.fta_in_dpo_price);
     setIptvMargins(marginsFromRows(rows));
     setBulkMargins({});
   };
@@ -1117,13 +1131,45 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
   };
 
+  // ---- FTA goes with every DPO (assigning a DPO assigns FTA; FTA can't be removed while a DPO is selected) ----
+  const iptvIdOf = (p) => p.sub_plan_id || p.plan_id || p.id;
+  const iptvTypeOfId = (id) => String((iptvPlans.find((p) => String(iptvIdOf(p)) === String(id)) || {}).type || '').toUpperCase();
+  const iptvFtaPlans = () => iptvPlans.filter((p) => String(p.type || '').toUpperCase() === 'FTA');
+  // the FTA to use: one already selected, else the one this operator had, else the cheapest
+  const pickIptvFta = (selected) => {
+    const ftas = iptvFtaPlans();
+    const sel = ftas.find((p) => selected.map(String).includes(String(iptvIdOf(p))));
+    if (sel) return sel;
+    const mapped = ftas.filter((p) => p.is_mapped);
+    const pool = mapped.length ? mapped : ftas;
+    return [...pool].sort((a, b) => Number(a.default_price ?? a.base_price ?? 0) - Number(b.default_price ?? b.base_price ?? 0))[0] || null;
+  };
+  const withFtaIfDpo = (ids) => {
+    const hasDpo = ids.some((id) => iptvTypeOfId(id) === 'DPO');
+    const hasFta = ids.some((id) => iptvTypeOfId(id) === 'FTA');
+    if (!hasDpo || hasFta) return ids;
+    const fta = pickIptvFta(ids);
+    return fta ? [...ids, iptvIdOf(fta)] : ids;
+  };
+  useEffect(() => {
+    if (!iptvPlans.length) return;
+    const next = withFtaIfDpo(selectedIptvPlanIds);
+    if (next.length !== selectedIptvPlanIds.length) setSelectedIptvPlanIds(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedIptvPlanIds, iptvPlans]);
+
   const toggleIptvPlanSelection = (planId) => {
     setSelectedIptvPlanIds((prev) => {
       if (prev.includes(planId)) {
-        return prev.filter((id) => id !== planId);
-      } else {
-        return [...prev, planId];
+        const next = prev.filter((id) => id !== planId);
+        // the last FTA can't go while a DPO is selected
+        if (iptvTypeOfId(planId) === 'FTA' && next.some((id) => iptvTypeOfId(id) === 'DPO') && !next.some((id) => iptvTypeOfId(id) === 'FTA')) {
+          toast.info('FTA goes with the DPO — unselect the DPO packs first to remove FTA.');
+          return prev;
+        }
+        return next;
       }
+      return withFtaIfDpo([...prev, planId]);
     });
   };
 
@@ -1148,14 +1194,16 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
 
   const handleSaveIptvPlanMapping = async () => {
     if (!iptvPlansPartner) return;
-    if (selectedIptvPlanIds.length === 0) {
-      toast.warn('Please select at least one channel or pack to assign.');
+    // only the DPO packs are sent; FTA and every Broadcaster / A-la-carte pack go with them
+    const dpoIds = selectedIptvPlanIds.filter((id) => iptvTypeOfId(id) === 'DPO');
+    if (dpoIds.length === 0) {
+      toast.warn('Select at least one DPO package to assign.');
       return;
     }
     const marginErr = checkMargins(
       iptvAdminChain,
       iptvMargins,
-      selectedIptvPlanIds,
+      dpoIds,
       (id) => customIptvPrices[id],
       (id) => iptvPlans.find((p) => String(p.sub_plan_id || p.plan_id || p.id) === String(id))?.plan_name || `Pack #${id}`
     );
@@ -1165,7 +1213,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
     setSavingIptvMapping(true);
     try {
-      const plansToMap = selectedIptvPlanIds.map((id) => {
+      const plansToMap = dpoIds.map((id) => {
         const customVal = customIptvPrices[id];
         const priceNum = customVal !== undefined && customVal !== '' ? Number(customVal) : 0;
         return {
@@ -1180,7 +1228,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       const res = await OneBssApi.mapIptvPlansToOperator(iptvPlansPartner.partner_id, plansToMap);
       const data = res.data || {};
       if (data.success !== false) {
-        toast.success(`Assign successful! ${selectedIptvPlanIds.length} IPTV plans assigned to ${iptvPlansPartner.partner_name} (#${iptvPlansPartner.partner_id}).`);
+        toast.success(`${dpoIds.length} DPO package${dpoIds.length > 1 ? 's' : ''} assigned to ${iptvPlansPartner.partner_name} (#${iptvPlansPartner.partner_id}), with FTA and all Broadcaster / A-la-carte packs.`);
         const refreshed = await OneBssApi.getIptvPlans(iptvPlansPartner.partner_id);
         const arr = Array.isArray(refreshed.data) ? refreshed.data : (refreshed.data?.data || []);
         setIptvPlans(arr);
@@ -1272,7 +1320,10 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       isub_plan_id: String(comboItem.isub_plan_id || comboItem.internet?.sub_plan_id || ''),
       iptvsub_plan_id: String(comboItem.iptvsub_plan_id || comboItem.iptv?.sub_plan_id || ''),
       // with admins above the operator the box is the super admin price (operator price = it + margins)
-      price: String(comboItem.sa_price !== undefined && comboItem.sa_price !== null ? comboItem.sa_price : comboItem.price !== undefined ? comboItem.price : ''),
+      price: (() => {
+        const v = comboItem.sa_price !== undefined && comboItem.sa_price !== null ? comboItem.sa_price : comboItem.price;
+        return v === undefined || v === null || v === '' || isNaN(Number(v)) ? '' : (Math.round(Number(v) * 100) / 100).toFixed(2);
+      })(),
       margins: Object.fromEntries(Object.entries(comboItem.margins && typeof comboItem.margins === 'object' ? comboItem.margins : {}).map(([k, v]) => [k, String(v)])),
       is_active: comboItem.is_active !== false && comboItem.is_active !== 0 && comboItem.is_active !== '0',
       _autoName: false,
@@ -1296,8 +1347,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
           updated._autoName = true;
         }
         if (!prev.price || prev._autoPrice) {
-          const sumPrice = Number(selInet.price || 0) + Number(selIptv.price || 0);
-          updated.price = String(sumPrice);
+          // internet + (DPO + FTA) for as many months as the internet plan (the super admin can edit it)
+          const sumPrice = Number(selInet.price || 0) + Number(selIptv.price || 0) * comboMonthsOf(selInet.validity);
+          updated.price = (Math.round(sumPrice * 100) / 100).toFixed(2); // no 636.0799999…
           updated._autoPrice = true;
         }
       }
@@ -1315,7 +1367,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     return out;
   };
   const comboOperatorTotal = () =>
-    (Number(comboForm.price) || 0) + Object.values(comboMarginsOut()).reduce((sum, v) => sum + v, 0);
+    Math.round(((Number(comboForm.price) || 0) + Object.values(comboMarginsOut()).reduce((sum, v) => sum + v, 0)) * 100) / 100;
 
   const handleSaveCombo = async () => {
     if (!comboPlansPartner) return;
@@ -1976,11 +2028,14 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMuted || '#94a3b8', marginBottom: 6 }}>
                     SELECT INTERNET BROADBAND SUBPLAN *
                   </Text>
-                  <Dropdown
+                  <SearchSelect
                     value={comboForm.isub_plan_id}
                     options={inetDropdownOpts}
                     onChange={(val) => handleSelectSubPlanInComboForm('isub_plan_id', val, inetList, iptvList)}
                     placeholder="Choose Broadband Plan & Subplan…"
+                    searchPlaceholder="Search internet plan, sub plan or days…"
+                    emptyText="No internet plan matches"
+                    accent="#ec4899"
                   />
                 </View>
 
@@ -1989,11 +2044,14 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMuted || '#94a3b8', marginBottom: 6 }}>
                     SELECT IPTV PACK / SUBPLAN *
                   </Text>
-                  <Dropdown
+                  <SearchSelect
                     value={comboForm.iptvsub_plan_id}
                     options={iptvDropdownOpts}
                     onChange={(val) => handleSelectSubPlanInComboForm('iptvsub_plan_id', val, inetList, iptvList)}
                     placeholder="Choose IPTV Pack & Subplan…"
+                    searchPlaceholder="Search DPO package…"
+                    emptyText="No IPTV pack matches"
+                    accent="#ec4899"
                   />
                 </View>
 
@@ -2078,12 +2136,18 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   const selI = inetList.find((i) => String(i.sub_plan_id) === String(comboForm.isub_plan_id));
                   const selT = iptvList.find((i) => String(i.sub_plan_id) === String(comboForm.iptvsub_plan_id));
                   if (!selI || !selT) return null;
-                  const separate = Number(selI.price || 0) + Number(selT.price || 0);
+                  const months = comboMonthsOf(selI.validity);
+                  const separate = Number(selI.price || 0) + Number(selT.price || 0) * months;
                   const combo = comboAdminChain.length ? comboOperatorTotal() : Number(comboForm.price || 0);
                   const saving = separate - combo;
                   return (
                     <View style={{ padding: 10, borderRadius: 8, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0', gap: 4 }}>
-                      <Text style={{ fontSize: 12, color: '#475569' }}>Internet ₹{Number(selI.price || 0).toFixed(2)} + IPTV ₹{Number(selT.price || 0).toFixed(2)} = <Text style={{ fontWeight: '800' }}>₹{separate.toFixed(2)}</Text> separately</Text>
+                      <Text style={{ fontSize: 12, color: '#475569' }}>
+                        Internet ₹{Number(selI.price || 0).toFixed(2)} + IPTV {selT.fta_in_dpo ? `(DPO + FTA) ₹${Number(selT.price || 0).toFixed(2)}` : `(DPO ₹${Number(selT.dpo_price ?? selT.price ?? 0).toFixed(2)}${selT.fta_price ? ` + FTA ₹${Number(selT.fta_price).toFixed(2)}` : ''})`}{months > 1 ? ` × ${months} months` : ''} = <Text style={{ fontWeight: '800' }}>₹{separate.toFixed(2)}</Text> separately
+                      </Text>
+                      <Text style={{ fontSize: 11, color: '#64748b' }}>
+                        FTA goes with the DPO and is included in the combo price{months > 1 ? `; IPTV for ${months} months. Add-ons are charged × ${months} months on top` : ''}.
+                      </Text>
                       {combo > 0 ? (
                         <Text style={{ fontSize: 12, fontWeight: '700', color: saving >= 0 ? '#047857' : '#dc2626' }}>
                           {saving >= 0 ? `Customer saves ₹${saving.toFixed(2)} with this combo` : `Combo is ₹${Math.abs(saving).toFixed(2)} more than buying separately`}
@@ -2302,6 +2366,26 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       })
       .filter((g) => g.rows.length || !readOnly);
   // IPTV packs grouped like internet plans: one card per pack, its validities (1 / 3 / 6 months...) inside.
+  // operator price of an IPTV pack as currently entered (super admin price + margins), or the saved one
+  const iptvOperatorPriceOf = (plan) => {
+    const id = iptvIdOf(plan);
+    if (readOnly) return Number(plan.mapped_price ?? plan.operator_price ?? plan.price ?? 0);
+    const sa = Number(customIptvPrices[id] ?? plan.sa_price ?? plan.default_price ?? plan.base_price ?? 0);
+    const m = iptvMargins[id] || {};
+    return sa + Object.values(m).reduce((t, v) => t + (Number(v) || 0), 0);
+  };
+  // DPO card: the DPO price includes FTA ("₹212.40 = DPO + FTA"), or (before the migration)
+  // "DPO ₹177.00 + FTA ₹35.40 = ₹212.40"
+  const iptvDpoWithFtaNote = (dpo) => {
+    const fta = pickIptvFta(selectedIptvPlanIds);
+    const d = iptvOperatorPriceOf(dpo);
+    if (iptvFtaInDpo) {
+      return `₹${d.toFixed(2)} per ${dpo.plan_validity || 30} days = DPO + FTA · FTA${fta ? ` “${fta.plan_name}”` : ''} is included in this price, not charged separately`;
+    }
+    if (!fta) return `DPO ₹${d.toFixed(2)} · no FTA pack in the catalog — run Sync Packages`;
+    const f = iptvOperatorPriceOf(fta);
+    return `DPO ₹${d.toFixed(2)} + FTA ₹${f.toFixed(2)} = ₹${(d + f).toFixed(2)} per ${dpo.plan_validity || 30} days (FTA is assigned with the DPO)`;
+  };
   const iptvGroups = () => {
     const byPack = new Map();
     filteredIptvPlans
@@ -2312,6 +2396,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
           byPack.set(key, { key, title: plan.plan_name, typeLabel: plan.type || 'A-la-carte', meta: `Pack ID: #${key}`, rows: [] });
         }
         const days = plan.plan_validity || 30;
+        if (String(plan.type || '').toUpperCase() === 'DPO') {
+          byPack.get(key).note = iptvDpoWithFtaNote(plan);
+        } else if (iptvFtaInDpo && String(plan.type || '').toUpperCase() === 'FTA') {
+          byPack.get(key).note = 'Assigned with the DPO · its price is included in the DPO price (not charged separately)';
+        }
         byPack.get(key).rows.push({
           kind: 'plan',
           id: plan.sub_plan_id || plan.plan_id || plan.id,
@@ -2384,9 +2473,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     );
   };
 
+  // Only DPO packs are listed and priced (30-day price, FTA included). FTA and every Broadcaster /
+  // A-la-carte pack are assigned automatically with the DPOs (iptv_plan_mapping.php).
   const filteredIptvPlans = iptvPlans.filter((plan) => {
     const q = searchIptvPlan.toLowerCase().trim();
     const planType = (plan.type || '').toLowerCase().trim();
+    if (!(planType === 'dpo' || planType === 'package' || planType === 'combo')) return false;
     let matchType = true;
     if (iptvTypeFilter === 'A-la-carte') {
       matchType = planType === 'a-la-carte' || planType === 'alacarte' || planType === 'a la carte';
@@ -2394,6 +2486,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       matchType = planType === 'dpo' || planType === 'package' || planType === 'combo';
     } else if (iptvTypeFilter === 'Broadcast') {
       matchType = planType === 'broadcast' || planType === 'broadcaster' || planType === 'bouquet';
+    } else if (iptvTypeFilter === 'FTA') {
+      matchType = planType === 'fta';
     }
     const matchQuery = !q || plan.plan_name?.toLowerCase().includes(q) || String(plan.plan_id || '').includes(q);
     return matchType && matchQuery;
@@ -2911,37 +3005,6 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   />
                 </View>
 
-                <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
-                  {[
-                    { id: '', label: 'All' },
-                    { id: 'DPO', label: 'DPO' },
-                    { id: 'A-la-carte', label: 'A-la-carte' },
-                    { id: 'Broadcast', label: 'Broadcast' },
-                  ].map((t) => (
-                    <TouchableOpacity
-                      key={t.id}
-                      style={[styles.typeChip, iptvTypeFilter === t.id && styles.typeChipActive]}
-                      onPress={() => setIptvTypeFilter(t.id)}
-                    >
-                      <Text style={[styles.typeChipText, iptvTypeFilter === t.id && styles.typeChipTextActive]}>
-                        {t.label}
-                      </Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-
-                <TouchableOpacity
-                  style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)' }}
-                  onPress={() => setExpandedIptvIds(iptvGroups().map((g) => g.key))}
-                >
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#7c3aed' }}>Expand All</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={{ paddingHorizontal: 12, paddingVertical: 10, borderRadius: 8, backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)' }}
-                  onPress={() => setExpandedIptvIds([])}
-                >
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: '#64748b' }}>Collapse All</Text>
-                </TouchableOpacity>
 
                 {isSuperAdminUser ? (
                   <TouchableOpacity
@@ -2981,7 +3044,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                     flexDirection: 'row',
                     alignItems: 'center',
                     gap: 8,
-                    opacity: selectedIptvPlanIds.length === 0 || savingIptvMapping ? 0.6 : 1,
+                    opacity: !selectedIptvPlanIds.some((id) => iptvTypeOfId(id) === 'DPO') || savingIptvMapping ? 0.6 : 1,
                   }}
                   onPress={handleSaveIptvPlanMapping}
                   disabled={savingIptvMapping}
@@ -2992,7 +3055,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                     <>
                       <Feather name="check-circle" size={16} color="#ffffff" />
                       <Text style={{ color: '#ffffff', fontSize: 13, fontWeight: '700' }}>
-                        Assign IPTV Plans ({selectedIptvPlanIds.length})
+                        Assign DPO Packages ({selectedIptvPlanIds.filter((id) => iptvTypeOfId(id) === 'DPO').length})
                       </Text>
                     </>
                   )}
@@ -3001,44 +3064,60 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
               </View>
             </View>
 
-            {renderMarginBulkBar(iptvAdminChain, setIptvMargins, selectedIptvPlanIds, '#7c3aed')}
+            <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 12, borderRadius: 10, marginBottom: 14, backgroundColor: 'rgba(139,92,246,0.06)', borderWidth: 1, borderColor: 'rgba(139,92,246,0.25)' }}>
+              <Feather name="info" size={15} color="#7c3aed" style={{ marginTop: 1 }} />
+              <Text style={{ flex: 1, fontSize: 12.5, color: '#4c1d95', lineHeight: 18 }}>
+                Only DPO packages are priced here (30-day price{iptvFtaInDpo ? ', FTA included' : ''}). When at least one DPO is assigned, the FTA pack and every Broadcaster and A-la-carte pack are assigned to this operator automatically at their default prices — they are not edited here.
+              </Text>
+            </View>
+
+            {renderMarginBulkBar(iptvAdminChain, setIptvMargins, selectedIptvPlanIds.filter((id) => iptvTypeOfId(id) === 'DPO'), '#7c3aed')}
 
             {loadingIptvPlans ? (
               <ActivityIndicator size="large" color="#8b5cf6" style={{ marginVertical: 40 }} />
             ) : filteredIptvPlans.length === 0 ? (
               <View style={styles.emptyContainer}>
                 <Feather name="info" size={24} color={COLORS.textMuted} />
-                <Text style={styles.emptyText}>No IPTV channel packages returned for this partner query.</Text>
+                <Text style={styles.emptyText}>No DPO packages found. Use Sync Packages, or clear the search.</Text>
               </View>
             ) : (
-              /* IPTV PACK CARDS, same as internet (validities of an expanded pack in a price table) */
-              <PlanCardList
-                groups={iptvGroups()}
-                expandedKeys={expandedIptvIds}
-                onToggleExpand={(key) => setExpandedIptvIds((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]))}
-                forceExpanded={searchIptvPlan.trim().length > 0}
-                onToggleGroup={(g, allSelected) => {
-                  const ids = g.rows.map((r) => r.id);
-                  setSelectedIptvPlanIds((prev) => (allSelected ? prev.filter((id) => !ids.includes(id)) : [...new Set([...prev, ...ids])]));
-                }}
-                icon="tv"
-                accent="#8b5cf6"
-                chain={iptvAdminChain}
-                mode={readOnly ? 'view' : 'edit'}
-                viewerId={user?.partner_id}
-                selectedIds={selectedIptvPlanIds}
-                onToggle={toggleIptvPlanSelection}
-                saPriceOf={(r) => customIptvPrices[r.id] ?? r.saPrice ?? r.basePrice ?? ''}
-                onSaPriceChange={(id, val) => {
-                  setCustomIptvPrices((prev) => ({ ...prev, [id]: val }));
-                  selectOnEdit(selectedIptvPlanIds, setSelectedIptvPlanIds, id);
-                }}
-                marginState={iptvMargins}
-                onMarginChange={(id, adminId, val) => {
-                  setIptvMargins((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), [adminId]: val } }));
-                  selectOnEdit(selectedIptvPlanIds, setSelectedIptvPlanIds, id);
-                }}
-              />
+              /* DPO packs in one price table (30-day price, FTA included) */
+              <View style={{ backgroundColor: '#ffffff', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)', overflow: 'hidden' }}>
+                <PlanPriceTable
+                  rows={filteredIptvPlans
+                    .filter((plan) => !readOnly || plan.is_mapped)
+                    .map((plan) => ({
+                      kind: 'plan',
+                      id: iptvIdOf(plan),
+                      title: plan.plan_name,
+                      validity: plan.plan_validity || 30,
+                      subtitle: iptvFtaInDpo ? 'Price includes FTA (not charged separately)' : iptvDpoWithFtaNote(plan),
+                      basePrice: plan.base_price,
+                      saPrice: plan.sa_price,
+                      mappedPrice: plan.mapped_price,
+                      margins: plan.margins,
+                    }))}
+                  chain={iptvAdminChain}
+                  mode={readOnly ? 'view' : 'edit'}
+                  viewerId={user?.partner_id}
+                  selectedIds={selectedIptvPlanIds}
+                  onToggle={toggleIptvPlanSelection}
+                  saPriceOf={(r) => customIptvPrices[r.id] ?? r.saPrice ?? r.basePrice ?? ''}
+                  onSaPriceChange={(id, val) => {
+                    setCustomIptvPrices((prev) => ({ ...prev, [id]: val }));
+                    selectOnEdit(selectedIptvPlanIds, setSelectedIptvPlanIds, id);
+                  }}
+                  marginState={iptvMargins}
+                  onMarginChange={(id, adminId, val) => {
+                    setIptvMargins((prev) => ({ ...prev, [id]: { ...(prev[id] || {}), [adminId]: val } }));
+                    selectOnEdit(selectedIptvPlanIds, setSelectedIptvPlanIds, id);
+                  }}
+                  accent="#8b5cf6"
+                  firstHeader="DPO package (30 days)"
+                  emptyText="No DPO packages match."
+                  bare
+                />
+              </View>
             )}
           </View>
         </ScrollView>
@@ -3203,7 +3282,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                             <Feather name="tv" size={14} color="#8b5cf6" />
                             <View style={{ flex: 1, minWidth: 0 }}>
                               <Text style={styles.comboTd} numberOfLines={1}>{tv.plan_name || item.iptv_plan_name || 'IPTV pack'}</Text>
-                              <Text style={styles.comboSub} numberOfLines={1}>{[tv.validity_days ? `${tv.validity_days} days` : null, iptvPrice > 0 ? `₹${iptvPrice.toFixed(2)}` : null, 'FTA included'].filter(Boolean).join(' · ')}</Text>
+                              <Text style={styles.comboSub} numberOfLines={1}>{[Number(item.months) > 1 ? `${item.months} months` : tv.validity_days ? `${tv.validity_days} days` : null, iptvPrice > 0 ? `${item.fta?.in_dpo_price ? 'DPO + FTA' : 'DPO'} ₹${iptvPrice.toFixed(2)}${item.fta && !item.fta.in_dpo_price && Number(item.fta.price) ? ` + FTA ₹${Number(item.fta.price).toFixed(2)}` : ''}${Number(item.months) > 1 ? '/month' : ''}` : null, item.fta_included === false ? '+ FTA on recharge' : 'FTA included'].filter(Boolean).join(' · ')}</Text>
                             </View>
                           </View>
                           <Text style={[styles.comboTd, { width: 100, textAlign: 'right', color: COLORS.textMuted, textDecorationLine: discount > 0 ? 'line-through' : 'none' }]}>₹{sumPrice.toFixed(2)}</Text>

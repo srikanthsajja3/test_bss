@@ -6,6 +6,7 @@ import { OneBssApi } from '../../services/oneBssApi';
 import { ModalShell, Btn, KV, Note } from '../internet/shared';
 import { parseApiDate, formatApiDate } from '../CustomerAccountsOverview';
 import { FtaIncluded } from './FtaIncluded';
+import { pickFta, ownedChannels, overlapReason, selectedConflicts } from './packRules';
 
 const IPTV = '#8b5cf6';
 const money = (v) => {
@@ -25,18 +26,23 @@ const TABS = [
 ];
 
 // One list for any pack type. mode 'single' = radio (DPO), 'multi' = checkbox (add-ons).
-const PackList = ({ packs, mode, isSelected, onPress, disabled, emptyText, searchLabel }) => {
+const PackList = ({ packs, mode, isSelected, onPress, disabled, emptyText, searchLabel, blockReason, conflictOf, fta }) => {
   const [q, setQ] = useState('');
   const filtered = useMemo(() => {
     const t = q.trim().toLowerCase();
-    return t ? packs.filter((p) => String(p.plan_name).toLowerCase().includes(t)) : packs;
+    if (!t) return packs;
+    const words = t.split(/\s+/);
+    return packs.filter((p) => {
+      const hay = [p.plan_name, p.type, ...(Array.isArray(p.channels) ? p.channels.map((ch) => ch?.name || ch?.channel_name || ch) : [])].filter(Boolean).join(' ').toLowerCase();
+      return words.every((w) => hay.includes(w));
+    });
   }, [packs, q]);
 
   if (packs.length === 0) return <Text style={[styles.muted, { padding: 16, textAlign: 'center' }]}>{emptyText}</Text>;
 
   return (
     <View style={disabled && { opacity: 0.5 }}>
-      {packs.length > 6 ? (
+      {packs.length > 1 ? (
         <View style={styles.searchBox}>
           <Feather name="search" size={13} color="#94a3b8" />
           <TextInput
@@ -53,14 +59,18 @@ const PackList = ({ packs, mode, isSelected, onPress, disabled, emptyText, searc
         </View>
       ) : null}
       <ScrollView style={styles.list} nestedScrollEnabled>
+        {filtered.length === 0 ? <Text style={[styles.muted, { padding: 14, textAlign: 'center' }]}>No package matches “{q.trim()}”.</Text> : null}
         {filtered.map((p) => {
           const on = isSelected(p.sub_plan_id);
+          // not selectable: a channel of it is already in the DPO / FTA / another add-on
+          const blocked = !on && blockReason ? blockReason(p) : null;
+          const clash = on && conflictOf ? conflictOf(p) : null;
           return (
             <TouchableOpacity
               key={p.sub_plan_id}
-              style={[styles.row, on && styles.rowOn]}
-              onPress={() => !disabled && onPress(p.sub_plan_id)}
-              disabled={disabled}
+              style={[styles.row, on && styles.rowOn, blocked && styles.rowBlocked, clash && styles.rowClash]}
+              onPress={() => !disabled && !blocked && onPress(p.sub_plan_id)}
+              disabled={disabled || !!blocked}
             >
               {mode === 'single' ? (
                 <View style={[styles.radio, on && styles.radioOn]}>{on ? <View style={styles.radioDot} /> : null}</View>
@@ -68,15 +78,17 @@ const PackList = ({ packs, mode, isSelected, onPress, disabled, emptyText, searc
                 <View style={[styles.checkbox, on && styles.checkboxOn]}>{on ? <Feather name="check" size={12} color="#ffffff" /> : null}</View>
               )}
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={[styles.rowName, on && { color: '#5b21b6', fontWeight: '700' }]} numberOfLines={1}>{p.plan_name}</Text>
+                <Text style={[styles.rowName, on && { color: '#5b21b6', fontWeight: '700' }, blocked && { color: '#94a3b8' }]} numberOfLines={1}>{p.plan_name}</Text>
                 {mode === 'single' ? (
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                     <Text style={styles.rowSub}>{p.plan_validity} days</Text>
-                    <FtaIncluded compact />
+                    <FtaIncluded compact fta={fta} />
                   </View>
                 ) : null}
+                {blocked ? <Text style={styles.rowBlockedText} numberOfLines={2}>{blocked}</Text> : null}
+                {clash ? <Text style={styles.rowClashText} numberOfLines={2}>{clash} — remove it</Text> : null}
               </View>
-              <Text style={styles.rowPrice}>{money(p.price)}</Text>
+              <Text style={[styles.rowPrice, blocked && { color: '#94a3b8' }]}>{money(p.price)}</Text>
             </TouchableOpacity>
           );
         })}
@@ -100,14 +112,37 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
   const compact = width < 520;
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState('');
-  const [plans, setPlans] = useState({ DPO: [], Broadcaster: [], 'A-la-carte': [] });
-  const [fta, setFta] = useState([]);
+  const [plans, setPlans] = useState({ DPO: [], FTA: [], Broadcaster: [], 'A-la-carte': [] });
+  const [period, setPeriod] = useState(null); // { mode, days, start, end, parts, internet } from the API
+  const [pending, setPending] = useState([]); // months already paid, waiting for the auto-renewal
   const [stb, setStb] = useState(null);
   const [currentSource, setCurrentSource] = useState('none');
   const [dpoId, setDpoId] = useState(null);
   const [addons, setAddons] = useState(new Set());
   const [tab, setTab] = useState('DPO');
   const [submitting, setSubmitting] = useState(false);
+  // customer's internet accounts: with more than one the operator picks which one the IPTV
+  // dates follow (alignId); the period is reloaded for it
+  const [internetAccounts, setInternetAccounts] = useState([]);
+  const [alignId, setAlignId] = useState(null);
+  const [periodLoading, setPeriodLoading] = useState(false);
+
+  useEffect(() => {
+    if (!visible) {
+      setAlignId(null);
+      setInternetAccounts([]);
+    }
+  }, [visible]);
+
+  // pick another internet account: reload only the period (pack choices stay)
+  const chooseInternet = async (id) => {
+    if (!account || String(id) === String(alignId)) return;
+    setAlignId(id);
+    setPeriodLoading(true);
+    const res = await OneBssApi.getIptvRechargePlans(account.id, id);
+    setPeriodLoading(false);
+    if (res.ok && res.data?.data) setPeriod(res.data.data.period || null);
+  };
 
   useEffect(() => {
     if (!visible || !account) return undefined;
@@ -116,8 +151,11 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
       setLoading(true);
       setLoadError('');
       setDpoId(null);
+      setPeriod(null);
+      setPending([]);
       setAddons(new Set());
       setTab('DPO');
+      setAlignId(null);
       try {
         const res = await OneBssApi.getIptvRechargePlans(account.id);
         if (cancelled) return;
@@ -129,12 +167,18 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
         const d = body.data || {};
         const grouped = {
           DPO: d.plans?.DPO || [],
+          FTA: d.plans?.FTA || [],
           Broadcaster: d.plans?.Broadcaster || [],
           'A-la-carte': d.plans?.['A-la-carte'] || [],
         };
         setPlans(grouped);
-        setFta(Array.isArray(d.fta) ? d.fta : []);
         setStb(d.stb || null);
+        setPeriod(d.period || null);
+        setPending((d.pending_schedule || []).filter((r) => r.status === 'waiting'));
+        const accs = Array.isArray(d.internet_accounts) ? d.internet_accounts : [];
+        setInternetAccounts(accs);
+        // one internet account (or none): nothing to ask
+        if (accs.length === 1) setAlignId(accs[0].internet_id);
         setCurrentSource(d.current?.source || 'none');
 
         // pre-select the STB's current packs
@@ -154,23 +198,43 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
   }, [visible, account?.id]);
 
   const dpo = plans.DPO.find((p) => p.sub_plan_id === dpoId) || null;
+  // FTA: added automatically with the DPO (chargeable); never without a DPO
+  const ftaPack = pickFta(plans.FTA);
+  const fta = dpo ? ftaPack : null;
+  const ftaMissing = !!dpo && !ftaPack;
+  const base = dpo; // one DPO is required
   const selectedOf = (type) => plans[type].filter((p) => addons.has(p.sub_plan_id));
   const alacarte = selectedOf('A-la-carte');
   const broadcasters = selectedOf('Broadcaster');
-  const lines = dpo ? [dpo, ...alacarte, ...broadcasters] : [];
-  const total = lines.reduce((s, p) => s + Number(p.price || 0), 0);
-  const sum = (arr) => arr.reduce((s, p) => s + Number(p.price || 0), 0);
+  const basePacks = [dpo, fta].filter(Boolean);
+  const lines = base ? [...basePacks, ...alacarte, ...broadcasters] : [];
+  // Prices are per 30 days; the recharge runs till the customer's internet expiry (else 30
+  // days) and is charged per day — same rounding as the server (per pack, to paise).
+  const days = period?.days > 0 ? Number(period.days) : 30;
+  const charge = (p) => Math.round((Number(p.price || 0) * days * 100) / 30) / 100;
+  const charged = (arr) => arr.map((p) => ({ ...p, monthly: p.price, price: charge(p) }));
+  const monthlyTotal = lines.reduce((s, p) => s + Number(p.price || 0), 0);
+  const total = lines.reduce((s, p) => s + charge(p), 0);
+  const parts = period?.parts || [];
+  const hasPending = pending.length > 0;
+  // channels already given by the base packs + selected add-ons; an add-on repeating one is blocked
+  const owned = ownedChannels([...basePacks, ...alacarte, ...broadcasters]);
+  const conflicts = selectedConflicts(basePacks, [...broadcasters, ...alacarte]);
+  const hasConflict = conflicts.size > 0;
+  const sum = (arr) => arr.reduce((s, p) => s + charge(p), 0);
 
   // Same rule the backend uses: still active -> advance from current expiry, else from now
   const expiry = parseApiDate(stb?.expiration || account?.expriration || account?.expiration);
   const isAdvance = stb ? !!stb.is_active : !!(expiry && expiry.getTime() > Date.now());
   // Advance renewal (STB still active) renews the CURRENT packs only — no changes allowed.
   const locked = isAdvance;
-  const validity = dpo?.plan_validity > 0 ? dpo.plan_validity : 30;
-  const start = isAdvance && expiry ? new Date(expiry) : new Date();
-  const end = new Date(start);
-  end.setDate(end.getDate() + validity);
-  end.setHours(23, 59, 59, 0);
+  const start = period?.start ? parseApiDate(period.start) : isAdvance && expiry ? new Date(expiry) : new Date();
+  const end = period?.end ? parseApiDate(period.end) : (() => {
+    const e = new Date(start);
+    e.setDate(e.getDate() + 30);
+    e.setHours(23, 59, 59, 0);
+    return e;
+  })();
 
   const toggle = (id) =>
     setAddons((prev) => {
@@ -186,11 +250,12 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
       return next;
     });
 
+  const needsInternetChoice = internetAccounts.length > 1 && !alignId;
   const confirm = async () => {
-    if (!dpo || submitting) return;
+    if (!base || ftaMissing || hasConflict || hasPending || submitting || needsInternetChoice || periodLoading) return;
     setSubmitting(true);
     try {
-      const ok = await onConfirm(lines.map((p) => p.sub_plan_id));
+      const ok = await onConfirm(lines.map((p) => p.sub_plan_id), { internetId: alignId });
       if (ok) onClose();
     } finally {
       setSubmitting(false);
@@ -202,7 +267,7 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
   const title = isAdvance ? 'Advance Renewal' : 'Recharge';
 
   const tabBadge = (key) => {
-    if (key === 'DPO') return dpo ? '1' : '0';
+    if (key === 'DPO') return String(basePacks.length);
     return String(selectedOf(key).length);
   };
 
@@ -212,7 +277,7 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
       <View style={styles.tabBar}>
         {TABS.map((t) => {
           const active = tab === t.key;
-          const locked = t.key !== 'DPO' && !dpo;
+          const locked = t.key !== 'DPO' && !base;
           return (
             <TouchableOpacity key={t.key} style={[styles.tab, compact && styles.tabCompact, active && styles.tabActive]} onPress={() => setTab(t.key)}>
               {!compact || locked ? <Feather name={locked ? 'lock' : t.icon} size={13} color={active ? '#ffffff' : '#475569'} /> : null}
@@ -230,26 +295,40 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
         <View style={styles.tabHead}>
           <Text style={styles.tabHint}>
             {tab === 'DPO'
-              ? 'Required · choose exactly one base pack'
-              : dpo
+              ? 'Required · one DPO pack (the FTA base pack is added with it)'
+              : base
               ? `Optional · select any number · ${selectedOf(tab).length} selected${selectedOf(tab).length ? ` (${money(sum(selectedOf(tab)))})` : ''}`
               : 'Select a DPO package first'}
           </Text>
-          {tab !== 'DPO' && dpo && selectedOf(tab).length ? (
+          {tab !== 'DPO' && base && selectedOf(tab).length ? (
             <TouchableOpacity onPress={() => clearType(tab)}><Text style={styles.clearLink}>Clear</Text></TouchableOpacity>
           ) : null}
         </View>
         {tab === 'DPO' ? (
-          <PackList
-            key="DPO"
-            packs={plans.DPO}
-            mode="single"
-            isSelected={(id) => id === dpoId}
-            onPress={(id) => setDpoId(id)}
-            disabled={submitting}
-            emptyText="No DPO package is assigned to this operator."
-            searchLabel="DPO packages"
-          />
+          <>
+            {/* FTA base pack: added (locked) with the DPO; can't be taken alone */}
+            {ftaPack ? (
+              <View style={[styles.ftaRow, fta && styles.rowOn, !fta && { opacity: 0.6 }]}>
+                <View style={[styles.checkbox, fta && styles.checkboxOn]}>{fta ? <Feather name={dpo ? 'lock' : 'check'} size={11} color="#ffffff" /> : null}</View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[styles.rowName, fta && { color: '#5b21b6', fontWeight: '700' }]} numberOfLines={1}>{ftaPack.plan_name}</Text>
+                  <Text style={styles.rowSub}>{ftaPack.included ? 'FTA base pack · included in the DPO price' : dpo ? 'FTA base pack · added with the DPO' : 'FTA base pack · added automatically when you choose a DPO'}</Text>
+                </View>
+                <Text style={[styles.rowPrice, ftaPack.included && { color: '#6d28d9' }]}>{ftaPack.included ? 'Included' : money(ftaPack.price)}</Text>
+              </View>
+            ) : null}
+            <PackList
+              key="DPO"
+              packs={plans.DPO}
+              mode="single"
+              isSelected={(id) => id === dpoId}
+              onPress={(id) => setDpoId((cur) => (cur === id ? null : id))}
+              disabled={submitting}
+              emptyText="No DPO package is assigned to this operator."
+              searchLabel="DPO packages"
+              fta={ftaPack}
+            />
+          </>
         ) : (
           <PackList
             key={tab}
@@ -257,12 +336,14 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
             mode="multi"
             isSelected={(id) => addons.has(id)}
             onPress={toggle}
-            disabled={!dpo || submitting}
+            disabled={!base || submitting}
+            blockReason={(p) => overlapReason(p, owned)}
+            conflictOf={(p) => conflicts.get(p.sub_plan_id) || null}
             emptyText={`No ${TABS.find((t) => t.key === tab).label.toLowerCase()} are assigned to this operator.`}
             searchLabel={tab === 'Broadcaster' ? 'broadcasters' : 'channels'}
           />
         )}
-        {tab === 'DPO' && dpo ? (
+        {tab === 'DPO' && base ? (
           <TouchableOpacity style={styles.nextLink} onPress={() => setTab('A-la-carte')}>
             <Text style={styles.nextLinkText}>Next: A-la-carte</Text>
             <Feather name="arrow-right" size={13} color={IPTV} />
@@ -279,7 +360,7 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
         {items.map((p) => (
           <View key={p.sub_plan_id} style={styles.billRow}>
             <Text style={styles.billName} numberOfLines={1}>{p.plan_name}</Text>
-            <Text style={styles.billPrice}>{money(p.price)}</Text>
+            <Text style={[styles.billPrice, p.included && { color: '#6d28d9' }]}>{p.included ? 'Included' : money(p.price)}</Text>
             {removable ? (
               <TouchableOpacity onPress={() => !submitting && toggle(p.sub_plan_id)} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
                 <Feather name="x" size={13} color="#94a3b8" />
@@ -295,21 +376,26 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
   const summaryPanel = (
     <View style={[styles.summaryBox, wide ? { flex: 1, marginLeft: 16 } : { marginTop: 14 }]}>
       <Text style={styles.summaryTitle}>Summary</Text>
-      {!dpo ? (
+      {!base ? (
         <Text style={styles.muted}>Select a DPO package to start.</Text>
       ) : (
         <>
-          <FtaIncluded fta={fta} />
-          {summaryGroup('DPO', [dpo], false)}
-          {summaryGroup(`A-la-carte (${alacarte.length})`, alacarte, !locked)}
-          {summaryGroup(`Broadcasters (${broadcasters.length})`, broadcasters, !locked)}
+          {ftaMissing ? <FtaIncluded fta={null} /> : null}
+          {summaryGroup('DPO', charged([dpo]), false)}
+          {fta ? summaryGroup(fta.included ? 'FTA (included in the DPO price)' : 'FTA (added with the DPO)', charged([fta]).map((p) => ({ ...p, included: !!fta.included })), false) : null}
+          {summaryGroup(`A-la-carte (${alacarte.length})`, charged(alacarte), !locked)}
+          {summaryGroup(`Broadcasters (${broadcasters.length})`, charged(broadcasters), !locked)}
           <View style={[styles.billRow, styles.billTotal]}>
             <Text style={[styles.billName, { fontWeight: '800' }]}>Total ({lines.length} pack{lines.length > 1 ? 's' : ''})</Text>
             <Text style={[styles.billPrice, { fontSize: 16, fontWeight: '800' }]}>{money(total)}</Text>
             <View style={{ width: 13 }} />
           </View>
+          <Text style={styles.calcLine}>
+            {money(monthlyTotal)} / 30 days × {days} day{days > 1 ? 's' : ''}
+            {period?.mode === 'internet' && period?.internet ? ` (till internet ${period.internet.username} expires)` : ' (no active internet — standard 30 days)'}
+          </Text>
           <KV label="Period" value={`${isAdvance ? formatApiDate(toYmdHms(start)) : 'Today'} → ${formatApiDate(toYmdHms(end))}`} />
-          <KV label="Validity" value={`${validity} days`} />
+
         </>
       )}
     </View>
@@ -328,19 +414,44 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
         <>
           <Btn label="Cancel" kind="ghost" onPress={onClose} disabled={submitting} />
           <Btn
-            label={`${isAdvance ? 'Confirm Advance Renewal' : 'Confirm Recharge'}${dpo ? ` · ${money(total)}` : ''}`}
+            label={`${isAdvance ? 'Confirm Advance Renewal' : 'Confirm Recharge'}${base ? ` · ${money(total)}` : ''}`}
             kind="orange"
             onPress={confirm}
             loading={submitting}
-            disabled={!dpo || loading}
+            disabled={!base || ftaMissing || hasConflict || hasPending || loading || needsInternetChoice || periodLoading}
           />
         </>
       }
     >
       <View style={styles.headerStrip}>
-        <KV label="Current expiry" value={expiry ? formatApiDate(stb?.expiration || account.expriration) : 'Not active'} />
+        {/* paid-till date when the STB is paid for longer than Pioneer shows, else Pioneer's expiry */}
+        <KV label="Current expiry" value={stb?.expected_expiry ? formatApiDate(stb.expected_expiry) : expiry ? formatApiDate(stb?.expiration || account.expriration) : 'Not active'} />
         <KV label="Type" value={isAdvance ? 'Advance renewal (STB still active)' : 'Recharge (STB expired / new)'} />
       </View>
+
+      {/* several internet accounts: which one should the IPTV dates follow? */}
+      {!loading && internetAccounts.length > 1 ? (
+        <View style={styles.alignBox}>
+          <Text style={styles.alignTitle}>Align IPTV with which internet account?</Text>
+          <Text style={styles.muted}>This customer has {internetAccounts.length} internet accounts. The IPTV period runs till the chosen account's expiry.</Text>
+          <View style={{ gap: 6, marginTop: 8 }}>
+            {internetAccounts.map((a) => {
+              const on = String(alignId) === String(a.internet_id);
+              return (
+                <TouchableOpacity key={a.internet_id} style={[styles.alignRow, on && styles.alignRowOn]} onPress={() => chooseInternet(a.internet_id)} disabled={submitting}>
+                  <View style={[styles.radio, on && styles.radioOn]}>{on ? <View style={styles.radioDot} /> : null}</View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={[styles.rowName, on && { color: '#5b21b6', fontWeight: '700' }]} numberOfLines={1}>{a.username}</Text>
+                    <Text style={styles.rowSub}>{a.is_active ? `Active till ${formatApiDate(a.expiration)}` : `Expired ${a.expiration ? formatApiDate(a.expiration) : ''} — IPTV would be 30 days`}</Text>
+                  </View>
+                  {on && periodLoading ? <ActivityIndicator size="small" color={IPTV} /> : null}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          {needsInternetChoice ? <Text style={[styles.rowSub, { color: '#b45309', marginTop: 6 }]}>Choose an internet account to continue.</Text> : null}
+        </View>
+      ) : null}
 
       {loading ? (
         <View style={styles.loadingRow}>
@@ -349,10 +460,15 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
         </View>
       ) : loadError ? (
         <Note tone="error" text={loadError} />
+      ) : hasPending ? (
+        <Note
+          tone="error"
+          text={`This STB is already paid till ${formatApiDate(pending[pending.length - 1].end_date)}. It can be recharged after that.`}
+        />
       ) : plans.DPO.length === 0 ? (
         <Note text="No DPO package is assigned to this operator yet. Ask your admin to map IPTV packages before recharging." />
       ) : locked ? (
-        !dpo ? (
+        !base ? (
           <Note
             tone="error"
             text="This STB is still active but its current packs are not known, so it cannot be renewed in advance. Sync the STB first, or recharge with new packs after it expires."
@@ -375,7 +491,8 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
             {listPanel}
             {summaryPanel}
           </View>
-          <Note text="Recharge starts now. The operator wallet is debited only if Pioneer confirms the renewal." />
+          {hasConflict ? <Note tone="error" text="Some selected add-ons repeat channels the customer already gets (marked in red). Remove them to continue — Pioneer refuses such a renewal." /> : null}
+          <Note text="The wallet is debited when the recharge starts. If Pioneer does not confirm it, the account shows Recheck." />
         </>
       )}
     </ModalShell>
@@ -383,6 +500,13 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
 };
 
 const styles = StyleSheet.create({
+  alignBox: { marginTop: 12, padding: 12, borderRadius: 10, borderWidth: 1, borderColor: 'rgba(139,92,246,0.3)', backgroundColor: 'rgba(139,92,246,0.05)' },
+  alignTitle: { fontSize: 13, fontWeight: '800', color: '#4c1d95', marginBottom: 2 },
+  alignRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8, borderWidth: 1, borderColor: 'rgba(0,0,0,0.1)', backgroundColor: '#ffffff' },
+  alignRowOn: { borderColor: '#8b5cf6', backgroundColor: 'rgba(139,92,246,0.08)' },
+  radio: { width: 16, height: 16, borderRadius: 8, borderWidth: 2, borderColor: '#94a3b8', alignItems: 'center', justifyContent: 'center' },
+  radioOn: { borderColor: '#7c3aed' },
+  radioDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#7c3aed' },
   headerStrip: { padding: 12, borderRadius: 10, backgroundColor: COLORS.bgSecondary, borderWidth: 1, borderColor: 'rgba(0,0,0,0.06)' },
   loadingRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 20, justifyContent: 'center' },
   muted: { fontSize: 12, color: '#64748b' },
@@ -409,6 +533,14 @@ const styles = StyleSheet.create({
   list: { maxHeight: 330, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)', borderRadius: 10 },
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   rowOn: { backgroundColor: '#f5f3ff' },
+  rowBlocked: { backgroundColor: '#f8fafc' },
+  calcLine: { fontSize: 11, color: '#64748b', marginBottom: 6 },
+  scheduleBox: { marginTop: 6, padding: 8, borderRadius: 8, backgroundColor: 'rgba(139,92,246,0.08)', borderWidth: 1, borderColor: 'rgba(139,92,246,0.25)', gap: 2 },
+  scheduleText: { fontSize: 11, color: '#5b21b6' },
+  rowBlockedText: { fontSize: 11, color: '#94a3b8', marginTop: 2 },
+  rowClash: { backgroundColor: '#fef2f2' },
+  rowClashText: { fontSize: 11, color: '#b91c1c', fontWeight: '600', marginTop: 2 },
+  ftaRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 10, borderWidth: 1, borderColor: 'rgba(139,92,246,0.3)', borderRadius: 10, marginBottom: 8 },
   rowName: { fontSize: 13, color: COLORS.textMain },
   rowSub: { fontSize: 11, color: '#64748b', marginTop: 1 },
   rowPrice: { fontSize: 13, fontWeight: '700', color: COLORS.textMain },

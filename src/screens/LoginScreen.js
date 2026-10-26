@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -24,7 +24,10 @@ export const LoginScreen = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
+  const passwordRef = useRef(null);
+
   const handleLogin = async () => {
+    if (loading) return; // Enter pressed again while signing in
     setErrorMsg('');
     setLoading(true);
 
@@ -131,6 +134,10 @@ export const LoginScreen = ({ onLoginSuccess }) => {
               placeholder="Enter username"
               placeholderTextColor={COLORS.textDim}
               autoCapitalize="none"
+              autoComplete="username"
+              returnKeyType="next"
+              blurOnSubmit={false}
+              onSubmitEditing={() => passwordRef.current && passwordRef.current.focus()}
             />
           </View>
         </View>
@@ -141,12 +148,16 @@ export const LoginScreen = ({ onLoginSuccess }) => {
           <View style={styles.inputWrapper}>
             <Feather name="lock" size={15} color={COLORS.textDim} />
             <TextInput
+              ref={passwordRef}
               style={styles.input}
               value={password}
               onChangeText={setPassword}
               secureTextEntry={!showPassword}
               placeholder="Enter password"
               placeholderTextColor={COLORS.textDim}
+              autoComplete="current-password"
+              returnKeyType="go"
+              onSubmitEditing={handleLogin}
             />
             <TouchableOpacity onPress={() => setShowPassword((prev) => !prev)}>
               <Feather name={showPassword ? 'eye-off' : 'eye'} size={15} color={COLORS.textDim} />
