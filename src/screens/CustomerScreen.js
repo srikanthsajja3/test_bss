@@ -434,6 +434,37 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [operatorSearchQuery, setOperatorSearchQuery] = useState('');
   const [selectedBranchFilter, setSelectedBranchFilter] = useState('');
 
+  // Excel-style column search filters
+  const [colSearch, setColSearch] = useState({
+    username: '',
+    stb: '',
+    name: '',
+    mobile: '',
+    aadhaar: '',
+    operator: '',
+    plan: '',
+    expiry: '',
+    registered: '',
+  });
+
+  const hasActiveColSearch = useMemo(() => {
+    return Object.values(colSearch).some((val) => !!val && String(val).trim() !== '');
+  }, [colSearch]);
+
+  const resetColSearch = () => {
+    setColSearch({
+      username: '',
+      stb: '',
+      name: '',
+      mobile: '',
+      aadhaar: '',
+      operator: '',
+      plan: '',
+      expiry: '',
+      registered: '',
+    });
+  };
+
   const selectedOpObj = useMemo(() => {
     if (!selectedOperatorId) return null;
     return operators.find((op) => String(op.partner_id || op.id) === String(selectedOperatorId));
@@ -1875,9 +1906,57 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           return bVal.includes(String(selectedBranchFilter).toLowerCase());
         });
       }
+
+      // Column-specific search filters (Excel filter row)
+      if (colSearch.username.trim()) {
+        const q = colSearch.username.toLowerCase().trim();
+        rows = rows.filter((c) => String(c.username || '').toLowerCase().includes(q));
+      }
+      if (colSearch.stb.trim()) {
+        const q = colSearch.stb.toLowerCase().trim();
+        rows = rows.filter((c) => {
+          const stb = String(c.stb_box || c.pioneer_stb_id || c.iptv_id || '').toLowerCase();
+          return stb.includes(q);
+        });
+      }
+      if (colSearch.name.trim()) {
+        const q = colSearch.name.toLowerCase().trim();
+        rows = rows.filter((c) => String(c.full_name || c.name || '').toLowerCase().includes(q));
+      }
+      if (colSearch.mobile.trim()) {
+        const q = colSearch.mobile.toLowerCase().trim();
+        rows = rows.filter((c) => String(c.mobile || c.phone || '').toLowerCase().includes(q));
+      }
+      if (colSearch.aadhaar.trim()) {
+        const q = colSearch.aadhaar.toLowerCase().trim();
+        rows = rows.filter((c) => String(c.aadhaar_number || c.aadhaar || '').toLowerCase().includes(q));
+      }
+      if (colSearch.operator.trim()) {
+        const q = colSearch.operator.toLowerCase().trim();
+        rows = rows.filter((c) => {
+          const op = String(c.partner_name || c.branch_name || '').toLowerCase();
+          return op.includes(q);
+        });
+      }
+      if (colSearch.plan.trim()) {
+        const q = colSearch.plan.toLowerCase().trim();
+        rows = rows.filter((c) => {
+          const p = String(c.package_name || c.subplan_name || c.plan || '').toLowerCase();
+          return p.includes(q);
+        });
+      }
+      if (colSearch.expiry.trim()) {
+        const q = colSearch.expiry.toLowerCase().trim();
+        rows = rows.filter((c) => String(c.expiration || c.expiration_date || '').toLowerCase().includes(q));
+      }
+      if (colSearch.registered.trim()) {
+        const q = colSearch.registered.toLowerCase().trim();
+        rows = rows.filter((c) => String(c.registered_on || '').toLowerCase().includes(q));
+      }
+
       return rows;
     },
-    [rawCustomers, viewMode, selectedBranchFilter]
+    [rawCustomers, viewMode, selectedBranchFilter, colSearch]
   );
   const paginatedCustomers = filteredCustomers; // the server already returned just this page
   const totalPages = Math.max(1, Math.ceil(listTotal / pageSize));
@@ -2820,6 +2899,407 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </Text>
             </View>
 
+            {/* Excel-style Column Filter Row (Row 1) */}
+            <View style={styles.excelFilterRow}>
+              {viewMode === 'iptv' ? (
+                <>
+                  {/* STB / Box */}
+                  <View style={{ flex: 1.7, minWidth: 140, paddingRight: 6 }}>
+                    <View style={[styles.excelColSearchBox, colSearch.stb && styles.excelColSearchBoxActive]}>
+                      <Feather name="search" size={10} color={colSearch.stb ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+                      <TextInput
+                        style={styles.excelColSearchInput}
+                        placeholder="Filter STB..."
+                        placeholderTextColor="#94a3b8"
+                        value={colSearch.stb}
+                        onChangeText={(val) => setColSearch((f) => ({ ...f, stb: val }))}
+                      />
+                      {colSearch.stb ? (
+                        <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, stb: '' }))}>
+                          <Feather name="x" size={10} color="#64748b" />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  {/* Status Toggle [All | Act | Exp] */}
+                  <View style={{ flex: 1.1, minWidth: 95, paddingRight: 6 }}>
+                    <View style={styles.excelToggleWrap}>
+                      <TouchableOpacity
+                        style={[
+                          styles.excelToggleBtn,
+                          activeFilter === 'all' && styles.excelToggleBtnActiveAll,
+                        ]}
+                        onPress={() => handleSelectFilter('all')}
+                      >
+                        <Text style={[styles.excelToggleText, activeFilter === 'all' && styles.excelToggleTextActiveAll]}>All</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.excelToggleBtn,
+                          activeFilter === 'active' && styles.excelToggleBtnActiveOn,
+                        ]}
+                        onPress={() => handleSelectFilter('active')}
+                      >
+                        <Text style={[styles.excelToggleText, activeFilter === 'active' && styles.excelToggleTextActiveWhite]}>Act</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.excelToggleBtn,
+                          activeFilter === 'expired' && styles.excelToggleBtnActiveOff,
+                        ]}
+                        onPress={() => handleSelectFilter('expired')}
+                      >
+                        <Text style={[styles.excelToggleText, activeFilter === 'expired' && styles.excelToggleTextActiveWhite]}>Exp</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Full Name */}
+                  <View style={{ flex: 1.7, minWidth: 130, paddingRight: 6 }}>
+                    <View style={[styles.excelColSearchBox, colSearch.name && styles.excelColSearchBoxActive]}>
+                      <Feather name="search" size={10} color={colSearch.name ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+                      <TextInput
+                        style={styles.excelColSearchInput}
+                        placeholder="Filter Name..."
+                        placeholderTextColor="#94a3b8"
+                        value={colSearch.name}
+                        onChangeText={(val) => setColSearch((f) => ({ ...f, name: val }))}
+                      />
+                      {colSearch.name ? (
+                        <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, name: '' }))}>
+                          <Feather name="x" size={10} color="#64748b" />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  {/* Mobile */}
+                  <View style={{ flex: 1.4, minWidth: 120, paddingRight: 6 }}>
+                    <View style={[styles.excelColSearchBox, colSearch.mobile && styles.excelColSearchBoxActive]}>
+                      <Feather name="search" size={10} color={colSearch.mobile ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+                      <TextInput
+                        style={styles.excelColSearchInput}
+                        placeholder="Filter Mobile..."
+                        placeholderTextColor="#94a3b8"
+                        value={colSearch.mobile}
+                        onChangeText={(val) => setColSearch((f) => ({ ...f, mobile: val }))}
+                      />
+                      {colSearch.mobile ? (
+                        <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, mobile: '' }))}>
+                          <Feather name="x" size={10} color="#64748b" />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  {/* Operator / Branch */}
+                  {!isOperatorRole ? (
+                    <View style={{ flex: 1.7, minWidth: 130, paddingRight: 6 }}>
+                      <View style={[styles.excelColSearchBox, colSearch.operator && styles.excelColSearchBoxActive]}>
+                        <Feather name="search" size={10} color={colSearch.operator ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+                        <TextInput
+                          style={styles.excelColSearchInput}
+                          placeholder="Filter Operator..."
+                          placeholderTextColor="#94a3b8"
+                          value={colSearch.operator}
+                          onChangeText={(val) => setColSearch((f) => ({ ...f, operator: val }))}
+                        />
+                        {colSearch.operator ? (
+                          <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, operator: '' }))}>
+                            <Feather name="x" size={10} color="#64748b" />
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                    </View>
+                  ) : null}
+
+                  {/* Package */}
+                  <View style={{ flex: 1.8, minWidth: 140, paddingRight: 6 }}>
+                    <View style={[styles.excelColSearchBox, colSearch.plan && styles.excelColSearchBoxActive]}>
+                      <Feather name="search" size={10} color={colSearch.plan ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+                      <TextInput
+                        style={styles.excelColSearchInput}
+                        placeholder="Filter Package..."
+                        placeholderTextColor="#94a3b8"
+                        value={colSearch.plan}
+                        onChangeText={(val) => setColSearch((f) => ({ ...f, plan: val }))}
+                      />
+                      {colSearch.plan ? (
+                        <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, plan: '' }))}>
+                          <Feather name="x" size={10} color="#64748b" />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  {/* Expiration Date */}
+                  <View style={{ flex: 2.0, minWidth: 140, paddingRight: 6 }}>
+                    <View style={[styles.excelColSearchBox, colSearch.expiry && styles.excelColSearchBoxActive]}>
+                      <Feather name="search" size={10} color={colSearch.expiry ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+                      <TextInput
+                        style={styles.excelColSearchInput}
+                        placeholder="Filter Expiry..."
+                        placeholderTextColor="#94a3b8"
+                        value={colSearch.expiry}
+                        onChangeText={(val) => setColSearch((f) => ({ ...f, expiry: val }))}
+                      />
+                      {colSearch.expiry ? (
+                        <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, expiry: '' }))}>
+                          <Feather name="x" size={10} color="#64748b" />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  {/* Registered */}
+                  {showRegisteredCol ? (
+                    <View style={{ flex: 1.3, minWidth: 110, paddingRight: 6 }}>
+                      <View style={[styles.excelColSearchBox, colSearch.registered && styles.excelColSearchBoxActive]}>
+                        <Feather name="search" size={10} color={colSearch.registered ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+                        <TextInput
+                          style={styles.excelColSearchInput}
+                          placeholder="Filter Date..."
+                          placeholderTextColor="#94a3b8"
+                          value={colSearch.registered}
+                          onChangeText={(val) => setColSearch((f) => ({ ...f, registered: val }))}
+                        />
+                        {colSearch.registered ? (
+                          <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, registered: '' }))}>
+                            <Feather name="x" size={10} color="#64748b" />
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                    </View>
+                  ) : null}
+
+                  {/* Actions / Clear */}
+                  <View style={{ flex: 0.8, minWidth: 80, alignItems: 'center' }}>
+                    {hasActiveColSearch ? (
+                      <TouchableOpacity style={styles.excelBtnReset} onPress={resetColSearch} title="Clear column filters">
+                        <Feather name="filter" size={10} color="#dc2626" style={{ marginRight: 2 }} />
+                        <Text style={styles.excelBtnResetText}>Clear</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <Feather name="filter" size={12} color="#cbd5e1" style={{ opacity: 0.5 }} />
+                    )}
+                  </View>
+                </>
+              ) : (
+                <>
+                  {/* Internet Subscribers: Username */}
+                  <View style={{ flex: 1.5, minWidth: 120, paddingRight: 6 }}>
+                    <View style={[styles.excelColSearchBox, colSearch.username && styles.excelColSearchBoxActive]}>
+                      <Feather name="search" size={10} color={colSearch.username ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+                      <TextInput
+                        style={styles.excelColSearchInput}
+                        placeholder="Filter User..."
+                        placeholderTextColor="#94a3b8"
+                        value={colSearch.username}
+                        onChangeText={(val) => setColSearch((f) => ({ ...f, username: val }))}
+                      />
+                      {colSearch.username ? (
+                        <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, username: '' }))}>
+                          <Feather name="x" size={10} color="#64748b" />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  {/* Internet Subscribers: Connectivity Toggle [All | On | Off] */}
+                  <View style={{ flex: 1.1, minWidth: 95, paddingRight: 6 }}>
+                    <View style={styles.excelToggleWrap}>
+                      <TouchableOpacity
+                        style={[
+                          styles.excelToggleBtn,
+                          activeFilter !== 'online' && activeFilter !== 'offline' && styles.excelToggleBtnActiveAll,
+                        ]}
+                        onPress={() => handleSelectFilter('all')}
+                      >
+                        <Text style={[styles.excelToggleText, activeFilter !== 'online' && activeFilter !== 'offline' && styles.excelToggleTextActiveAll]}>All</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.excelToggleBtn,
+                          activeFilter === 'online' && styles.excelToggleBtnActiveOn,
+                        ]}
+                        onPress={() => handleSelectFilter('online')}
+                      >
+                        <Text style={[styles.excelToggleText, activeFilter === 'online' && styles.excelToggleTextActiveWhite]}>On</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        style={[
+                          styles.excelToggleBtn,
+                          activeFilter === 'offline' && styles.excelToggleBtnActiveOff,
+                        ]}
+                        onPress={() => handleSelectFilter('offline')}
+                      >
+                        <Text style={[styles.excelToggleText, activeFilter === 'offline' && styles.excelToggleTextActiveWhite]}>Off</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+
+                  {/* Full Name */}
+                  <View style={{ flex: 1.8, minWidth: 140, paddingRight: 6 }}>
+                    <View style={[styles.excelColSearchBox, colSearch.name && styles.excelColSearchBoxActive]}>
+                      <Feather name="search" size={10} color={colSearch.name ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+                      <TextInput
+                        style={styles.excelColSearchInput}
+                        placeholder="Filter Name..."
+                        placeholderTextColor="#94a3b8"
+                        value={colSearch.name}
+                        onChangeText={(val) => setColSearch((f) => ({ ...f, name: val }))}
+                      />
+                      {colSearch.name ? (
+                        <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, name: '' }))}>
+                          <Feather name="x" size={10} color="#64748b" />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  {/* Mobile */}
+                  <View style={{ flex: 1.4, minWidth: 120, paddingRight: 6 }}>
+                    <View style={[styles.excelColSearchBox, colSearch.mobile && styles.excelColSearchBoxActive]}>
+                      <Feather name="search" size={10} color={colSearch.mobile ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+                      <TextInput
+                        style={styles.excelColSearchInput}
+                        placeholder="Filter Mobile..."
+                        placeholderTextColor="#94a3b8"
+                        value={colSearch.mobile}
+                        onChangeText={(val) => setColSearch((f) => ({ ...f, mobile: val }))}
+                      />
+                      {colSearch.mobile ? (
+                        <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, mobile: '' }))}>
+                          <Feather name="x" size={10} color="#64748b" />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  {/* Aadhaar */}
+                  <View style={{ flex: 1.3, minWidth: 120, paddingRight: 6 }}>
+                    <View style={[styles.excelColSearchBox, colSearch.aadhaar && styles.excelColSearchBoxActive]}>
+                      <Feather name="search" size={10} color={colSearch.aadhaar ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+                      <TextInput
+                        style={styles.excelColSearchInput}
+                        placeholder="Filter Aadhaar..."
+                        placeholderTextColor="#94a3b8"
+                        value={colSearch.aadhaar}
+                        onChangeText={(val) => setColSearch((f) => ({ ...f, aadhaar: val }))}
+                      />
+                      {colSearch.aadhaar ? (
+                        <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, aadhaar: '' }))}>
+                          <Feather name="x" size={10} color="#64748b" />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  {/* Operator */}
+                  {!isOperatorRole ? (
+                    <View style={{ flex: 1.5, minWidth: 120, paddingRight: 6 }}>
+                      <View style={[styles.excelColSearchBox, colSearch.operator && styles.excelColSearchBoxActive]}>
+                        <Feather name="search" size={10} color={colSearch.operator ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+                        <TextInput
+                          style={styles.excelColSearchInput}
+                          placeholder="Filter Operator..."
+                          placeholderTextColor="#94a3b8"
+                          value={colSearch.operator}
+                          onChangeText={(val) => setColSearch((f) => ({ ...f, operator: val }))}
+                        />
+                        {colSearch.operator ? (
+                          <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, operator: '' }))}>
+                            <Feather name="x" size={10} color="#64748b" />
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                    </View>
+                  ) : null}
+
+                  {/* Plan */}
+                  <View style={{ flex: 1.8, minWidth: 140, paddingRight: 6 }}>
+                    <View style={[styles.excelColSearchBox, colSearch.plan && styles.excelColSearchBoxActive]}>
+                      <Feather name="search" size={10} color={colSearch.plan ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+                      <TextInput
+                        style={styles.excelColSearchInput}
+                        placeholder="Filter Plan..."
+                        placeholderTextColor="#94a3b8"
+                        value={colSearch.plan}
+                        onChangeText={(val) => setColSearch((f) => ({ ...f, plan: val }))}
+                      />
+                      {colSearch.plan ? (
+                        <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, plan: '' }))}>
+                          <Feather name="x" size={10} color="#64748b" />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  {/* Expiration Date */}
+                  <View style={{ flex: 2.2, minWidth: 140, paddingRight: 6 }}>
+                    <View style={[styles.excelColSearchBox, colSearch.expiry && styles.excelColSearchBoxActive]}>
+                      <Feather name="search" size={10} color={colSearch.expiry ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+                      <TextInput
+                        style={styles.excelColSearchInput}
+                        placeholder="Filter Expiry..."
+                        placeholderTextColor="#94a3b8"
+                        value={colSearch.expiry}
+                        onChangeText={(val) => setColSearch((f) => ({ ...f, expiry: val }))}
+                      />
+                      {colSearch.expiry ? (
+                        <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, expiry: '' }))}>
+                          <Feather name="x" size={10} color="#64748b" />
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  {/* Registered */}
+                  {showRegisteredCol ? (
+                    <View style={{ flex: 1.3, minWidth: 110, paddingRight: 6 }}>
+                      <View style={[styles.excelColSearchBox, colSearch.registered && styles.excelColSearchBoxActive]}>
+                        <Feather name="search" size={10} color={colSearch.registered ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+                        <TextInput
+                          style={styles.excelColSearchInput}
+                          placeholder="Filter Date..."
+                          placeholderTextColor="#94a3b8"
+                          value={colSearch.registered}
+                          onChangeText={(val) => setColSearch((f) => ({ ...f, registered: val }))}
+                        />
+                        {colSearch.registered ? (
+                          <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, registered: '' }))}>
+                            <Feather name="x" size={10} color="#64748b" />
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                    </View>
+                  ) : null}
+
+                  {/* Actions / Reset */}
+                  <View style={{ flex: 1.6, minWidth: 150, alignItems: 'center' }}>
+                    {hasActiveColSearch || activeFilter === 'online' || activeFilter === 'offline' ? (
+                      <TouchableOpacity
+                        style={styles.excelBtnReset}
+                        onPress={() => {
+                          resetColSearch();
+                          if (activeFilter === 'online' || activeFilter === 'offline') {
+                            handleSelectFilter('all');
+                          }
+                        }}
+                        title="Clear column filters"
+                      >
+                        <Feather name="filter" size={10} color="#dc2626" style={{ marginRight: 3 }} />
+                        <Text style={styles.excelBtnResetText}>Clear</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <Feather name="filter" size={12} color="#cbd5e1" style={{ opacity: 0.5 }} />
+                    )}
+                  </View>
+                </>
+              )}
+            </View>
+
             {/* Table Rows Body Container (ONLY SUBSCRIBER LIST ROWS SCROLL) */}
             <ScrollView style={isMobile ? null : { maxHeight: 600 }} nestedScrollEnabled={true} keyboardShouldPersistTaps="handled">
             {listError && !loadingData ? (
@@ -3258,6 +3738,105 @@ const styles = StyleSheet.create({
     zIndex: 50,
   },
   th: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase' },
+  excelFilterRow: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: 2,
+    borderBottomColor: '#cbd5e1',
+    backgroundColor: '#f8fafc',
+    position: 'sticky',
+    top: 40,
+    zIndex: 49,
+  },
+  excelColSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 6,
+    height: 28,
+    paddingHorizontal: 6,
+  },
+  excelColSearchBoxActive: {
+    borderColor: '#3b82f6',
+    backgroundColor: '#eff6ff',
+  },
+  excelColSearchInput: {
+    flex: 1,
+    fontSize: 11,
+    color: '#0f172a',
+    outlineStyle: 'none',
+    padding: 0,
+  },
+  excelToggleWrap: {
+    flexDirection: 'row',
+    backgroundColor: '#e2e8f0',
+    borderRadius: 6,
+    padding: 2,
+    height: 28,
+    alignItems: 'center',
+  },
+  excelToggleBtn: {
+    flex: 1,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
+    paddingHorizontal: 2,
+  },
+  excelToggleBtnActiveAll: {
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 1,
+    elevation: 1,
+  },
+  excelToggleBtnActiveOn: {
+    backgroundColor: '#16a34a',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 1,
+    elevation: 1,
+  },
+  excelToggleBtnActiveOff: {
+    backgroundColor: '#64748b',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 1,
+    elevation: 1,
+  },
+  excelToggleText: {
+    fontSize: 9.5,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  excelToggleTextActiveAll: {
+    color: '#1d4ed8',
+    fontWeight: '800',
+  },
+  excelToggleTextActiveWhite: {
+    color: '#ffffff',
+    fontWeight: '800',
+  },
+  excelBtnReset: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fee2e2',
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  excelBtnResetText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: '#dc2626',
+  },
   tr: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.05)', minHeight: 48 },
   tdBold: { fontSize: 13, fontWeight: '700', color: COLORS.textMain },
   tdSub: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted },

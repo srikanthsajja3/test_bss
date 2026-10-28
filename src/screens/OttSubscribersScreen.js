@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
@@ -40,6 +40,31 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
   const [error, setError] = useState('');
   const seq = useRef(0);
 
+  // Excel-style column search filters
+  const [colSearch, setColSearch] = useState({
+    subId: '',
+    name: '',
+    mobile: '',
+    operator: '',
+    pkg: '',
+    expiry: '',
+  });
+
+  const hasActiveColSearch = useMemo(() => {
+    return Object.values(colSearch).some((val) => !!val && String(val).trim() !== '');
+  }, [colSearch]);
+
+  const resetColSearch = () => {
+    setColSearch({
+      subId: '',
+      name: '',
+      mobile: '',
+      operator: '',
+      pkg: '',
+      expiry: '',
+    });
+  };
+
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 350);
     return () => clearTimeout(t);
@@ -71,9 +96,40 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
     if (typeof window !== 'undefined') window.location.hash = `customers?sub_id=${row.cust_id}`;
   };
 
+  // Filter rows by Excel column searches
+  const filteredRows = useMemo(() => {
+    let list = rows;
+    if (colSearch.subId.trim()) {
+      const q = colSearch.subId.toLowerCase().trim();
+      list = list.filter((r) => String(r.subscriber_id || '').toLowerCase().includes(q));
+    }
+    if (colSearch.name.trim()) {
+      const q = colSearch.name.toLowerCase().trim();
+      list = list.filter((r) => String(r.full_name || '').toLowerCase().includes(q));
+    }
+    if (colSearch.mobile.trim()) {
+      const q = colSearch.mobile.toLowerCase().trim();
+      list = list.filter((r) => String(r.mobile || '').toLowerCase().includes(q));
+    }
+    if (colSearch.operator.trim()) {
+      const q = colSearch.operator.toLowerCase().trim();
+      list = list.filter((r) => String(r.partner_name || '').toLowerCase().includes(q));
+    }
+    if (colSearch.pkg.trim()) {
+      const q = colSearch.pkg.toLowerCase().trim();
+      list = list.filter((r) => String(r.package_name || r.subplan_name || '').toLowerCase().includes(q));
+    }
+    if (colSearch.expiry.trim()) {
+      const q = colSearch.expiry.toLowerCase().trim();
+      list = list.filter((r) => String(r.expiration || '').toLowerCase().includes(q));
+    }
+    return list;
+  }, [rows, colSearch]);
+
   const pages = Math.max(1, Math.ceil(total / PAGE));
   const table = (
     <View style={{ flex: 1 }}>
+      {/* Table Header */}
       <View style={[styles.tr, styles.thRow]}>
         <Text style={[styles.th, { flex: 1.4, minWidth: 130 }]}>Subscriber ID</Text>
         <Text style={[styles.th, { flex: 1, minWidth: 100 }]}>Status</Text>
@@ -83,14 +139,164 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
         <Text style={[styles.th, { flex: 1.6, minWidth: 140 }]}>Package</Text>
         <Text style={[styles.th, { flex: 1.5, minWidth: 140 }]}>Expiry</Text>
       </View>
+
+      {/* Excel Filter Row (Row 1) */}
+      <View style={styles.excelFilterRow}>
+        {/* Subscriber ID */}
+        <View style={{ flex: 1.4, minWidth: 130, paddingRight: 6 }}>
+          <View style={[styles.colSearchBox, colSearch.subId && styles.colSearchBoxActive]}>
+            <Feather name="search" size={10} color={colSearch.subId ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+            <TextInput
+              style={styles.colSearchInput}
+              placeholder="Filter ID..."
+              placeholderTextColor="#94a3b8"
+              value={colSearch.subId}
+              onChangeText={(val) => setColSearch((f) => ({ ...f, subId: val }))}
+            />
+            {colSearch.subId ? (
+              <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, subId: '' }))}>
+                <Feather name="x" size={10} color="#64748b" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
+
+        {/* Status Toggle [All | Act | Exp] */}
+        <View style={{ flex: 1, minWidth: 100, paddingRight: 6 }}>
+          <View style={styles.statusToggleWrap}>
+            <TouchableOpacity
+              style={[styles.statusToggleBtn, status === 'all' && styles.statusToggleBtnActiveAll]}
+              onPress={() => setStatus('all')}
+            >
+              <Text style={[styles.statusToggleText, status === 'all' && styles.statusToggleTextActiveAll]}>All</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.statusToggleBtn, status === 'active' && styles.statusToggleBtnActiveAct]}
+              onPress={() => setStatus('active')}
+            >
+              <Text style={[styles.statusToggleText, status === 'active' && styles.statusToggleTextActiveWhite]}>Act</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.statusToggleBtn, status === 'expired' && styles.statusToggleBtnActiveExp]}
+              onPress={() => setStatus('expired')}
+            >
+              <Text style={[styles.statusToggleText, status === 'expired' && styles.statusToggleTextActiveWhite]}>Exp</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Full Name */}
+        <View style={{ flex: 1.6, minWidth: 140, paddingRight: 6 }}>
+          <View style={[styles.colSearchBox, colSearch.name && styles.colSearchBoxActive]}>
+            <Feather name="search" size={10} color={colSearch.name ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+            <TextInput
+              style={styles.colSearchInput}
+              placeholder="Filter Name..."
+              placeholderTextColor="#94a3b8"
+              value={colSearch.name}
+              onChangeText={(val) => setColSearch((f) => ({ ...f, name: val }))}
+            />
+            {colSearch.name ? (
+              <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, name: '' }))}>
+                <Feather name="x" size={10} color="#64748b" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
+
+        {/* Mobile */}
+        <View style={{ flex: 1.2, minWidth: 110, paddingRight: 6 }}>
+          <View style={[styles.colSearchBox, colSearch.mobile && styles.colSearchBoxActive]}>
+            <Feather name="search" size={10} color={colSearch.mobile ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+            <TextInput
+              style={styles.colSearchInput}
+              placeholder="Filter Mobile..."
+              placeholderTextColor="#94a3b8"
+              value={colSearch.mobile}
+              onChangeText={(val) => setColSearch((f) => ({ ...f, mobile: val }))}
+            />
+            {colSearch.mobile ? (
+              <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, mobile: '' }))}>
+                <Feather name="x" size={10} color="#64748b" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
+
+        {/* Operator */}
+        {!isOperator ? (
+          <View style={{ flex: 1.4, minWidth: 120, paddingRight: 6 }}>
+            <View style={[styles.colSearchBox, colSearch.operator && styles.colSearchBoxActive]}>
+              <Feather name="search" size={10} color={colSearch.operator ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+              <TextInput
+                style={styles.colSearchInput}
+                placeholder="Filter Operator..."
+                placeholderTextColor="#94a3b8"
+                value={colSearch.operator}
+                onChangeText={(val) => setColSearch((f) => ({ ...f, operator: val }))}
+              />
+              {colSearch.operator ? (
+                <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, operator: '' }))}>
+                  <Feather name="x" size={10} color="#64748b" />
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </View>
+        ) : null}
+
+        {/* Package */}
+        <View style={{ flex: 1.6, minWidth: 140, paddingRight: 6 }}>
+          <View style={[styles.colSearchBox, colSearch.pkg && styles.colSearchBoxActive]}>
+            <Feather name="search" size={10} color={colSearch.pkg ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+            <TextInput
+              style={styles.colSearchInput}
+              placeholder="Filter Package..."
+              placeholderTextColor="#94a3b8"
+              value={colSearch.pkg}
+              onChangeText={(val) => setColSearch((f) => ({ ...f, pkg: val }))}
+            />
+            {colSearch.pkg ? (
+              <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, pkg: '' }))}>
+                <Feather name="x" size={10} color="#64748b" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </View>
+
+        {/* Expiry / Clear */}
+        <View style={{ flex: 1.5, minWidth: 140, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={[styles.colSearchBox, { flex: 1 }, colSearch.expiry && styles.colSearchBoxActive]}>
+            <Feather name="search" size={10} color={colSearch.expiry ? '#2563eb' : '#94a3b8'} style={{ marginRight: 3 }} />
+            <TextInput
+              style={styles.colSearchInput}
+              placeholder="Filter Expiry..."
+              placeholderTextColor="#94a3b8"
+              value={colSearch.expiry}
+              onChangeText={(val) => setColSearch((f) => ({ ...f, expiry: val }))}
+            />
+            {colSearch.expiry ? (
+              <TouchableOpacity onPress={() => setColSearch((f) => ({ ...f, expiry: '' }))}>
+                <Feather name="x" size={10} color="#64748b" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          {hasActiveColSearch && (
+            <TouchableOpacity style={styles.btnResetCol} onPress={resetColSearch} title="Clear column filters">
+              <Feather name="x-circle" size={12} color="#dc2626" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* Data Rows */}
       {error ? (
         <Text style={[styles.empty, { color: '#b91c1c' }]}>{error}</Text>
-      ) : rows.length === 0 ? (
+      ) : filteredRows.length === 0 ? (
         <View style={{ padding: 30, alignItems: 'center' }}>
           {loading ? <ActivityIndicator size="small" color={OTT} /> : <Text style={styles.empty}>No OTT subscribers match.</Text>}
         </View>
       ) : (
-        rows.map((r) => {
+        filteredRows.map((r) => {
           const b = BADGE[r.status_key] || BADGE.disabled;
           return (
             <View key={r.ott_id} style={styles.tr}>
@@ -189,4 +395,90 @@ const styles = StyleSheet.create({
   pill: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 },
   pillText: { fontSize: 10, fontWeight: '700' },
   empty: { padding: 20, fontSize: 13, color: '#64748b', textAlign: 'center' },
+
+  // Excel Filter Row styles
+  excelFilterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    backgroundColor: '#f8fafc',
+    borderBottomWidth: 2,
+    borderBottomColor: '#cbd5e1',
+  },
+  colSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 6,
+    height: 28,
+    paddingHorizontal: 6,
+  },
+  colSearchBoxActive: {
+    borderColor: '#0ea5e9',
+    backgroundColor: '#f0f9ff',
+  },
+  colSearchInput: {
+    flex: 1,
+    fontSize: 11,
+    color: '#0f172a',
+    outlineStyle: 'none',
+    padding: 0,
+  },
+  statusToggleWrap: {
+    flexDirection: 'row',
+    backgroundColor: '#e2e8f0',
+    borderRadius: 6,
+    padding: 2,
+    height: 28,
+    alignItems: 'center',
+  },
+  statusToggleBtn: {
+    flex: 1,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
+    paddingHorizontal: 2,
+  },
+  statusToggleBtnActiveAll: {
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 1,
+    elevation: 1,
+  },
+  statusToggleBtnActiveAct: {
+    backgroundColor: '#15803d',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 1,
+    elevation: 1,
+  },
+  statusToggleBtnActiveExp: {
+    backgroundColor: '#b91c1c',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 1,
+    elevation: 1,
+  },
+  statusToggleText: {
+    fontSize: 9.5,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  statusToggleTextActiveAll: {
+    color: '#0ea5e9',
+    fontWeight: '800',
+  },
+  statusToggleTextActiveWhite: {
+    color: '#ffffff',
+    fontWeight: '800',
+  },
+  btnResetCol: {
+    padding: 4,
+  },
 });
