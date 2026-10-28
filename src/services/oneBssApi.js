@@ -867,5 +867,49 @@ export const OneBssApi = {
   updateInventoryOnu: async (id, fields) => post(`/inventory/update_onu.php?id=${id}`, fields),
 
   deleteInventoryOnu: async (id) => post(`/inventory/delete_onu.php?id=${id}`, {}),
+
+  // ------------------------------------------------------------------
+  // DHCP Devices
+  // ------------------------------------------------------------------
+  getDhcpClients: async (sync = 1) => {
+    const primaryUrl = `https://crm.polfibernet.in/api/dhcp_devices/dhcp_clients.php?sync=${sync ? 1 : 0}`;
+    try {
+      const activeToken = AUTH_TOKEN || (safeStorage('localStorage')?.getItem(TOKEN_KEY) || '');
+      const res = await fetch(primaryUrl, {
+        headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { ok: true, data };
+      }
+    } catch (e) {
+      console.warn('Direct crm.polfibernet.in DHCP fetch failed, using base URL fallback...', e);
+    }
+    return get(`/dhcp_devices/dhcp_clients.php?sync=${sync ? 1 : 0}`);
+  },
+
+  grantDhcpDeviceAccess: async (id) => {
+    const err = requireArg(id, 'id');
+    if (err) return clientError(err);
+    const primaryUrl = 'https://crm.polfibernet.in/api/dhcp_devices/dhcp_access_grant.php';
+    try {
+      const activeToken = AUTH_TOKEN || (safeStorage('localStorage')?.getItem(TOKEN_KEY) || '');
+      const res = await fetch(primaryUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(activeToken ? { Authorization: `Bearer ${activeToken}` } : {}),
+        },
+        body: JSON.stringify({ id: toNum(id) }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return { ok: true, data };
+      }
+    } catch (e) {
+      console.warn('Direct crm.polfibernet.in access grant failed, using base URL fallback...', e);
+    }
+    return post('/dhcp_devices/dhcp_access_grant.php', { id: toNum(id) });
+  },
 };
 

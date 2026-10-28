@@ -18,9 +18,12 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
         { id: 'dashboard', label: 'Dashboard', icon: 'grid' },
         { id: 'customers', label: 'Subscribers', icon: 'users' },
         { id: 'partners', label: 'Partners', icon: 'briefcase' },
-        ...(isSuper ? [{ id: 'inventory', label: 'Inventory', icon: 'box' }] : []),
-        ...(isSuper ? [{ id: 'iptv_renewals', label: 'IPTV Auto-Renewals', icon: 'repeat' }] : []),
-        ...(isSuper ? [{ id: 'payu_payments', label: 'Online Payments', icon: 'credit-card' }] : []),
+        ...(isSuper ? [
+          { id: 'inventory', label: 'Inventory', icon: 'box' },
+          { id: 'dhcp_devices', label: 'DHCP-devices', icon: 'server' },
+          { id: 'iptv_renewals', label: 'IPTV Auto-Renewals', icon: 'repeat' },
+          { id: 'payu_payments', label: 'Online Payments', icon: 'credit-card' },
+        ] : []),
       ];
 
   return (

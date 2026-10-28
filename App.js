@@ -10,6 +10,7 @@ import { CustomerPricesPage } from './src/components/plans/CustomerPricesPage';
 import { CustomerScreen } from './src/screens/CustomerScreen';
 import { OttSubscribersScreen } from './src/screens/OttSubscribersScreen';
 import { InventoryScreen } from './src/screens/InventoryScreen';
+import { DhcpDevicesScreen } from './src/screens/DhcpDevicesScreen';
 import { IptvRenewalsScreen } from './src/screens/IptvRenewalsScreen';
 import { PayuPaymentsScreen } from './src/screens/PayuPaymentsScreen';
 import { WalletScreen } from './src/screens/WalletScreen';
@@ -43,7 +44,7 @@ export default function App() {
           const [routePart] = hash.split('&');
           const [rawTab, rawFilter] = routePart.split('?filter=');
           const tab = rawTab ? rawTab.split('?')[0] : '';
-          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'iptv_renewals', 'payu_payments', 'wallet'].includes(tab)) {
+          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'dhcp_devices', 'iptv_renewals', 'payu_payments', 'wallet'].includes(tab)) {
             const filter = rawFilter ? rawFilter.split('?')[0].split('&')[0] : 'all';
             const rangeMatch = hash.match(/[?&]range=([a-z0-9_]+)/);
             return { tab, filter, range: rangeMatch ? rangeMatch[1] : '' };
@@ -51,7 +52,7 @@ export default function App() {
         }
         const savedTab = localStorage.getItem('onebss_active_tab');
         const savedFilter = localStorage.getItem('onebss_filter');
-        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'iptv_renewals', 'payu_payments', 'wallet'].includes(savedTab)) {
+        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'dhcp_devices', 'iptv_renewals', 'payu_payments', 'wallet'].includes(savedTab)) {
           return { tab: savedTab, filter: savedFilter || 'all', range: '' };
         }
       }
@@ -368,6 +369,12 @@ export default function App() {
           return <DashboardScreen user={user} refreshSignal={globalRefreshKey} onNavigateToCustomers={handleNavigateToCustomers} onNavigateToPartners={handleNavigateToPartners} />;
         }
         return <InventoryScreen user={user} refreshSignal={globalRefreshKey} />;
+      case 'dhcp_devices':
+        // super admin only
+        if (String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin') {
+          return <DashboardScreen user={user} refreshSignal={globalRefreshKey} onNavigateToCustomers={handleNavigateToCustomers} onNavigateToPartners={handleNavigateToPartners} />;
+        }
+        return <DhcpDevicesScreen user={user} refreshSignal={globalRefreshKey} />;
       case 'iptv_renewals':
         // super admin only (the API answers 403 to everyone else)
         if (String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin') {
@@ -418,6 +425,8 @@ export default function App() {
         return { title: 'Customer Prices', subtitle: 'What your customers pay, per package' };
       case 'inventory':
         return { title: 'Inventory', subtitle: 'ONU stock, vendors and models' };
+      case 'dhcp_devices':
+        return { title: 'DHCP Devices', subtitle: 'Live Network Client Leases & Device Access' };
       case 'iptv_renewals':
         return { title: 'IPTV Auto-Renewals', subtitle: 'Paid IPTV months renewed on Pioneer by the hourly cron' };
       case 'payu_payments':
