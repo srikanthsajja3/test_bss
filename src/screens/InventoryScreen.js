@@ -15,6 +15,7 @@ import { toast } from 'react-toastify';
 import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 import { isSuperAdmin } from '../components/internet/shared';
+import { BulkInventoryScannerModal } from '../components/BulkInventoryScannerModal';
 
 // Status styling configuration matching OneBSS WCAG high-contrast standards
 const STATUS_CONFIG = {
@@ -87,6 +88,7 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
 
   // Modals state
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showBulkScannerModal, setShowBulkScannerModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [deleteItem, setDeleteItem] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -355,7 +357,15 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
               <Text style={styles.catalogBtnText}>Vendors & Models</Text>
             </TouchableOpacity>
 
-            <TouchableOpacity style={[styles.addBtn, isMobile && { flex: 1.2, justifyContent: 'center' }]} onPress={() => setShowAddModal(true)}>
+            <TouchableOpacity
+              style={[styles.scanBtn, isMobile && { flex: 1.2, justifyContent: 'center' }]}
+              onPress={() => setShowBulkScannerModal(true)}
+            >
+              <Feather name="maximize" size={14} color="#ffffff" />
+              <Text style={styles.scanBtnText}>Bulk Scan</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity style={[styles.addBtn, isMobile && { flex: 1.1, justifyContent: 'center' }]} onPress={() => setShowAddModal(true)}>
               <Feather name="plus-circle" size={14} color="#ffffff" />
               <Text style={styles.addBtnText}>Add Device</Text>
             </TouchableOpacity>
@@ -891,6 +901,26 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
 
               {/* Modal Body */}
               <ScrollView style={{ padding: 18, maxHeight: 460 }}>
+                {/* Bulk Scanner Fast-Track Banner */}
+                <TouchableOpacity
+                  style={styles.addModalScanBanner}
+                  onPress={() => {
+                    setShowAddModal(false);
+                    setShowBulkScannerModal(true);
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+                    <View style={styles.addModalScanIconBox}>
+                      <Feather name="maximize" size={15} color="#0284c7" />
+                    </View>
+                    <View>
+                      <Text style={styles.addModalScanBannerTitle}>Import Multiple Devices via Scanner</Text>
+                      <Text style={styles.addModalScanBannerSub}>Use Barcode Gun or Camera to scan MAC & Serials in bulk</Text>
+                    </View>
+                  </View>
+                  <Feather name="arrow-right" size={15} color="#0284c7" />
+                </TouchableOpacity>
+
                 {/* 1. Vendor Selection */}
                 <View style={styles.formGroup}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
@@ -1472,6 +1502,22 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
         </Modal>
       )}
 
+      {/* ======================================================== */}
+      {/* 11. Modal: BULK SCANNER IMPORT (BARCODE GUN / CAMERA / PASTE) */}
+      {/* ======================================================== */}
+      {showBulkScannerModal && (
+        <BulkInventoryScannerModal
+          visible={showBulkScannerModal}
+          onClose={() => setShowBulkScannerModal(false)}
+          vendors={vendors}
+          allModels={allModels}
+          onSuccess={() => {
+            loadStatsAndVendors();
+            loadOnus();
+          }}
+        />
+      )}
+
     </View>
   );
 };
@@ -1583,6 +1629,51 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontWeight: '700',
     color: '#ffffff',
+  },
+  scanBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#0284c7',
+    borderRadius: 8,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    elevation: 2,
+    boxShadow: '0 2px 6px rgba(2, 132, 199, 0.3)',
+  },
+  scanBtnText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  addModalScanBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+    marginBottom: 14,
+  },
+  addModalScanIconBox: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: '#e0f2fe',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addModalScanBannerTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0369a1',
+  },
+  addModalScanBannerSub: {
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 1,
   },
 
   // Metrics
