@@ -7,19 +7,22 @@ import { OneBssApi } from '../services/oneBssApi';
 import { parseApiDate, formatApiDate } from '../components/CustomerAccountsOverview';
 
 /**
- * Super admin › Online Payments: every operator wallet top-up made through PayU
- * (pg/payu_payments.php). A wallet is credited only after the server confirmed the payment
- * with PayU; "Recheck" asks PayU again now (credits once if PayU says it was paid).
+ * Super admin › Online Payments: every operator wallet top-up made through Razorpay or PayU
+ * (pg/razorpay/razorpay_payments.php and pg/payu/payu_payments.php). Which gateway may top up which
+ * wallet is set per operator: partner page › Plans & Setup › Payment Gateways.
  */
 const GREEN = '#059669';
+const BLUE = '#0284c7';
+
 const STATUS = {
   success: { label: 'CREDITED', fg: '#047857', bg: '#dcfce7', icon: 'check-circle' },
   initiated: { label: 'NOT PAID YET', fg: '#475569', bg: '#f1f5f9', icon: 'clock' },
-  pending: { label: 'PENDING AT PAYU', fg: '#b45309', bg: '#fef3c7', icon: 'loader' },
+  pending: { label: 'PENDING', fg: '#b45309', bg: '#fef3c7', icon: 'loader' },
   failed: { label: 'FAILED', fg: '#b91c1c', bg: '#fee2e2', icon: 'x-circle' },
   expired: { label: 'ABANDONED', fg: '#64748b', bg: '#f1f5f9', icon: 'slash' },
   review: { label: 'CHECK BY HAND', fg: '#9d174d', bg: '#fce7f3', icon: 'alert-triangle' },
 };
+
 const FILTERS = [
   { id: 'all', label: 'All' },
   { id: 'success', label: 'Credited' },
@@ -27,12 +30,14 @@ const FILTERS = [
   { id: 'review', label: 'Check by hand' },
   { id: 'failed', label: 'Failed' },
 ];
+
 const fmt = (d) => (parseApiDate(d) ? formatApiDate(d) : '—');
 const money = (v) => `₹${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 export const PayuPaymentsScreen = ({ refreshSignal }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
+  const [gateway, setGateway] = useState('razorpay'); // 'razorpay' | 'payu'
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
@@ -41,11 +46,12 @@ export const PayuPaymentsScreen = ({ refreshSignal }) => {
   const [data, setData] = useState(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(null);
-  const [setup, setSetup] = useState(null); // { loading } | check result
 
   const load = useCallback(async () => {
     setLoading(true);
-    const res = await OneBssApi.payuPayments({ status: filter, q: query, page, limit: 50 });
+    const res = gateway === 'razorpay'
+      ? await OneBssApi.razorpayPayments({ status: filter, q: query, page, limit: 50 })
+      : await OneBssApi.payuPayments({ status: filter, q: query, page, limit: 50 });
     setLoading(false);
     if (!res.ok) {
       setError(res.data?.message || `Could not load (HTTP ${res.status}).`);
@@ -53,11 +59,12 @@ export const PayuPaymentsScreen = ({ refreshSignal }) => {
     }
     setError('');
     setData(res.data);
-  }, [filter, query, page]);
+  }, [gateway, filter, query, page]);
 
   useEffect(() => {
     load();
   }, [load, refreshSignal]);
+
   useEffect(() => {
     const t = setInterval(load, 60000);
     return () => clearInterval(t);
@@ -65,7 +72,9 @@ export const PayuPaymentsScreen = ({ refreshSignal }) => {
 
   const recheck = async (p) => {
     setBusy(p.txnid);
-    const res = await OneBssApi.payuRecheck(p.txnid);
+    const res = gateway === 'razorpay'
+      ? await OneBssApi.razorpayRecheck(p.txnid)
+      : await OneBssApi.payuRecheck(p.txnid);
     setBusy(null);
     if (!res.ok) {
       toast.error(res.data?.message || 'Recheck failed');
@@ -79,12 +88,6 @@ export const PayuPaymentsScreen = ({ refreshSignal }) => {
     load();
   };
 
-  const checkSetup = async () => {
-    setSetup({ loading: true });
-    const res = await OneBssApi.payuCheckSetup();
-    setSetup(res.ok ? res.data.check : { ok: false, warnings: [res.data?.message || 'Could not run the check'] });
-  };
-
   const sum = data?.summary || {};
   const tiles = [
     { label: 'Credited today', value: `${sum.paid_today_count ?? 0} · ${money(sum.paid_today_amount)}`, color: '#047857', icon: 'check-circle', f: 'success' },
@@ -93,44 +96,38 @@ export const PayuPaymentsScreen = ({ refreshSignal }) => {
     { label: 'Failed today', value: sum.failed_today ?? 0, color: '#b91c1c', icon: 'x-circle', f: 'failed' },
   ];
   const pages = data ? Math.max(1, Math.ceil(data.total / data.limit)) : 1;
+  const gwThemeColor = gateway === 'razorpay' ? BLUE : GREEN;
 
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.bgPrimary }}>
       <ScrollView contentContainerStyle={{ padding: isMobile ? 12 : 24, gap: 14 }}>
-        {data?.env === 'test' ? (
-          <View style={s.testBanner}>
-            <Feather name="alert-triangle" size={15} color="#92400e" />
-            <Text style={s.testText}>PayU is in TEST mode (PAYU_ENV = test). Switch to production before operators pay real money.</Text>
-          </View>
-        ) : null}
+        {/* Gateway Switcher */}
+        <View style={s.gwBar}>
+          <TouchableOpacity
+            style={[s.gwTab, gateway === 'razorpay' && s.gwTabRzpActive]}
+            onPress={() => { setGateway('razorpay'); setPage(1); setData(null); }}
+          >
+            <Feather name="shield" size={16} color={gateway === 'razorpay' ? BLUE : '#64748b'} />
+            <Text style={[s.gwTabText, gateway === 'razorpay' && { color: BLUE, fontWeight: '800' }]}>
+              Razorpay
+            </Text>
+            {gateway === 'razorpay' ? <View style={[s.gwDot, { backgroundColor: BLUE }]} /> : null}
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.gwTab, gateway === 'payu' && s.gwTabPayuActive]}
+            onPress={() => { setGateway('payu'); setPage(1); setData(null); }}
+          >
+            <Feather name="credit-card" size={16} color={gateway === 'payu' ? GREEN : '#64748b'} />
+            <Text style={[s.gwTabText, gateway === 'payu' && { color: GREEN, fontWeight: '800' }]}>
+              PayU
+            </Text>
+            {gateway === 'payu' ? <View style={[s.gwDot, { backgroundColor: GREEN }]} /> : null}
+          </TouchableOpacity>
+        </View>
+
+
         {error ? <Text style={s.error}>{error}</Text> : null}
 
-        {/* PayU setup check */}
-        <View style={[s.setup, setup && !setup.loading && (setup.ok ? s.setupOk : s.setupBad)]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-            <Feather name={setup && !setup.loading ? (setup.ok ? 'check-circle' : 'alert-octagon') : 'settings'} size={16} color={setup && !setup.loading ? (setup.ok ? '#047857' : '#b91c1c') : '#475569'} />
-            <Text style={[s.setupTitle, { flex: 1, minWidth: 200 }]}>
-              {!setup || setup.loading
-                ? 'PayU setup — checks your key and salt with PayU (no payment is made)'
-                : setup.ok
-                  ? `PayU ${setup.env === 'test' ? 'TEST' : 'LIVE'} key and salt are accepted by PayU`
-                  : 'PayU rejected the key / salt — payments will fail with a hash error'}
-            </Text>
-            <TouchableOpacity style={s.setupBtn} onPress={checkSetup} disabled={setup?.loading}>
-              {setup?.loading ? <ActivityIndicator size="small" color={GREEN} /> : <Feather name="shield" size={13} color={GREEN} />}
-              <Text style={s.setupBtnText}>Check PayU setup</Text>
-            </TouchableOpacity>
-          </View>
-          {setup && !setup.loading ? (
-            <View style={{ marginTop: 8, gap: 3 }}>
-              <Text style={s.setupLine}>
-                Mode: {setup.env === 'test' ? 'TEST' : 'LIVE'} · Key: {setup.key_preview || 'not set'} ({setup.key_length || 0} chars) · Salt: {setup.salt_set ? `${setup.salt_length} chars` : 'not set'}
-              </Text>
-              {setup.payu_answer ? <Text style={s.setupLine}>PayU answered: {setup.payu_answer}</Text> : null}
-              {(setup.warnings || []).map((w, i) => <Text key={i} style={[s.setupLine, { color: '#b91c1c' }]}>• {w}</Text>)}
-            </View>
-          ) : null}
-        </View>
 
         <View style={s.tiles}>
           {tiles.map((t) => (
@@ -166,13 +163,13 @@ export const PayuPaymentsScreen = ({ refreshSignal }) => {
               {search ? <TouchableOpacity onPress={() => { setSearch(''); setQuery(''); setPage(1); }}><Feather name="x" size={14} color="#94a3b8" /></TouchableOpacity> : null}
             </View>
             <TouchableOpacity onPress={load} style={s.refresh} accessibilityLabel="Refresh">
-              {loading ? <ActivityIndicator size="small" color={GREEN} /> : <Feather name="refresh-cw" size={14} color={GREEN} />}
+              {loading ? <ActivityIndicator size="small" color={gwThemeColor} /> : <Feather name="refresh-cw" size={14} color={gwThemeColor} />}
             </TouchableOpacity>
           </View>
         </View>
 
         {loading && !data ? (
-          <ActivityIndicator size="large" color={GREEN} style={{ marginVertical: 30 }} />
+          <ActivityIndicator size="large" color={gwThemeColor} style={{ marginVertical: 30 }} />
         ) : (
           <View style={s.card}>
             <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: '100%', flexGrow: 1 }}>
@@ -182,12 +179,15 @@ export const PayuPaymentsScreen = ({ refreshSignal }) => {
                   <Text style={[s.th, { width: 170 }]}>Operator</Text>
                   <Text style={[s.th, { width: 110, textAlign: 'right', paddingRight: 16 }]}>Amount</Text>
                   <Text style={[s.th, { width: 150 }]}>Status</Text>
-                  <Text style={[s.th, { width: 200 }]}>Txn / PayU</Text>
+                  <Text style={[s.th, { width: 200 }]}>Txn / {gateway === 'razorpay' ? 'Razorpay' : 'PayU'}</Text>
                   <Text style={[s.th, { flex: 1, minWidth: 200 }]}>Details</Text>
                   <Text style={[s.th, { width: 70, textAlign: 'right' }]}> </Text>
                 </View>
                 {(data?.payments || []).map((p) => {
                   const conf = STATUS[p.status] || STATUS.initiated;
+                  const gatewayRef = gateway === 'razorpay'
+                    ? (p.razorpay_payment_id ? `Rzp ${p.razorpay_payment_id}` : p.razorpay_order_id ? `Ord ${p.razorpay_order_id}` : null)
+                    : (p.mihpayid && p.mihpayid !== 'Not Found' ? `PayU ${p.mihpayid}` : null);
                   return (
                     <View key={p.txnid} style={s.tr}>
                       <View style={{ width: 170, paddingRight: 8 }}>
@@ -196,7 +196,7 @@ export const PayuPaymentsScreen = ({ refreshSignal }) => {
                       </View>
                       <View style={{ width: 170, paddingRight: 8 }}>
                         <Text style={[s.td, { fontWeight: '700' }]} numberOfLines={1}>{p.partner_name || 'Operator'}</Text>
-                        <Text style={s.sub}>#{p.partner_id}</Text>
+                        <Text style={s.sub}>#{p.partner_id}{p.wallet_type && p.wallet_type !== 'Single' ? ` · ${p.wallet_type} wallet` : ''}</Text>
                       </View>
                       <Text style={[s.td, { width: 110, textAlign: 'right', paddingRight: 16, fontWeight: '800' }]}>{money(p.amount)}</Text>
                       <View style={{ width: 150 }}>
@@ -208,19 +208,19 @@ export const PayuPaymentsScreen = ({ refreshSignal }) => {
                       <View style={{ width: 200, paddingRight: 8 }}>
                         <Text style={[s.td, { fontSize: 12 }]} selectable>{p.txnid}</Text>
                         <Text style={s.sub} selectable>
-                          {[p.mode, p.bank_ref_num ? `Ref ${p.bank_ref_num}` : null, p.mihpayid && p.mihpayid !== 'Not Found' ? `PayU ${p.mihpayid}` : null].filter(Boolean).join(' · ') || '—'}
+                          {[p.mode, p.bank_ref_num ? `Ref ${p.bank_ref_num}` : null, gatewayRef].filter(Boolean).join(' · ') || '—'}
                         </Text>
                       </View>
                       <View style={{ flex: 1, minWidth: 200, paddingRight: 8 }}>
                         {p.error_message ? <Text style={[s.td, { fontSize: 12, color: p.status === 'review' ? '#9d174d' : '#b91c1c' }]} numberOfLines={3}>{p.error_message}</Text> : null}
                         {p.status === 'success' ? <Text style={s.sub}>Ledger #{p.ledger_id ?? '—'} · balance after {money(p.balance_after)} · via {p.credited_via}</Text> : null}
                         {p.remark ? <Text style={s.sub} numberOfLines={1}>Remark: {p.remark}</Text> : null}
-                        {p.status !== 'success' && !p.error_message ? <Text style={s.sub}>{p.checks ? `Checked with PayU ${p.checks}× · last ${fmt(p.last_checked_at)}` : 'Not checked with PayU yet'}</Text> : null}
+                        {p.status !== 'success' && !p.error_message ? <Text style={s.sub}>{p.checks ? `Checked ${p.checks}× · last ${fmt(p.last_checked_at)}` : 'Not checked yet'}</Text> : null}
                       </View>
                       <View style={{ width: 70, alignItems: 'flex-end' }}>
                         {p.status !== 'success' ? (
-                          <TouchableOpacity style={s.iconBtn} onPress={() => recheck(p)} disabled={busy === p.txnid} title="Recheck with PayU" accessibilityLabel="Recheck with PayU">
-                            {busy === p.txnid ? <ActivityIndicator size="small" color={GREEN} /> : <Feather name="refresh-cw" size={14} color={GREEN} />}
+                          <TouchableOpacity style={[s.iconBtn, { borderColor: gateway === 'razorpay' ? '#bae6fd' : '#a7f3d0' }]} onPress={() => recheck(p)} disabled={busy === p.txnid} title={`Recheck with ${gateway === 'razorpay' ? 'Razorpay' : 'PayU'}`} accessibilityLabel="Recheck">
+                            {busy === p.txnid ? <ActivityIndicator size="small" color={gwThemeColor} /> : <Feather name="refresh-cw" size={14} color={gwThemeColor} />}
                           </TouchableOpacity>
                         ) : null}
                       </View>
@@ -239,25 +239,20 @@ export const PayuPaymentsScreen = ({ refreshSignal }) => {
             <TouchableOpacity disabled={page >= pages} onPress={() => setPage((x) => x + 1)} style={[s.pageBtn, page >= pages && { opacity: 0.4 }]}><Feather name="chevron-right" size={14} color="#334155" /></TouchableOpacity>
           </View>
         ) : null}
-        <Text style={s.foot}>
-          A wallet is credited only after the server confirms the payment with PayU, for exactly the amount ordered, and only once. Payments whose browser never came back are checked with PayU every 10 minutes. "Check by hand" means PayU reported a different amount or wallet — nothing was credited.
-        </Text>
       </ScrollView>
     </View>
   );
 };
 
 const s = StyleSheet.create({
-  testBanner: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 12, borderRadius: 10, backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a' },
-  testText: { flex: 1, fontSize: 13, fontWeight: '600', color: '#92400e' },
+  gwBar: { flexDirection: 'row', gap: 10, padding: 4, backgroundColor: '#ffffff', borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0' },
+  gwTab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 10, borderRadius: 8 },
+  gwTabRzpActive: { backgroundColor: '#f0f9ff', borderWidth: 1, borderColor: '#bae6fd' },
+  gwTabPayuActive: { backgroundColor: '#ecfdf5', borderWidth: 1, borderColor: '#a7f3d0' },
+  gwTabSetActive: { backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#cbd5e1' },
+  gwTabText: { fontSize: 13.5, fontWeight: '600', color: '#64748b' },
+  gwDot: { width: 6, height: 6, borderRadius: 3 },
   error: { fontSize: 13, color: '#b91c1c' },
-  setup: { padding: 12, borderRadius: 10, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e2e8f0' },
-  setupOk: { backgroundColor: '#ecfdf5', borderColor: '#a7f3d0' },
-  setupBad: { backgroundColor: '#fef2f2', borderColor: '#fecaca' },
-  setupTitle: { fontSize: 13, fontWeight: '700', color: '#0f172a' },
-  setupLine: { fontSize: 12, color: '#475569' },
-  setupBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, height: 34, borderRadius: 8, borderWidth: 1, borderColor: '#a7f3d0', backgroundColor: '#ffffff' },
-  setupBtnText: { fontSize: 12.5, fontWeight: '700', color: GREEN },
   tiles: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   tile: { flexGrow: 1, minWidth: 170, padding: 14, borderRadius: 12, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e2e8f0', gap: 6 },
   tileLabel: { fontSize: 11, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 0.4 },
@@ -278,8 +273,7 @@ const s = StyleSheet.create({
   sub: { fontSize: 11.5, color: '#64748b', marginTop: 1 },
   pill: { flexDirection: 'row', alignItems: 'center', gap: 4, alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999 },
   pillText: { fontSize: 10.5, fontWeight: '800' },
-  iconBtn: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, borderColor: '#a7f3d0', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff' },
+  iconBtn: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff' },
   pager: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 10 },
   pageBtn: { width: 30, height: 30, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff' },
-  foot: { fontSize: 11.5, color: '#94a3b8' },
 });

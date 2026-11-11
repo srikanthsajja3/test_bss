@@ -5,20 +5,40 @@ import { toast } from 'react-toastify';
 import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 import { redirectToPayU, rememberPendingPayU, forgetPendingPayU, waitForPayUResult, payuErrorText } from '../services/payuService';
+import {
+  openRazorpayCheckout,
+  rememberPendingRazorpay,
+  forgetPendingRazorpay,
+  waitForRazorpayResult,
+  razorpayErrorText,
+} from '../services/razorpayService';
 import { parseApiDate, formatApiDate } from '../components/CustomerAccountsOverview';
+import { can } from '../services/staffAccess';
 
 /**
- * Operator › Wallet: add money through PayU (top) and every wallet transaction (below).
- * Paying: the server creates the order + PayU hash (pg/payu_initiate.php), the operator pays on
- * PayU's page and comes back to #payu=<txnid>; the server confirms with PayU and credits once.
- * `resumeTxnid`: the payment we just came back from. On success `onPaid()` (App goes to the
- * dashboard; the header balance refreshes); otherwise the result is shown here.
+ * Operator › Wallet: add money (top) and every wallet transaction (below).
+ * Wallets: ONE wallet, or — when the super admin split them — separate Internet / IPTV / OTT
+ * wallets (each recharge is paid from its service's wallet). Which gateways (Razorpay / PayU / …)
+ * can top up which wallet is set by the super admin: pg/pg_settings.php tells this page.
+ * `resumeTxnid` / `resumeGateway`: the payment we just came back from.
  */
-const MIN_AMOUNT = 1000;
+const MIN_AMOUNT = 1;
 const MAX_AMOUNT = 200000;
 const PRESETS = [1000, 2000, 5000, 10000, 25000];
 const GREEN = '#059669';
+const BLUE = '#0284c7';
 const PAGE_SIZE = 20;
+const WALLET_TONE = {
+  Single: { fg: GREEN, bg: '#ecfdf5', icon: 'credit-card' },
+  Internet: { fg: '#2563eb', bg: '#eff6ff', icon: 'wifi' },
+  IPTV: { fg: '#7c3aed', bg: '#f5f3ff', icon: 'tv' },
+  OTT: { fg: '#0891b2', bg: '#ecfeff', icon: 'play-circle' },
+};
+const GW_META = {
+  razorpay: { label: 'Razorpay', sub: 'UPI, Cards, Netbanking', icon: 'shield', color: BLUE, bg: '#f0f9ff' },
+  payu: { label: 'PayU', sub: 'Hosted Checkout', icon: 'credit-card', color: GREEN, bg: '#ecfdf5' },
+  hdfc: { label: 'HDFC', sub: 'Coming soon', icon: 'briefcase', color: '#1e3a8a', bg: '#eef2ff' },
+};
 
 const money = (v) => `₹${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const whole = (v) => `₹${Number(v || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
@@ -36,20 +56,24 @@ const PAY_STATUS = {
 /** A short, readable title for a ledger row. */
 const describe = (t) => {
   const remark = String(t.Remark || '').trim();
+  if (/^Razorpay top-up/i.test(remark)) return { title: 'Added via Razorpay', detail: remark.replace(/^Razorpay top-up\s*/i, '') };
   if (/^PayU top-up/i.test(remark)) return { title: 'Added via PayU', detail: remark.replace(/^PayU top-up\s*/i, '') };
   if (t.recharge_id) return { title: remark || 'Recharge', detail: `Recharge #${t.recharge_id}` };
   if (t.txn_type === 'credit') return { title: remark || 'Money added', detail: t.created_by_username ? `By ${t.created_by_username}` : '' };
   return { title: remark || 'Deducted', detail: t.created_by_username ? `By ${t.created_by_username}` : '' };
 };
 
-export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResumeHandled, onPaid }) => {
+export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, resumeGateway = null, onResumeHandled, onPaid }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
   const wide = width >= 1100;
   const partnerId = user?.partner_id;
 
   // ---- balance + add money ----
-  const [balance, setBalance] = useState(null);
+  const [balance, setBalance] = useState(null); // total of all wallets
+  const [walletInfo, setWalletInfo] = useState(null); // { mode, wallets: [{type, label, balance, gateways}] }
+  const [target, setTarget] = useState(''); // wallet that gets the money (split mode)
+  const [gateway, setGateway] = useState('razorpay'); // 'razorpay' | 'payu'
   const [amount, setAmount] = useState('');
   const [remark, setRemark] = useState('');
   const [paying, setPaying] = useState(false);
@@ -59,9 +83,11 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
   const payingRef = useRef(false);
   payingRef.current = paying;
 
-  // ---- history ----
-  const [tab, setTab] = useState('ledger'); // ledger | online
-  const [type, setType] = useState('');
+  // ---- transactions list ----
+  const [tab, setTab] = useState('ledger'); // 'ledger' | 'online'
+  const [walletFilter, setWalletFilter] = useState(''); // '' = all wallets (split mode)
+  const [onlineGateway, setOnlineGateway] = useState('razorpay'); // 'razorpay' | 'payu'
+  const [type, setType] = useState(''); // '' | 'credit' | 'debit'
   const [search, setSearch] = useState('');
   const [query, setQuery] = useState('');
   const [page, setPage] = useState(1);
@@ -70,12 +96,42 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
   const [loading, setLoading] = useState(true);
   const [listError, setListError] = useState('');
 
+  const loadWallets = useCallback(async () => {
+    const res = await OneBssApi.getPgSettings();
+    if (!res.ok) return;
+    setWalletInfo({ mode: res.data.wallet_mode, wallets: res.data.wallets || [] });
+    if (res.data.wallet_balance !== undefined) setBalance(Number(res.data.wallet_balance));
+  }, []);
+
+  useEffect(() => {
+    loadWallets();
+  }, [loadWallets, refreshSignal]);
+
+  const split = walletInfo?.mode === 'split';
+  const wallets = walletInfo?.wallets || [];
+  const targetWallet = wallets.find((w) => w.type === target) || wallets[0] || null;
+  const allowedGateways = targetWallet?.gateways || [];
+
+  // keep the target wallet / gateway valid as the settings load
+  useEffect(() => {
+    if (!wallets.length) return;
+    if (!wallets.some((w) => w.type === target)) setTarget(wallets[0].type);
+  }, [walletInfo]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (allowedGateways.length && !allowedGateways.includes(gateway)) setGateway(allowedGateways[0]);
+  }, [targetWallet?.type, allowedGateways.join(',')]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const loadHistory = useCallback(async () => {
     if (!partnerId) return;
     setLoading(true);
-    const res = tab === 'ledger'
-      ? await OneBssApi.getWalletHistory(partnerId, { page, limit: PAGE_SIZE, type, q: query })
-      : await OneBssApi.payuPayments({ page, limit: PAGE_SIZE, q: query });
+    let res;
+    if (tab === 'ledger') {
+      res = await OneBssApi.getWalletHistory(partnerId, { page, limit: PAGE_SIZE, type, q: query, walletType: walletFilter });
+    } else if (onlineGateway === 'razorpay') {
+      res = await OneBssApi.razorpayPayments({ page, limit: PAGE_SIZE, q: query });
+    } else {
+      res = await OneBssApi.payuPayments({ page, limit: PAGE_SIZE, q: query });
+    }
     setLoading(false);
     if (!res.ok) {
       setListError(res.data?.message || 'Could not load transactions.');
@@ -90,7 +146,7 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
       setRows(res.data.payments || []);
       setTotal(Number(res.data.total || 0));
     }
-  }, [partnerId, tab, page, type, query]);
+  }, [partnerId, tab, onlineGateway, page, type, query, walletFilter]);
 
   useEffect(() => {
     loadHistory();
@@ -98,46 +154,52 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
 
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
-    const onChange = () => loadHistory();
+    const onChange = () => {
+      loadHistory();
+      loadWallets();
+    };
     window.addEventListener('onebss:wallet-changed', onChange);
     return () => window.removeEventListener('onebss:wallet-changed', onChange);
-  }, [loadHistory]);
+  }, [loadHistory, loadWallets]);
 
   // ---- result of a payment we came back from ----
-  const check = useCallback(async (txnid) => {
+  const check = useCallback(async (txnid, explicitGw = null, payData = null) => {
     setResult({ phase: 'checking', txnid });
-    const r = await waitForPayUResult(txnid);
-    forgetPendingPayU();
+    const isRzp = explicitGw === 'razorpay' || (!explicitGw && (resumeGateway === 'razorpay' || String(txnid).includes('R')));
+    const r = isRzp ? await waitForRazorpayResult(txnid, { payData }) : await waitForPayUResult(txnid);
+    if (isRzp) forgetPendingRazorpay();
+    else forgetPendingPayU();
     const status = r.payment?.status || 'unknown';
     if (status === 'success') {
       setResult(null);
-      toast.success(`${money(r.payment.amount)} added to your wallet`);
+      const wName = r.payment.wallet_type && r.payment.wallet_type !== 'Single' ? `${r.payment.wallet_type} wallet` : 'wallet';
+      toast.success(`${money(r.payment.amount)} added to your ${wName}`);
       if (onPaid) onPaid(r);
       return;
     }
     setResult({ status, payment: r.payment, message: r.message, txnid });
     loadHistory();
-  }, [onPaid, loadHistory]);
+  }, [resumeGateway, onPaid, loadHistory]);
 
   useEffect(() => {
     if (!resumeTxnid) return;
-    check(resumeTxnid);
+    check(resumeTxnid, resumeGateway);
     if (onResumeHandled) onResumeHandled();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resumeTxnid]);
 
-  // browser "Back" from PayU's page restores this page mid-redirect: check that payment instead
+  // browser "Back" restores this page mid-redirect: check that payment
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
     const onShow = (e) => {
       if (e.persisted && payingRef.current && lastTxn.current) {
         setPaying(false);
-        check(lastTxn.current);
+        check(lastTxn.current, gateway);
       }
     };
     window.addEventListener('pageshow', onShow);
     return () => window.removeEventListener('pageshow', onShow);
-  }, [check]);
+  }, [check, gateway]);
 
   const amt = Number(amount);
   const amountValid = amount !== '' && !Number.isNaN(amt) && amt >= MIN_AMOUNT && amt <= MAX_AMOUNT;
@@ -151,10 +213,48 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
 
   const pay = async () => {
     if (paying || !amountValid) return;
+    if (!allowedGateways.includes(gateway)) {
+      setFormError(allowedGateways.length ? 'Choose a payment gateway.' : 'Online top-up is not set up for this wallet. Contact your administrator.');
+      return;
+    }
+    const walletType = split && targetWallet ? targetWallet.type : '';
     setFormError('');
     setResult(null);
     setPaying(true);
-    const res = await OneBssApi.payuInitiate(Math.round(amt * 100) / 100, remark);
+    const amtToPay = Math.round(amt * 100) / 100;
+
+    if (gateway === 'razorpay') {
+      const res = await OneBssApi.razorpayInitiate(amtToPay, remark, walletType);
+      if (!res.ok || !res.data?.order_id) {
+        setPaying(false);
+        setFormError(razorpayErrorText(res, 'Could not start Razorpay payment. Please try again.'));
+        return;
+      }
+      rememberPendingRazorpay(res.data.txnid, res.data.amount);
+      lastTxn.current = res.data.txnid;
+      const opened = await openRazorpayCheckout(res.data, {
+        onSuccess: (resp) => {
+          setPaying(false);
+          check(res.data.txnid, 'razorpay', resp);
+        },
+        onDismiss: () => {
+          setPaying(false);
+          check(res.data.txnid, 'razorpay');
+        },
+        onFailure: (err) => {
+          setPaying(false);
+          setFormError(err?.description || 'Payment was cancelled or failed.');
+        },
+      });
+      if (!opened) {
+        setPaying(false);
+        setFormError('Could not open Razorpay. Check your internet connection and try again.');
+      }
+      return;
+    }
+
+    // PayU
+    const res = await OneBssApi.payuInitiate(amtToPay, remark, walletType);
     if (!res.ok || !res.data?.fields || !res.data?.payment_url) {
       setPaying(false);
       setFormError(payuErrorText(res, 'Could not start the payment. Please try again.'));
@@ -175,11 +275,13 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
   // ---- result banner ----
   const banner = (() => {
     if (!result) return null;
+    const isRzp = result.txnid && (String(result.txnid).includes('R') || resumeGateway === 'razorpay');
+    const gwName = isRzp ? 'Razorpay' : 'PayU';
     if (result.phase === 'checking') {
       return (
         <View style={[s.banner, { backgroundColor: '#f8fafc', borderColor: '#e2e8f0' }]}>
-          <ActivityIndicator size="small" color={GREEN} />
-          <Text style={[s.bannerTitle, { flex: 1 }]}>Checking your payment with PayU…</Text>
+          <ActivityIndicator size="small" color={isRzp ? BLUE : GREEN} />
+          <Text style={[s.bannerTitle, { flex: 1 }]}>Checking your payment with {gwName}…</Text>
         </View>
       );
     }
@@ -187,9 +289,9 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
     const waiting = st === 'pending' || st === 'unknown';
     const notPaid = st === 'initiated' || st === 'expired';
     const conf = waiting
-      ? { icon: 'clock', fg: '#92400e', bg: '#fffbeb', bd: '#fde68a', title: 'Waiting for PayU to confirm your payment', text: 'If money was taken from your account, it will be added to your wallet automatically within a few minutes.' }
+      ? { icon: 'clock', fg: '#92400e', bg: '#fffbeb', bd: '#fde68a', title: `Waiting for ${gwName} to confirm your payment`, text: 'If money was taken from your account, it will be added to your wallet automatically within a few minutes.' }
       : st === 'review'
-        ? { icon: 'alert-triangle', fg: '#9d174d', bg: '#fdf2f8', bd: '#fbcfe8', title: 'Payment under review', text: 'PayU reported a different amount than ordered, so the wallet was not credited. Our team will check it.' }
+        ? { icon: 'alert-triangle', fg: '#9d174d', bg: '#fdf2f8', bd: '#fbcfe8', title: 'Payment under review', text: `${gwName} reported a different amount than ordered, so the wallet was not credited. Our team will check it.` }
         : notPaid
           ? { icon: 'info', fg: '#334155', bg: '#f8fafc', bd: '#e2e8f0', title: 'Payment not completed', text: 'No payment was received for this top-up.' }
           : { icon: 'x-circle', fg: '#991b1b', bg: '#fef2f2', bd: '#fecaca', title: 'Payment failed', text: `${result.message && !/^Payment (failure|failed)/i.test(result.message) ? `${result.message}. ` : ''}If any money was deducted, your bank will return it.` };
@@ -234,7 +336,10 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
           <Feather name={credit ? 'arrow-down-left' : 'arrow-up-right'} size={15} color={credit ? GREEN : '#dc2626'} />
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={s.rowTitle} numberOfLines={1}>{d.title}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            {split && t.wallet_type && t.wallet_type !== 'Single' ? <WalletTag type={t.wallet_type} /> : null}
+            <Text style={[s.rowTitle, { flexShrink: 1 }]} numberOfLines={1}>{d.title}</Text>
+          </View>
           <Text style={s.rowSub} numberOfLines={1}>
             {[when(t.txn_timestamp), d.detail, `#${t.ledger_id}`].filter(Boolean).join(' · ')}
           </Text>
@@ -250,15 +355,19 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
 
   const paymentRow = (p) => {
     const c = PAY_STATUS[p.status] || PAY_STATUS.initiated;
+    const ref = p.razorpay_payment_id ? `Rzp ${p.razorpay_payment_id}` : p.mihpayid ? `PayU ${p.mihpayid}` : null;
     return (
       <View key={p.txnid} style={s.row}>
         <View style={[s.rowIcon, { backgroundColor: '#f1f5f9' }]}>
           <Feather name="credit-card" size={15} color="#475569" />
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={s.rowTitle} numberOfLines={1} selectable>{p.txnid}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            {split && p.wallet_type && p.wallet_type !== 'Single' ? <WalletTag type={p.wallet_type} /> : null}
+            <Text style={[s.rowTitle, { flexShrink: 1 }]} numberOfLines={1} selectable>{p.txnid}</Text>
+          </View>
           <Text style={s.rowSub} numberOfLines={1}>
-            {[when(p.created_at), p.mode, p.bank_ref_num ? `Ref ${p.bank_ref_num}` : null].filter(Boolean).join(' · ')}
+            {[when(p.created_at), p.mode, p.bank_ref_num ? `Ref ${p.bank_ref_num}` : null, ref].filter(Boolean).join(' · ')}
           </Text>
           {p.error_message && p.status !== 'success' ? <Text style={[s.rowSub, { color: '#b91c1c' }]} numberOfLines={2}>{p.error_message}</Text> : null}
         </View>
@@ -270,6 +379,9 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
     );
   };
 
+  const gwInfo = GW_META[gateway] || GW_META.payu;
+  const btnBg = gwInfo.color;
+
   return (
     <ScrollView style={{ flex: 1, backgroundColor: COLORS.bgPrimary }} contentContainerStyle={{ padding: isMobile ? 12 : 24, gap: 16 }} keyboardShouldPersistTaps="handled">
       {banner}
@@ -278,13 +390,89 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
       <View style={[s.card, wide && { flexDirection: 'row' }]}>
         <View style={[s.balancePane, wide ? { width: 300, borderRightWidth: 1, borderBottomWidth: 0 } : null]}>
           <View style={s.balanceIcon}><Ionicons name="wallet-outline" size={22} color={GREEN} /></View>
-          <Text style={s.balanceLabel}>Wallet balance</Text>
+          <Text style={s.balanceLabel}>{split ? 'Total in your wallets' : 'Wallet balance'}</Text>
           <Text style={s.balanceValue}>{balance === null ? '—' : money(balance)}</Text>
           <Text style={s.balanceSub}>{user?.partner_name || 'Operator'}{partnerId ? ` · #${partnerId}` : ''}</Text>
+          {split ? (
+            <View style={{ gap: 6, marginTop: 10 }}>
+              {wallets.map((w) => {
+                const tone = WALLET_TONE[w.type] || WALLET_TONE.Single;
+                return (
+                  <View key={w.type} style={[s.wMini, { backgroundColor: tone.bg }]}>
+                    <Feather name={tone.icon} size={13} color={tone.fg} />
+                    <Text style={[s.wMiniLabel, { color: tone.fg }]}>{w.type}</Text>
+                    <Text style={s.wMiniValue}>{money(w.balance)}</Text>
+                  </View>
+                );
+              })}
+              <Text style={[s.hint, { marginTop: 2 }]}>Each recharge is paid from the wallet of its service.</Text>
+            </View>
+          ) : null}
         </View>
 
+        {can(user, 'wallet.topup') ? (
         <View style={{ flex: 1, padding: isMobile ? 16 : 20, gap: 14 }}>
           <Text style={s.h2}>Add money</Text>
+
+          {/* Which wallet gets the money (separate wallets only) */}
+          {split ? (
+            <View style={{ gap: 6 }}>
+              <Text style={s.label}>Add to</Text>
+              <View style={s.gwSelectRow}>
+                {wallets.map((w) => {
+                  const on = targetWallet?.type === w.type;
+                  const tone = WALLET_TONE[w.type] || WALLET_TONE.Single;
+                  return (
+                    <TouchableOpacity
+                      key={w.type}
+                      style={[s.gwSelectBtn, on && { borderColor: tone.fg, backgroundColor: tone.bg }]}
+                      onPress={() => { setFormError(''); setTarget(w.type); }}
+                      disabled={paying}
+                    >
+                      <Feather name={tone.icon} size={16} color={on ? tone.fg : '#64748b'} />
+                      <View style={{ gap: 2, flexShrink: 1 }}>
+                        <Text style={[s.gwSelectTitle, on && { color: tone.fg, fontWeight: '800' }]}>{w.type} wallet</Text>
+                        <Text style={s.gwSelectSub}>{money(w.balance)}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            </View>
+          ) : null}
+
+          {/* Gateway Selector: only the gateways the super admin switched on for this wallet */}
+          <View style={{ gap: 6 }}>
+            <Text style={s.label}>Payment Gateway</Text>
+            {walletInfo && !allowedGateways.length ? (
+              <View style={s.error}>
+                <Feather name="info" size={14} color="#b91c1c" />
+                <Text style={s.errorText}>No online payment is enabled for {split && targetWallet ? `your ${targetWallet.type} wallet` : 'your wallet'}. Contact your admin to add money.</Text>
+              </View>
+            ) : (
+              <View style={s.gwSelectRow}>
+                {(allowedGateways.length ? allowedGateways : ['razorpay', 'payu']).map((id) => {
+                  const g = GW_META[id] || { label: id, sub: '', icon: 'credit-card', color: GREEN, bg: '#ecfdf5' };
+                  const on = gateway === id;
+                  return (
+                    <TouchableOpacity
+                      key={id}
+                      style={[s.gwSelectBtn, on && { borderColor: g.color, backgroundColor: g.bg }]}
+                      onPress={() => setGateway(id)}
+                      disabled={paying || !walletInfo}
+                    >
+                      <Feather name={g.icon} size={16} color={on ? g.color : '#64748b'} />
+                      <View style={{ gap: 2 }}>
+                        <Text style={[s.gwSelectTitle, on && { color: g.color, fontWeight: '800' }]}>{g.label}</Text>
+                        <Text style={s.gwSelectSub}>{g.sub}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+
           <View style={[{ gap: 14 }, !isMobile && { flexDirection: 'row', alignItems: 'flex-start' }]}>
             <View style={{ flex: 1.3, minWidth: 0 }}>
               <Text style={s.label}>Amount</Text>
@@ -318,8 +506,8 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
             {PRESETS.map((v) => {
               const on = Number(amount) === v;
               return (
-                <TouchableOpacity key={v} style={[s.preset, on && s.presetOn]} onPress={() => { setFormError(''); setAmount(String(v)); }} disabled={paying}>
-                  <Text style={[s.presetText, on && { color: GREEN }]}>{whole(v)}</Text>
+                <TouchableOpacity key={v} style={[s.preset, on && { borderColor: btnBg, backgroundColor: gwInfo.bg }]} onPress={() => { setFormError(''); setAmount(String(v)); }} disabled={paying}>
+                  <Text style={[s.presetText, on && { color: btnBg }]}>{whole(v)}</Text>
                 </TouchableOpacity>
               );
             })}
@@ -332,11 +520,18 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
             </View>
           ) : null}
 
-          <TouchableOpacity style={[s.btnPay, (!amountValid || paying) && { opacity: 0.5 }, isMobile && { alignSelf: 'stretch' }]} onPress={pay} disabled={!amountValid || paying}>
+          {walletInfo && !allowedGateways.length ? null : (
+          <TouchableOpacity style={[s.btnPay, { backgroundColor: btnBg }, (!amountValid || paying || !allowedGateways.includes(gateway)) && { opacity: 0.5 }, isMobile && { alignSelf: 'stretch' }]} onPress={pay} disabled={!amountValid || paying || !allowedGateways.includes(gateway)}>
             {paying ? <ActivityIndicator size="small" color="#ffffff" /> : <Feather name="lock" size={14} color="#ffffff" />}
-            <Text style={s.btnPayText}>{paying ? 'Opening PayU…' : `Pay ${amountValid ? money(amt) : ''}`}</Text>
+            <Text style={s.btnPayText}>
+              {paying
+                ? `Opening ${gwInfo.label}…`
+                : `Pay ${amountValid ? money(amt) : ''} with ${gwInfo.label}${split && targetWallet ? ` · ${targetWallet.type} wallet` : ''}`}
+            </Text>
           </TouchableOpacity>
+          )}
         </View>
+        ) : null}
       </View>
 
       {/* ---- transactions ---- */}
@@ -353,6 +548,15 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
             ))}
           </View>
           <View style={[{ flexDirection: 'row', gap: 8, alignItems: 'center' }, isMobile && { flexWrap: 'wrap' }]}>
+            {tab === 'ledger' && split ? (
+              <View style={s.seg}>
+                {[{ id: '', label: 'All wallets' }, ...wallets.map((w) => ({ id: w.type, label: w.type }))].map((f) => (
+                  <TouchableOpacity key={f.id || 'allw'} style={[s.segBtn, walletFilter === f.id && s.segOn]} onPress={() => { setWalletFilter(f.id); setPage(1); }}>
+                    <Text style={[s.segText, walletFilter === f.id && { color: (WALLET_TONE[f.id] || { fg: '#0f172a' }).fg }]}>{f.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null}
             {tab === 'ledger' ? (
               <View style={s.seg}>
                 {[
@@ -365,7 +569,18 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
                   </TouchableOpacity>
                 ))}
               </View>
-            ) : null}
+            ) : (
+              <View style={s.seg}>
+                {[
+                  { id: 'razorpay', label: 'Razorpay' },
+                  { id: 'payu', label: 'PayU' },
+                ].map((g) => (
+                  <TouchableOpacity key={g.id} style={[s.segBtn, onlineGateway === g.id && s.segOn]} onPress={() => { setOnlineGateway(g.id); setPage(1); }}>
+                    <Text style={[s.segText, onlineGateway === g.id && { color: g.id === 'razorpay' ? BLUE : GREEN }]}>{g.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
             <View style={[s.search, isMobile && { flex: 1, minWidth: 180 }]}>
               <Feather name="search" size={14} color="#94a3b8" />
               <TextInput
@@ -414,7 +629,21 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, onResume
   );
 };
 
+const WalletTag = ({ type }) => {
+  const tone = WALLET_TONE[type] || WALLET_TONE.Single;
+  return (
+    <View style={[s.wTag, { backgroundColor: tone.bg }]}>
+      <Text style={[s.wTagText, { color: tone.fg }]}>{type}</Text>
+    </View>
+  );
+};
+
 const s = StyleSheet.create({
+  wMini: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8 },
+  wMiniLabel: { fontSize: 12, fontWeight: '800', flex: 1 },
+  wMiniValue: { fontSize: 13, fontWeight: '800', color: '#0f172a' },
+  wTag: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 5 },
+  wTagText: { fontSize: 10, fontWeight: '800' },
   card: { backgroundColor: '#ffffff', borderRadius: 14, borderWidth: 1, borderColor: '#e2e8f0', overflow: 'hidden' },
   balancePane: { padding: 20, gap: 4, backgroundColor: '#f8fffb', borderColor: '#e2e8f0', borderBottomWidth: 1, justifyContent: 'center' },
   balanceIcon: { width: 42, height: 42, borderRadius: 12, backgroundColor: '#dcfce7', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
@@ -423,6 +652,12 @@ const s = StyleSheet.create({
   balanceSub: { fontSize: 12.5, color: '#64748b' },
   h2: { fontSize: 16, fontWeight: '800', color: '#0f172a' },
   label: { fontSize: 12, fontWeight: '700', color: '#334155', marginBottom: 6 },
+  gwSelectRow: { flexDirection: 'row', gap: 10, flexWrap: 'wrap' },
+  gwSelectBtn: { flex: 1, minWidth: 150, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 10, borderWidth: 1.5, borderColor: '#e2e8f0', backgroundColor: '#f8fafc' },
+  gwSelectRzpActive: { borderColor: BLUE, backgroundColor: '#f0f9ff' },
+  gwSelectPayuActive: { borderColor: GREEN, backgroundColor: '#ecfdf5' },
+  gwSelectTitle: { fontSize: 13.5, fontWeight: '700', color: '#0f172a' },
+  gwSelectSub: { fontSize: 11, color: '#64748b' },
   amountBox: { flexDirection: 'row', alignItems: 'center', height: 50, paddingHorizontal: 14, borderRadius: 10, borderWidth: 1.5, borderColor: '#cbd5e1', backgroundColor: '#ffffff' },
   rupee: { fontSize: 20, fontWeight: '700', color: '#0f172a', marginRight: 6 },
   amountInput: { flex: 1, minWidth: 0, fontSize: 20, fontWeight: '800', color: '#0f172a', outlineStyle: 'none' },
@@ -430,11 +665,10 @@ const s = StyleSheet.create({
   remark: { height: 50, paddingHorizontal: 12, borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0', fontSize: 14, color: '#0f172a', outlineStyle: 'none' },
   presets: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   preset: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 999, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#ffffff' },
-  presetOn: { borderColor: GREEN, backgroundColor: '#ecfdf5' },
   presetText: { fontSize: 13, fontWeight: '700', color: '#334155' },
   error: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, padding: 10, borderRadius: 10, backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fecaca' },
   errorText: { flex: 1, fontSize: 12.5, color: '#991b1b', lineHeight: 18 },
-  btnPay: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, alignSelf: 'flex-start', paddingHorizontal: 24, height: 46, minWidth: 200, borderRadius: 10, backgroundColor: GREEN },
+  btnPay: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, alignSelf: 'flex-start', paddingHorizontal: 24, height: 46, minWidth: 220, borderRadius: 10 },
   btnPayText: { fontSize: 14.5, fontWeight: '800', color: '#ffffff' },
   banner: { flexDirection: 'row', alignItems: 'flex-start', gap: 12, padding: 14, borderRadius: 12, borderWidth: 1 },
   bannerTitle: { fontSize: 14, fontWeight: '800', color: '#0f172a' },

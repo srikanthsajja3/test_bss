@@ -7,7 +7,9 @@ import { toast } from 'react-toastify';
 import { Dropdown } from './internet/shared';
 
 // Hierarchy: Super Admin > Super Distributor > Distributor > Sub Distributor > Operator.
-// The three middle levels are "admin" accounts; their level comes from who they are created under.
+// The three middle levels are "admin" accounts (admin_level 1-3). A partner can be created under the
+// super admin or any partner of a HIGHER level (levels may be skipped, e.g. a Distributor directly
+// under the super admin). parentLevel = the usual parent's level (used as the default).
 const LEVEL_TYPES = [
   { id: 'sd', label: 'Super Distributor', role: 'admin', parentLevel: 0, icon: 'award' },
   { id: 'd', label: 'Distributor', role: 'admin', parentLevel: 1, icon: 'shield' },
@@ -26,23 +28,22 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
   const [parentSel, setParentSel] = useState(parentId ? String(parentId) : '');
   const [adminList, setAdminList] = useState([]);
   const levelDef = LEVEL_TYPES.find((t) => t.id === levelType) || LEVEL_TYPES[3];
-  const parentOptions = levelDef.role === 'operator'
-    ? [{ value: '', label: 'Super Admin (directly)' }, ...adminList.map((a) => ({ value: String(a.partner_id), label: `${a.hierarchy_label || 'Admin'} — ${a.partner_name} (#${a.partner_id})` }))]
-    : levelDef.parentLevel === 0
-      ? [{ value: '', label: 'Super Admin' }]
-      : adminList
-          .filter((a) => Number(a.admin_level) === levelDef.parentLevel)
-          .map((a) => ({ value: String(a.partner_id), label: `${a.hierarchy_label || 'Admin'} — ${a.partner_name} (#${a.partner_id})` }));
+  const newLevel = levelDef.role === 'admin' ? levelDef.parentLevel + 1 : 4; // 1..3, operator = 4
+  const parentOptions = [
+    { value: '', label: 'Super Admin (directly)' },
+    ...adminList
+      .filter((a) => Number(a.admin_level || 0) > 0 && Number(a.admin_level) < newLevel && String(a.status || 'enabled') === 'enabled')
+      .map((a) => ({ value: String(a.partner_id), label: `${a.hierarchy_label || 'Admin'} — ${a.partner_name} (#${a.partner_id})` })),
+  ];
   const chooseLevel = (id) => {
     const def = LEVEL_TYPES.find((t) => t.id === id);
     setLevelType(id);
     setRole(def.role);
     // keep the parent only if it is valid for the new level
     setParentSel((cur) => {
-      if (def.role === 'operator') return cur;
-      if (def.parentLevel === 0) return '';
+      if (def.role === 'operator' || !cur) return cur;
       const a = adminList.find((x) => String(x.partner_id) === String(cur));
-      return a && Number(a.admin_level) === def.parentLevel ? cur : '';
+      return a && Number(a.admin_level) < def.parentLevel + 1 ? cur : '';
     });
   };
   
@@ -81,6 +82,10 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
   const [iptvKey, setIptvKey] = useState('');
   const [iptvOperatorId, setIptvOperatorId] = useState('');
   const [ottFranchiseId, setOttFranchiseId] = useState('');
+  // one wallet, or separate Internet / IPTV / OTT wallets (login_credentials.wallet_type)
+  const [walletMode, setWalletMode] = useState('single');
+  // RADIUS token must not belong to another operator: checked when the field is left
+  const [tokenCheck, setTokenCheck] = useState({ status: 'idle', message: '' }); // idle | checking | ok | taken | error
   const [iptvBranchId, setIptvBranchId] = useState('');
 
   const [roleDropdownOpen, setRoleDropdownOpen] = useState(false);
@@ -125,6 +130,8 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       setPassword('');
       setInternetBaseUrl('');
       setInternetToken('');
+      setTokenCheck({ status: 'idle', message: '' });
+      setWalletMode('single');
       setInternetPartnerId('');
       setInternalBranchId('');
       setPartnerList([]);
@@ -215,7 +222,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
             }
             if (isCancelled) return;
             setBranchList(bList);
-            setInternalBranchId(bList.length > 0 ? bList[0].id : '');
+            setInternalBranchId(bList.map((b) => b.id).join(','));
           } catch (e) {
             if (isCancelled) return;
             toast.error(`Branch API Error: ${e.message || 'Failed to fetch branches'}`);
@@ -281,7 +288,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
           name: b.name || b.branch_name || `Branch #${b.id || b.branch_id}`,
         }));
         setBranchList(liveList);
-        if (liveList[0]) setInternalBranchId(liveList[0].id);
+        if (liveList[0]) setInternalBranchId(liveList.map((b) => b.id).join(','));
       } else {
         toast.warn(`No branches available for partner #${partnerIdVal}`);
         setBranchList([]);
@@ -297,9 +304,33 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
   };
 
   // Handle manual selection from auto-fetched Branch dropdown
+  // Several branches can be ticked (stored comma-separated; the first is the default)
+  const pickedBranchIds = String(internetBranchId || '').split(/[\s,;]+/).filter(Boolean);
   const handleSelectBranch = (branchIdVal) => {
-    setInternalBranchId(branchIdVal);
-    setBranchDropdownOpen(false);
+    const id = String(branchIdVal);
+    const next = pickedBranchIds.includes(id) ? pickedBranchIds.filter((x) => x !== id) : [...pickedBranchIds, id];
+    setInternalBranchId(next.join(','));
+  };
+
+  // -> true when the token is free (or empty), false when another operator has it
+  const checkTokenFree = async (tokenRaw) => {
+    const token = String(tokenRaw || '').trim();
+    if (!token) {
+      setTokenCheck({ status: 'idle', message: '' });
+      return true;
+    }
+    setTokenCheck({ status: 'checking', message: '' });
+    const res = await OneBssApi.checkInternetToken(token);
+    if (!res.ok) {
+      setTokenCheck({ status: 'error', message: res.data?.message || 'Could not check the token' });
+      return true; // the server checks again when saving
+    }
+    if (res.data.available === false) {
+      setTokenCheck({ status: 'taken', message: res.data.message || 'Already assigned to another operator' });
+      return false;
+    }
+    setTokenCheck({ status: 'ok', message: '' });
+    return true;
   };
 
   const handleSubmit = async () => {
@@ -320,7 +351,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       return;
     }
     if (!region.trim()) {
-      toast.error('Please enter City / Region');
+      toast.error('Please enter the Address');
       return;
     }
     if (!username.trim()) {
@@ -331,17 +362,18 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       toast.error('Password must be at least 8 characters');
       return;
     }
-    if (canCreateAdmin && levelDef.role === 'admin' && levelDef.parentLevel > 0 && !parentSel) {
-      toast.error(`Choose the ${LEVEL_TYPES.find((t) => t.parentLevel === levelDef.parentLevel - 1 && t.role === 'admin')?.label || 'admin'} this ${levelDef.label} belongs to`);
-      return;
-    }
     if (isOperatorRole) {
       if (!internetBaseUrl.trim() || !internetToken.trim()) {
         toast.error('Please enter the RADIUS URL and API token');
         return;
       }
-      if (!internetPartnerId.trim() || !internetBranchId.trim()) {
-        toast.error('Please select the RADIUS partner and branch');
+      if (!internetPartnerId.trim() || !pickedBranchIds.length) {
+        toast.error('Please select the RADIUS partner and at least one branch');
+        return;
+      }
+      const free = tokenCheck.status === 'ok' ? true : tokenCheck.status === 'taken' ? false : await checkTokenFree(internetToken);
+      if (!free) {
+        toast.error('This RADIUS token is already assigned to another operator. Use the operator\'s own token.');
         return;
       }
     }
@@ -362,6 +394,8 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
         role: role || 'operator',
       },
       ...(canCreateAdmin && parentSel ? { parent_id: Number(parentSel) } : {}),
+      ...(canCreateAdmin && levelDef.role === 'admin' ? { admin_level: levelDef.parentLevel + 1 } : {}),
+      ...(walletMode === 'split' ? { wallet_mode: 'split' } : {}),
       // Gateways belong to operators only; IPTV is optional (sent only when a key is given)
       ...(isOperatorRole
         ? {
@@ -369,7 +403,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
               internet_base_url: internetBaseUrl.trim(),
               internet_token: internetToken.trim(),
               internet_partner_id: internetPartnerId.trim(),
-              internet_branch_id: internetBranchId.trim(),
+              internet_branch_id: pickedBranchIds.join(','),
             },
             ...(iptvKey.trim()
               ? { iptv_mapping: { iptv_base_url: iptvBaseUrl.trim(), iptv_key: iptvKey.trim(), iptv_operator_id: Number(iptvOperatorId) || 0 } }
@@ -414,7 +448,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
   };
 
   const selectedPartnerObj = partnerList.find((p) => String(p.id) === String(internetPartnerId));
-  const selectedBranchObj = branchList.find((b) => String(b.id) === String(internetBranchId));
+  const selectedBranchObjs = branchList.filter((b) => pickedBranchIds.includes(String(b.id)));
 
   return (
     <View style={styles.fullScreenContainer}>
@@ -457,22 +491,16 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
               })}
             </View>
             <View style={[styles.inputGroup, { marginTop: 12 }]}>
-              <Text style={styles.label}>{levelDef.role === 'operator' ? 'UNDER' : levelDef.parentLevel === 0 ? 'UNDER' : `UNDER WHICH ${LEVEL_TYPES.find((t) => t.parentLevel === levelDef.parentLevel - 1 && t.role === 'admin')?.label.toUpperCase() || 'ADMIN'} *`}</Text>
-              {parentOptions.length ? (
-                <Dropdown
-                  value={parentSel}
-                  options={parentOptions}
-                  onChange={(v) => setParentSel(String(v))}
-                  disabled={levelDef.role === 'admin' && levelDef.parentLevel === 0}
-                  placeholder="Select…"
-                />
-              ) : (
-                <Text style={{ fontSize: 12.5, color: '#b45309' }}>
-                  No {LEVEL_TYPES.find((t) => t.parentLevel === levelDef.parentLevel - 1 && t.role === 'admin')?.label || 'admin'} exists yet — create one first.
-                </Text>
-              )}
+              <Text style={styles.label}>UNDER</Text>
+              <Dropdown
+                value={parentSel}
+                options={parentOptions}
+                onChange={(v) => setParentSel(String(v))}
+                disabled={levelDef.role === 'admin' && levelDef.parentLevel === 0}
+                placeholder="Select…"
+              />
               <Text style={[styles.manualModeHelpText, { marginTop: 6 }]}>
-                Super Distributor › Distributor › Sub Distributor › Operator. Admin levels can only view their data; the super admin sets their margins on each operator's plans.
+                Super Distributor › Distributor › Sub Distributor › Operator. A partner can go under the super admin or any higher level. Admin levels can only view their data; the super admin sets their margins on each operator's plans.
               </Text>
             </View>
           </View>
@@ -532,12 +560,14 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
             </View>
 
             <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.label}>CITY / REGION *</Text>
+              <Text style={styles.label}>ADDRESS *</Text>
               <TextInput
-                style={styles.input}
-                placeholder="Enter operational city or region"
+                style={[styles.input, { minHeight: 64, textAlignVertical: 'top', paddingTop: 10 }]}
+                placeholder="Door no, street, area, city, PIN"
                 value={region}
                 onChangeText={setRegion}
+                multiline
+                numberOfLines={3}
                 placeholderTextColor={COLORS.textDim}
               />
             </View>
@@ -574,6 +604,30 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
           </View>
         </View>
 
+        {/* Wallets: one, or separate per service */}
+        <View style={styles.sectionCard}>
+          <Text style={styles.sectionCardTitle}>WALLETS</Text>
+          <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap', marginTop: 10 }}>
+            {[
+              { id: 'single', title: 'One wallet', sub: 'Internet, IPTV and OTT recharges are paid from one wallet' },
+              { id: 'split', title: 'Separate wallets', sub: 'An Internet, an IPTV and an OTT wallet; each recharge uses its own' },
+            ].map((o) => {
+              const on = walletMode === o.id;
+              return (
+                <TouchableOpacity
+                  key={o.id}
+                  onPress={() => setWalletMode(o.id)}
+                  style={{ flex: 1, minWidth: 200, padding: 12, borderRadius: 10, borderWidth: 1.5, borderColor: on ? COLORS.primary : COLORS.borderLight, backgroundColor: on ? 'rgba(16,185,129,0.06)' : '#ffffff' }}
+                >
+                  <Text style={{ fontSize: 13.5, fontWeight: '800', color: on ? COLORS.primary : COLORS.textMain }}>{on ? '● ' : '○ '}{o.title}</Text>
+                  <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 3 }}>{o.sub}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+          <Text style={[styles.manualModeHelpText, { marginTop: 8 }]}>You can change this later from the partner's wallet page (the money moves along).</Text>
+        </View>
+
         {/* Section 3: RADIUS Internet Mapping (operators only) */}
         {isOperatorRole ? (
         <View style={styles.sectionCard}>
@@ -608,9 +662,20 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
                 style={styles.input}
                 placeholder="Enter RADIUS Gateway Token"
                 value={internetToken}
-                onChangeText={setInternetToken}
+                onChangeText={(v) => {
+                  setInternetToken(v);
+                  if (tokenCheck.status !== 'idle') setTokenCheck({ status: 'idle', message: '' });
+                }}
+                onBlur={() => checkTokenFree(internetToken)}
                 placeholderTextColor={COLORS.textDim}
               />
+              {tokenCheck.status === 'checking' ? (
+                <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 4 }}>Checking the token…</Text>
+              ) : tokenCheck.status === 'taken' ? (
+                <Text style={{ fontSize: 12, color: '#dc2626', fontWeight: '700', marginTop: 4 }}>✕ {tokenCheck.message}. Each operator needs its own token.</Text>
+              ) : tokenCheck.status === 'ok' ? (
+                <Text style={{ fontSize: 12, color: '#059669', fontWeight: '700', marginTop: 4 }}>✓ Token not used by any other operator</Text>
+              ) : null}
             </View>
           </View>
 
@@ -662,10 +727,10 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
                 </View>
 
                 <View style={[styles.inputGroup, { flex: 1 }]}>
-                  <Text style={styles.label}>RADIUS BRANCH ID *</Text>
+                  <Text style={styles.label}>RADIUS BRANCH ID(S) *</Text>
                   <TextInput
                     style={styles.input}
-                    placeholder="e.g. 328"
+                    placeholder="e.g. 328 or 328,329"
                     value={internetBranchId}
                     onChangeText={setInternalBranchId}
                     placeholderTextColor={COLORS.textDim}
@@ -736,7 +801,7 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
               <View style={[styles.inputGroup, { marginTop: 14 }]}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 }}>
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                    <Text style={styles.label}>SELECT RADIUS BRANCH *</Text>
+                    <Text style={styles.label}>SELECT RADIUS BRANCHES *</Text>
                     {branchList.length > 0 ? (
                       <View style={[styles.seedIndicatorBadge, { backgroundColor: 'rgba(139, 92, 246, 0.12)' }]}>
                         <Text style={[styles.seedIndicatorText, { color: '#8b5cf6' }]}>{branchList.length} Available</Text>
@@ -753,8 +818,10 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
                     <Feather name="git-branch" size={16} color="#8b5cf6" />
                     <Text style={styles.dropdownSelectValueText}>
-                      {selectedBranchObj
-                        ? selectedBranchObj.name
+                      {selectedBranchObjs.length
+                        ? (selectedBranchObjs.length === branchList.length && branchList.length > 1
+                            ? `All ${branchList.length} branches`
+                            : selectedBranchObjs.map((b) => b.name).join(', '))
                         : (fetchingBranches
                             ? 'Fetching branches from gateway...'
                             : (branchList.length > 0
@@ -769,15 +836,26 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
 
                 {branchDropdownOpen && branchList.length > 0 ? (
                   <View style={styles.dropdownMenuBox}>
+                    {branchList.length > 1 ? (
+                      <TouchableOpacity
+                        style={styles.dropdownMenuItem}
+                        onPress={() => setInternalBranchId(selectedBranchObjs.length === branchList.length ? '' : branchList.map((b) => b.id).join(','))}
+                      >
+                        <Feather name={selectedBranchObjs.length === branchList.length ? 'check-square' : 'square'} size={16} color="#8b5cf6" />
+                        <Text style={[styles.dropdownMenuItemText, { fontWeight: '700', color: '#8b5cf6' }]}>
+                          {selectedBranchObjs.length === branchList.length ? 'Clear all' : 'Select all branches'}
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
                     {branchList.map((b) => {
-                      const isSelected = String(internetBranchId) === String(b.id);
+                      const isSelected = pickedBranchIds.includes(String(b.id));
                       return (
                         <TouchableOpacity
                           key={b.id}
                           style={[styles.dropdownMenuItem, isSelected && styles.dropdownMenuItemActivePurple]}
                           onPress={() => handleSelectBranch(b.id)}
                         >
-                          <Feather name={isSelected ? "check-circle" : "circle"} size={16} color={isSelected ? "#8b5cf6" : COLORS.textMuted} />
+                          <Feather name={isSelected ? "check-square" : "square"} size={16} color={isSelected ? "#8b5cf6" : COLORS.textMuted} />
                           <Text style={[styles.dropdownMenuItemText, isSelected && styles.dropdownMenuItemTextActivePurple]}>
                             {b.name}
                           </Text>

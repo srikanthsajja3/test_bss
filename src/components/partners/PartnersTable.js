@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../../constants/theme';
@@ -34,9 +34,63 @@ const n = (v) => Number(v ?? 0);
  *
  * Props: list, loading, isMobile, emptyText,
  *        onOpen(p), onWallet(p), onToggleStatus(p) | null (hidden when null),
- *        onImpersonate(p) | null, impersonatingId, onResetPassword(p) | null
+ *        onImpersonate(p) | null, impersonatingId, onResetPassword(p) | null,
+ *        fetchChildren(adminId) -> Promise<{ok, data: []}> | null
+ *
+ * With fetchChildren, every admin row with partners below it gets a +/− button that opens
+ * the partners it created right under the row (any depth). onOpen then gets a second
+ * argument: the expanded admins above the clicked row, top first (for the Back trail).
  */
-export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWallet, onToggleStatus, onImpersonate, impersonatingId, onResetPassword }) => {
+const TREE_TONES = ['#6366f1', '#14b8a6', '#f59e0b', '#ec4899'];
+
+export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWallet, onToggleStatus, onImpersonate, impersonatingId, onResetPassword, fetchChildren }) => {
+  const [open, setOpen] = useState({}); // partner_id -> true
+  const [kids, setKids] = useState({}); // partner_id -> { loading, list, error }
+
+  const hasKids = (p) => !!fetchChildren && String(p.account_role || '').toLowerCase() === 'admin'
+    && (n(p.subtree_operators) + n(p.subtree_admins)) > 0;
+
+  const toggle = async (p) => {
+    const id = String(p.partner_id);
+    if (open[id]) { setOpen((o) => ({ ...o, [id]: false })); return; }
+    setOpen((o) => ({ ...o, [id]: true }));
+    if (kids[id]?.list) return;
+    setKids((k) => ({ ...k, [id]: { loading: true } }));
+    const res = await fetchChildren(p.partner_id);
+    setKids((k) => ({ ...k, [id]: res.ok ? { list: res.data || [] } : { list: [], error: res.data?.message || 'Could not load' } }));
+  };
+
+  // rows in display order: [{ p, depth, ancestors }] plus loading/empty markers
+  const flatten = (rows, depth, ancestors, out) => {
+    rows.forEach((p) => {
+      out.push({ p, depth, ancestors });
+      const id = String(p.partner_id);
+      if (open[id]) {
+        const k = kids[id];
+        if (!k || k.loading) out.push({ marker: 'loading', depth: depth + 1, key: `l${id}` });
+        else if (k.error || !k.list.length) out.push({ marker: k.error || 'No partners under it', depth: depth + 1, key: `e${id}` });
+        else flatten(k.list, depth + 1, [...ancestors, p], out);
+      }
+    });
+    return out;
+  };
+
+  const Expander = ({ p }) => {
+    if (!fetchChildren) return null;
+    if (!hasKids(p)) return <View style={styles.expSpacer} />;
+    const on = !!open[String(p.partner_id)];
+    return (
+      <TouchableOpacity style={[styles.exp, on && styles.expOn]} onPress={() => toggle(p)} title={on ? 'Hide partners below' : 'Show partners below'}>
+        <Feather name={on ? 'minus' : 'plus'} size={13} color={on ? '#fff' : '#334155'} />
+      </TouchableOpacity>
+    );
+  };
+  const treeStyle = (depth) => (depth > 0 ? {
+    borderLeftWidth: 3,
+    borderLeftColor: TREE_TONES[(depth - 1) % TREE_TONES.length],
+    backgroundColor: depth % 2 ? '#f5f7ff' : '#f0fdfa',
+  } : null);
+
   if (loading) {
     return <ActivityIndicator size="large" color={COLORS.primary} style={{ marginVertical: 40 }} />;
   }
@@ -72,9 +126,15 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
   if (isMobile) {
     return (
       <View style={{ padding: 12, gap: 12 }}>
-        {list.map((p) => (
-          <View key={p.partner_id} style={styles.mCard}>
-            <TouchableOpacity style={styles.mHead} onPress={() => onOpen(p)}>
+        {flatten(list, 0, [], []).map((row) => row.marker ? (
+          <View key={row.key} style={[styles.markerRow, { marginLeft: row.depth * 14 }]}>
+            {row.marker === 'loading' ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Text style={styles.sub}>{row.marker}</Text>}
+          </View>
+        ) : (() => { const { p, depth, ancestors } = row; return (
+          <View key={p.partner_id} style={[styles.mCard, depth > 0 && { marginLeft: depth * 14 }, treeStyle(depth)]}>
+            <View style={styles.mHead}>
+            <Expander p={p} />
+            <TouchableOpacity style={[styles.mHead, { flex: 1 }]} onPress={() => onOpen(p, ancestors)}>
               <View style={styles.idBadge}><Text style={styles.idText}>#{p.partner_id}</Text></View>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={styles.name} numberOfLines={1}>{p.partner_name}</Text>
@@ -82,6 +142,7 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
               </View>
               <LevelBadge partner={p} small />
             </TouchableOpacity>
+            </View>
             <View style={styles.mRow}>
               <View style={styles.mStat}><Text style={styles.mStatNum}>{n(p.active_internet_accounts)}</Text><Text style={styles.mStatLbl}>Internet active</Text></View>
               <View style={styles.mStat}><Text style={styles.mStatNum}>{n(p.active_iptv_accounts)}</Text><Text style={styles.mStatLbl}>IPTV active</Text></View>
@@ -94,7 +155,7 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
               <StatusTag p={p} />
             </View>
             <View style={[styles.mRow, { gap: 6 }]}>
-              <TouchableOpacity style={[styles.btn, { flex: 1 }]} onPress={() => onOpen(p)}>
+              <TouchableOpacity style={[styles.btn, { flex: 1 }]} onPress={() => onOpen(p, ancestors)}>
                 <Feather name="eye" size={12} color="#2563eb" />
                 <Text style={[styles.btnText, { color: '#2563eb' }]}>View</Text>
               </TouchableOpacity>
@@ -112,7 +173,7 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
               ) : null}
             </View>
           </View>
-        ))}
+        ); })())}
       </View>
     );
   }
@@ -121,7 +182,7 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
     <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: 1020, width: '100%' }}>
       <View style={{ width: '100%' }}>
         <View style={styles.thRow}>
-          <Text style={[styles.th, { flex: 2.0, minWidth: 170 }]}>Partner</Text>
+          <Text style={[styles.th, { flex: 2.0, minWidth: 170 }, fetchChildren && { paddingLeft: 30 }]}>Partner</Text>
           <Text style={[styles.th, { flex: 1.0, minWidth: 95 }]}>Contact</Text>
           <Text style={[styles.th, { flex: 1.2, minWidth: 125 }]}>Level</Text>
           <Text style={[styles.th, { flex: 0.8, minWidth: 80 }]}>Wallet</Text>
@@ -131,19 +192,30 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
           <Text style={[styles.th, { flex: 0.9, minWidth: 90 }]}>Status</Text>
           <Text style={[styles.th, { flex: 1.2, minWidth: 135 }]}>Actions</Text>
         </View>
-        {list.map((p) => {
+        {flatten(list, 0, [], []).map((row) => {
+          if (row.marker) {
+            return (
+              <View key={row.key} style={[styles.tr, styles.markerRow, treeStyle(row.depth), { paddingLeft: 16 + row.depth * 22 }]}>
+                {row.marker === 'loading' ? <ActivityIndicator size="small" color={COLORS.primary} /> : <Text style={styles.sub}>{row.marker}</Text>}
+              </View>
+            );
+          }
+          const { p, depth, ancestors } = row;
           const isAdmin = String(p.account_role || '').toLowerCase() === 'admin';
           return (
-            <View key={p.partner_id} style={styles.tr}>
-              <TouchableOpacity style={[styles.td, { flex: 2.0, minWidth: 170 }]} onPress={() => onOpen(p)}>
+            <View key={p.partner_id} style={[styles.tr, treeStyle(depth)]}>
+              <View style={[styles.td, { flex: 2.0, minWidth: 170, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: depth * 22 }]}>
+              <Expander p={p} />
+              <TouchableOpacity style={{ flex: 1, minWidth: 0 }} onPress={() => onOpen(p, ancestors)}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                   <View style={styles.idBadge}><Text style={styles.idText}>#{p.partner_id}</Text></View>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={styles.name} numberOfLines={1}>{p.partner_name}</Text>
-                    <Text style={styles.sub} numberOfLines={1}>{[p.company_name, p.partner_region].filter(Boolean).join(' · ')}</Text>
+                    <Text style={styles.sub} numberOfLines={1}>{p.company_name || ''}</Text>
                   </View>
                 </View>
               </TouchableOpacity>
+              </View>
               <View style={[styles.td, { flex: 1.0, minWidth: 95 }]}>
                 <Text style={styles.cell}>{p.partner_mobile || '—'}</Text>
                 {p.account_username ? <Text style={styles.sub}>{p.account_username}</Text> : null}
@@ -168,7 +240,7 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
               </View>
               <View style={[styles.td, { flex: 0.9, minWidth: 90 }]}><StatusTag p={p} /></View>
               <View style={[styles.td, { flex: 1.2, minWidth: 135, flexDirection: 'row', gap: 6, alignItems: 'center' }]}>
-                <TouchableOpacity style={styles.btn} onPress={() => onOpen(p)}>
+                <TouchableOpacity style={styles.btn} onPress={() => onOpen(p, ancestors)}>
                   <Feather name="eye" size={12} color="#2563eb" />
                   <Text style={[styles.btnText, { color: '#2563eb' }]}>View</Text>
                 </TouchableOpacity>
@@ -188,6 +260,10 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
 };
 
 const styles = StyleSheet.create({
+  exp: { width: 22, height: 22, borderRadius: 5, borderWidth: 1, borderColor: '#cbd5e1', backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
+  expOn: { backgroundColor: '#4f46e5', borderColor: '#4f46e5' },
+  expSpacer: { width: 22 },
+  markerRow: { paddingVertical: 10, alignItems: 'flex-start' },
   empty: { alignItems: 'center', gap: 8, paddingVertical: 32 },
   emptyText: { fontSize: 13, color: COLORS.textMuted, textAlign: 'center' },
   thRow: { flexDirection: 'row', backgroundColor: '#f8fafc', borderBottomWidth: 1, borderBottomColor: '#e2e8f0', paddingHorizontal: 16, paddingVertical: 12 },

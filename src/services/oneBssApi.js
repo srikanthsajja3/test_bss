@@ -11,7 +11,16 @@
 //   3. Only the logged-in user's own token is ever sent. The original token kept
 //      during impersonation is used ONLY to return to that account.
 
-const DEFAULT_BASE_URL = 'https://demo.onebss.in/b_bss' // 'https://crm.polfibernet.in/api';
+// const DEFAULT_BASE_URL = 'https://demo.onebss.in/b_bss'; // 'https://crm.polfibernet.in/api';
+const getDefaultBaseUrl = () => {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}/api`;
+  }
+
+  return '';
+};
+
+const DEFAULT_BASE_URL = getDefaultBaseUrl();
 
 // Set EXPO_PUBLIC_API_BASE_URL at build time to point at another backend
 // (Expo inlines process.env.EXPO_PUBLIC_* — keep this exact expression).
@@ -309,6 +318,33 @@ export const OneBssApi = {
   },
 
   // ------------------------------------------------------------------
+  // Staff & roles (office_staff + staff_roles; any partner level manages its own)
+  // ------------------------------------------------------------------
+  // Activity Log of the logged-in account (activity_log.php): filters { page, limit, from, to, status,
+  // q, user ('username' | 'staff:<id>'), account (partner_id), kind ('logins') }
+  getActivityLog: async (f = {}) => {
+    const params = Object.entries(f).filter(([, v]) => v !== '' && v !== null && v !== undefined).map(([k, v]) => `${k}=${q(v)}`);
+    return get(`/activity_log.php${params.length ? `?${params.join('&')}` : ''}`);
+  },
+  // tells the server the user logged out (for the Activity Log); never blocks the logout
+  logout: async () => post('/logout.php', {}),
+
+  // the logged-in staff member's current permissions ({ staff: null } for a partner login)
+  staffMe: async () => get('/staff_me.php'),
+  // { catalog: [modules], roles: [...], partner_role, my_permissions }
+  getStaffRoles: async () => get('/staff_roles.php'),
+  // role = { role_id?, role_name, description, permissions }
+  saveStaffRole: async (role) => (role.role_id ? put('/staff_roles.php', role) : post('/staff_roles.php', role)),
+  deleteStaffRole: async (roleId) => del(`/staff_roles.php?role_id=${q(roleId)}`),
+  // { staff: [...], roles: [{ role_id, role_name }] }
+  getStaff: async () => get('/staff.php'),
+  // staff = { id?, staff_name, staff_phno, role_id, username, password?, status }
+  saveStaff: async (staff) => (staff.id ? put('/staff.php', staff) : post('/staff.php', staff)),
+  deleteStaff: async (id) => del(`/staff.php?id=${q(id)}`),
+  checkStaffUsername: async (username, exceptId) =>
+    get(`/staff.php?check_username=${q(username)}${exceptId ? `&except_id=${q(exceptId)}` : ''}`),
+
+  // ------------------------------------------------------------------
   // Partners
   // ------------------------------------------------------------------
   // GET /partner.php?role=&status= — server scopes the list to what the caller may see.
@@ -493,6 +529,26 @@ export const OneBssApi = {
     return post('/scoreme_verify_otp.php', body);
   },
 
+  // ---- Aadhaar verification of ONE existing internet account (operator comes from the account) ----
+  accountAadhaarSendOtp: async (internetId, aadhaarNumber) => {
+    if (!/^\d{12}$/.test(String(aadhaarNumber || ''))) return clientError('Enter the 12-digit Aadhaar number.');
+    return post('/scoreme_send_otp.php', { aadhaar_number: String(aadhaarNumber), internet_id: toNum(internetId) });
+  },
+  accountAadhaarVerifyOtp: async (internetId, aadhaarNumber, otp) => {
+    if (!otp) return clientError('OTP is required.');
+    return post('/scoreme_verify_otp.php', { aadhaar_number: String(aadhaarNumber), otp: String(otp), internet_id: toNum(internetId) });
+  },
+  accountAadhaarDigilockerDownload: async (internetId, clientId) =>
+    post('/digilocker_download_aadhaar.php', { client_id: clientId, internet_id: toNum(internetId) }),
+  // fold a duplicate customer record (same person) into this one: accounts move, the duplicate is deleted
+  mergeCustomers: async (keepCustId, mergeCustId) => post('/merge_customers.php', { keep_cust_id: toNum(keepCustId), merge_cust_id: toNum(mergeCustId) }),
+
+  // name a set-top box ("Hall TV"); '' removes it — shown instead of "STB <id>"
+  setIptvDeviceName: async (iptvId, deviceName) => post('/iptv_device_name.php', { iptv_id: toNum(iptvId), device_name: String(deviceName || '') }),
+
+  // send the last verification to RADIUS again (flag / photo / XML that did not go through)
+  accountAadhaarPush: async (internetId) => post('/internet_kyc_push.php', { internet_id: toNum(internetId) }),
+
   // ------------------------------------------------------------------
   // Customers
   // ------------------------------------------------------------------
@@ -581,6 +637,10 @@ export const OneBssApi = {
     return get(`${endpoint}?${params.toString()}`);
   },
 
+  // Options for the list's filter-row dropdowns: { plans: [{value,label}], operators: [{value,label}] }
+  getListFacets: async (type = 'internet', partnerId) =>
+    get(`/customers_list.php?facets=1&type=${q(type)}${partnerId ? `&partner_id=${q(partnerId)}` : ''}`),
+
   getCustomersByDateSummary: async (partnerId) =>
     get(`/customers_by_date.php?summary=1${partnerId ? `&partner_id=${q(partnerId)}` : ''}`),
 
@@ -596,36 +656,56 @@ export const OneBssApi = {
   // ------------------------------------------------------------------
   // Wallet
   // ------------------------------------------------------------------
-  getWallet: async (partnerId, page = 1, limit = 20) => {
+  // Wallets: a partner has ONE wallet (wallet_mode 'single') or separate Internet / IPTV / OTT
+  // wallets ('split'). Every answer has wallet_balance (= total), wallet_mode and wallets: [{type, label, balance}].
+  // walletType: 'Internet' | 'IPTV' | 'OTT' | 'Single' | '' (= all wallets of the partner)
+  getWallet: async (partnerId, page = 1, limit = 20, walletType = '') => {
     const err = requireArg(partnerId, 'partner_id');
     if (err) return clientError(err);
-    return get(`/wallet.php?partner_id=${q(partnerId)}&page=${page}&limit=${limit}`);
+    return get(`/wallet.php?partner_id=${q(partnerId)}&page=${page}&limit=${limit}${walletType ? `&wallet_type=${q(walletType)}` : ''}`);
   },
-  /** Wallet ledger with filters: { page, limit, type: 'credit' | 'debit', q } */
-  getWalletHistory: async (partnerId, { page = 1, limit = 20, type = '', q: search = '' } = {}) => {
+  /** Wallet ledger with filters: { page, limit, type: 'credit' | 'debit', q, walletType } */
+  getWalletHistory: async (partnerId, { page = 1, limit = 20, type = '', q: search = '', walletType = '' } = {}) => {
     const err = requireArg(partnerId, 'partner_id');
     if (err) return clientError(err);
     const qs = new URLSearchParams({ partner_id: String(partnerId), page: String(page), limit: String(limit) });
     if (type) qs.set('type', type);
     if (search) qs.set('q', search);
+    if (walletType) qs.set('wallet_type', walletType);
     return get(`/wallet.php?${qs.toString()}`);
   },
 
-  topupWallet: async (partnerId, amount, remark = 'Wallet top-up') => {
+  // super admin: credit / debit one wallet (walletType needed when the partner has separate wallets)
+  topupWallet: async (partnerId, amount, remark = 'Wallet top-up', walletType = '') => {
     const amt = Number(amount);
     if (!(amt > 0)) return clientError('Enter an amount greater than 0.');
     const err = requireArg(partnerId, 'partner_id');
     if (err) return clientError(err);
-    return post('/wallet_credit_debit.php', { partner_id: toNum(partnerId), amount: amt, type: 'credit', remark: String(remark || 'Wallet top-up') });
+    return post('/wallet_credit_debit.php', { partner_id: toNum(partnerId), amount: amt, type: 'credit', remark: String(remark || 'Wallet top-up'), ...(walletType ? { wallet_type: walletType } : {}) });
   },
 
-  debitWallet: async (partnerId, amount, remark = 'Wallet debit') => {
+  debitWallet: async (partnerId, amount, remark = 'Wallet debit', walletType = '') => {
     const amt = Number(amount);
     if (!(amt > 0)) return clientError('Enter an amount greater than 0.');
     const err = requireArg(partnerId, 'partner_id');
     if (err) return clientError(err);
-    return post('/wallet_credit_debit.php', { partner_id: toNum(partnerId), amount: amt, type: 'debit', remark: String(remark || 'Wallet debit') });
+    return post('/wallet_credit_debit.php', { partner_id: toNum(partnerId), amount: amt, type: 'debit', remark: String(remark || 'Wallet debit'), ...(walletType ? { wallet_type: walletType } : {}) });
   },
+
+  // one wallet vs separate Internet / IPTV / OTT wallets (super admin switches; money moves along)
+  getWalletMode: async (partnerId) => get(`/wallet_mode.php?partner_id=${q(partnerId)}`),
+  setWalletMode: async (partnerId, mode, dryRun = false) =>
+    post('/wallet_mode.php', { partner_id: toNum(partnerId), mode, ...(dryRun ? { dry_run: true } : {}) }),
+
+  // Payment gateways per operator and per wallet (super admin › partner › Payment Gateways, like KYC).
+  // getPgSettings() = the logged-in operator's wallets + gateways; getPgSettings(partnerId) = super admin:
+  // that operator's switches. savePgSettings(partnerId, matrix): only the switches sent change.
+  getPgSettings: async (partnerId) => get(`/pg/pg_settings.php${partnerId ? `?partner_id=${q(partnerId)}` : ''}`),
+  savePgSettings: async (partnerId, matrix) => post('/pg/pg_settings.php', { partner_id: toNum(partnerId), matrix }),
+
+  // Add / Edit partner: is this RADIUS token free? -> { available, used_by, message }
+  checkInternetToken: async (token, partnerId = null) =>
+    post('/check_internet_token.php', { internet_token: String(token || '').trim(), ...(partnerId ? { partner_id: toNum(partnerId) } : {}) }),
 
   // ------------------------------------------------------------------
   // Recharge
@@ -696,6 +776,44 @@ export const OneBssApi = {
     return post(`/iptv_bulk_customer_sync.php?partner_id=${q(partnerId)}`);
   },
 
+  // IPTV sync for just these mobiles of an operator (max 50 per call) — used after a CSV import
+  syncIptvMobiles: async (partnerId, mobiles) => post(`/iptv_bulk_customer_sync.php?partner_id=${q(partnerId)}`, { mobiles }),
+
+  // Pioneer customer export (CSV rows) -> iptv_users + customers. partnerId 0 = operator by Branch column.
+  // Max 200 rows per call. -> { summary, results, mobiles_by_operator }
+  importIptvCustomers: async (partnerId, rows, dryRun = false) =>
+    post('/iptv_import.php', { partner_id: partnerId ? Number(partnerId) : 0, rows, dry_run: !!dryRun }),
+
+  // ------------------------------------------------------------------
+  // Hierarchy changes (super admin): move a partner / change a distributor's level
+  // ------------------------------------------------------------------
+  getPartnerMoveOptions: async (partnerId) => get(`/partner_move.php?partner_id=${q(partnerId)}`),
+  // newLevel (admins, optional): 1 Super Distributor, 2 Distributor, 3 Sub Distributor
+  movePartner: async (partnerId, newParentId, dryRun = false, newLevel = null) =>
+    post('/partner_move.php', { partner_id: Number(partnerId), new_parent_id: Number(newParentId), dry_run: !!dryRun, ...(newLevel ? { new_level: Number(newLevel) } : {}) }),
+
+  // Move internet customers (with their IPTV / OTT) to another operator on the same RADIUS
+  getCustomerMigration: async (fromId, toId) =>
+    get(`/customer_migrate.php?from=${q(fromId)}${toId ? `&to=${q(toId)}` : ''}`),
+  // Bulk Operations: operators that can take customers of several operators at once
+  getMigrationTargets: async (sourceIds = []) =>
+    get(`/customer_migrate.php?sources=${q(sourceIds.join(','))}`),
+  // Bulk Internet Recharge step 1: current plan + price of each account, nothing charged
+  previewBulkInternetRecharge: async (internetIds = []) =>
+    post('/internet_bulk_recharge_preview.php', { internet_ids: internetIds.map(toNum) }),
+  migrateCustomers: async (fromId, toId, internetIds, toBranchId = '') =>
+    post('/customer_migrate.php', { from: Number(fromId), to: Number(toId), internet_ids: internetIds, ...(toBranchId ? { to_branch_id: String(toBranchId) } : {}) }),
+
+  // Does the operator (or the operators of a customer) offer IPTV / OTT? -> { iptv, ott }
+  getOperatorServices: async ({ partnerId, custId }) =>
+    get(`/operator_services.php?${partnerId ? `partner_id=${q(partnerId)}` : `cust_id=${q(custId)}`}`),
+
+  // RADIUS branches of an operator (several allowed; the first is the default).
+  // Operators get only their own selected branches — for the Add Internet Customer branch picker.
+  getRadiusBranches: async (partnerId) => get(`/partner_radius_branches.php?partner_id=${q(partnerId)}`),
+  saveRadiusBranches: async (partnerId, branchIds) =>
+    post('/partner_radius_branches.php', { partner_id: Number(partnerId), branch_ids: branchIds.map(String) }),
+
   getIptvRechargePlans: async (iptvId, internetId = null) =>
     get(`/iptv_recharge_plans.php?iptv_id=${q(iptvId)}${internetId ? `&internet_id=${q(internetId)}` : ''}`),
 
@@ -717,10 +835,44 @@ export const OneBssApi = {
   changeInternetPassword: async (internetId, password) =>
     post('/internet_change_password.php', { internet_id: toNum(internetId), password }),
 
-  getInternetMacBindings: async (internetId) => get(`/internet_get_mac_bindings.php?internet_id=${q(internetId)}`),
+  // Networking (RADIUS network bindings: MAC, static IP, IP login/bind, NAS Port ID, IPv6 prefix)
+  getInternetNetworking: async (internetId) => get(`/internet_get_mac_bindings.php?internet_id=${q(internetId)}`),
 
-  removeInternetMacBinding: async (internetId, bindingId) =>
+  // binding: { type: 0-6, mac?, ip_address?, nas_port_id?, framed_ip_prefix?, delegated_ip_prefix? }
+  addInternetNetworking: async (internetId, binding = {}) =>
+    post('/internet_add_networking.php', { ...binding, internet_id: toNum(internetId), type: toNum(binding.type) }),
+
+  removeInternetNetworking: async (internetId, bindingId) =>
     post('/internet_remove_mac_binding.php', { internet_id: toNum(internetId), binding_id: toNum(bindingId) }),
+
+  // NAS -> IP pool -> free IP choices for Static IP / IP Login / IP Bind (customer's operator's pools)
+  getInternetIpOptions: async (internetId, nasId, ippoolId) => {
+    const params = [`internet_id=${q(internetId)}`];
+    if (nasId) params.push(`nas_id=${q(nasId)}`);
+    if (ippoolId) params.push(`ippool_id=${q(ippoolId)}`);
+    return get(`/internet_ip_options.php?${params.join('&')}`);
+  },
+
+  // ------------------------------------------------------------------
+  // Networking (Superadmin): NAS, IP pools, pool ↔ operator
+  // ------------------------------------------------------------------
+  getNasList: async () => get('/networking/nas.php'),
+  createNas: async (nas) => post('/networking/nas.php', nas),
+  updateNas: async (nas) => put('/networking/nas.php', { ...nas, nas_id: toNum(nas.nas_id) }),
+  deleteNas: async (nasId) => del('/networking/nas.php', { nas_id: toNum(nasId) }),
+  checkNasStatus: async (nasId) => get(`/networking/nas_status.php${nasId ? `?nas_id=${q(nasId)}` : ''}`),
+
+  getIpPools: async (nasId) => get(`/networking/ip_pools.php${nasId ? `?nas_id=${q(nasId)}` : ''}`),
+  getIpPoolDetail: async (ippoolId) => get(`/networking/ip_pools.php?ippool_id=${q(ippoolId)}`),
+  createIpPool: async (pool) => post('/networking/ip_pools.php', { ...pool, nas_id: toNum(pool.nas_id), partner_ids: (pool.partner_ids || []).map(toNum) }),
+  updateIpPool: async (pool) => put('/networking/ip_pools.php', { ...pool, ippool_id: toNum(pool.ippool_id), nas_id: toNum(pool.nas_id) }),
+  deleteIpPool: async (ippoolId) => del('/networking/ip_pools.php', { ippool_id: toNum(ippoolId) }),
+  addPoolOperator: async (ippoolId, partnerId) => post('/networking/pool_operators.php', { ippool_id: toNum(ippoolId), partner_id: toNum(partnerId) }),
+  removePoolOperator: async (ipopid) => del('/networking/pool_operators.php', { ipopid: toNum(ipopid) }),
+
+  // old names, kept so existing callers keep working
+  getInternetMacBindings: async (internetId) => OneBssApi.getInternetNetworking(internetId),
+  removeInternetMacBinding: async (internetId, bindingId) => OneBssApi.removeInternetNetworking(internetId, bindingId),
 
   // dates: 'YYYY-MM-DD'
   getInternetAuthLogs: async (internetId) => get(`/internet_auth_logs.php?internet_id=${q(internetId)}`),
@@ -795,9 +947,11 @@ export const OneBssApi = {
 
   
   // ------------------------------------------------------------------
-  // ONU Inventory (Superadmin)
+  // ONU Inventory — super admin: everything; admins: their tree; operators: their own devices.
+  // partnerId: 'all' | '0' (master stock) | a partner_id
   // ------------------------------------------------------------------
-  getInventoryStats: async () => get('/inventory/get_inventory_stats.php'),
+  getInventoryStats: async (partnerId) =>
+    get(`/inventory/get_inventory_stats.php${partnerId !== undefined && partnerId !== null && partnerId !== 'all' ? `?partner_id=${q(partnerId)}` : ''}`),
 
   // ------------------------------------------------------------------
   // IPTV auto-renewal monitor (Superadmin)
@@ -822,10 +976,11 @@ export const OneBssApi = {
   // PayU wallet top-up (pg/). The server makes the order and the hash; the
   // wallet is credited only after the server confirms the payment with PayU.
   // ------------------------------------------------------------------
-  payuInitiate: async (amount, remark = '') => {
+  // walletType: the wallet that gets the money ('Internet' | 'IPTV' | 'OTT'; '' = the only wallet)
+  payuInitiate: async (amount, remark = '', walletType = '') => {
     const amt = Number(amount);
     if (!(amt > 0)) return clientError('Enter an amount greater than 0.');
-    return post('/pg/payu_initiate.php', { amount: amt, remark: String(remark || '').trim() });
+    return post('/pg/payu_initiate.php', { amount: amt, remark: String(remark || '').trim(), ...(walletType ? { wallet_type: walletType } : {}) });
   },
   /** One payment; check=true asks PayU now if it isn't final yet (and credits once if paid). */
   payuPayment: async (txnid, check = true) =>
@@ -840,16 +995,60 @@ export const OneBssApi = {
     return get(`/pg/payu_payments.php${s ? `?${s}` : ''}`);
   },
   payuRecheck: async (txnid) => post('/pg/payu_payments.php', { action: 'recheck', txnid }),
-  /** Super admin: checks PAYU_ENV / PAYU_KEY / PAYU_SALT with PayU (no payment). */
-  payuCheckSetup: async () => get('/pg/payu_payments.php?check_setup=1'),
 
+  // ------------------------------------------------------------------
+  // Razorpay wallet top-up (pg/razorpay/). Same money rules as PayU: the server creates the
+  // order and credits only after Razorpay itself confirms the payment for that order.
+  // ------------------------------------------------------------------
+  razorpayInitiate: async (amount, remark = '', walletType = '') => {
+    const amt = Number(amount);
+    if (!(amt > 0)) return clientError('Enter an amount greater than 0.');
+    return post('/pg/razorpay/razorpay_initiate.php', { amount: amt, remark: String(remark || '').trim(), ...(walletType ? { wallet_type: walletType } : {}) });
+  },
+  /** One payment; check=true asks Razorpay now if it isn't final yet (and credits once if paid). */
+  razorpayPayment: async (txnid, check = true, payData = null) => {
+    let url = `/pg/razorpay/razorpay_payments.php?txnid=${q(txnid)}${check ? '&check=1' : ''}`;
+    if (payData?.razorpay_payment_id) url += `&payment_id=${q(payData.razorpay_payment_id)}`;
+    if (payData?.razorpay_signature) url += `&signature=${q(payData.razorpay_signature)}`;
+    return get(url);
+  },
+  razorpayPayments: async (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.status) qs.set('status', params.status);
+    if (params.q) qs.set('q', params.q);
+    if (params.page) qs.set('page', params.page);
+    if (params.limit) qs.set('limit', params.limit);
+    const s = qs.toString();
+    return get(`/pg/razorpay/razorpay_payments.php${s ? `?${s}` : ''}`);
+  },
+  razorpayRecheck: async (txnid) => post('/pg/razorpay/razorpay_payments.php', { action: 'recheck', txnid }),
   getInventoryVendorsAndModels: async () => get('/inventory/get_vendors_models.php'),
+
+  // Master stock (super admin): catalog products -> vendors -> models, the office staff who receive
+  // consignments, and inward consignments (each ONU belongs to one: onu.batch_id).
+  getInventoryMeta: async () => get('/inventory/get_inventory_meta.php'),
+  // { action: 'add_product' | 'add_vendor' | 'add_model' | 'add_staff', ...fields }
+  manageInventoryCatalog: async (payload) => post('/inventory/manage_catalog.php', payload),
+  getInwardShipments: async (params = {}) => {
+    const qs = new URLSearchParams();
+    ['product_id', 'vendor_id', 'model_id', 'search', 'limit'].forEach((k) => {
+      if (params[k]) qs.set(k, params[k]);
+    });
+    if (params.offset !== undefined) qs.set('offset', params.offset);
+    const s = qs.toString();
+    return get(`/inventory/inward_stock.php${s ? `?${s}` : ''}`);
+  },
+  createInwardShipment: async (payload) => post('/inventory/inward_stock.php', payload),
+  // { batch_id, devices: [{ serial_no, mac_address }] } -> { inserted: [...], errors: [...] }
+  bulkInwardOnus: async (payload) => post('/inventory/bulk_inward_onus.php', payload),
 
   getInventoryOnus: async (params = {}) => {
     const qs = new URLSearchParams();
     if (params.status && params.status !== 'all') qs.set('status', params.status);
+    if (params.partner_id !== undefined && params.partner_id !== null && params.partner_id !== 'all') qs.set('partner_id', params.partner_id);
     if (params.vendor_id) qs.set('vendor_id', params.vendor_id);
     if (params.model_id) qs.set('model_id', params.model_id);
+    if (params.batch_id) qs.set('batch_id', params.batch_id);
     if (params.type && params.type !== 'all') qs.set('type', params.type);
     if (params.search) qs.set('search', params.search);
     if (params.limit) qs.set('limit', params.limit);
@@ -857,6 +1056,17 @@ export const OneBssApi = {
     const queryStr = qs.toString();
     return get(`/inventory/get_onus.php${queryStr ? `?${queryStr}` : ''}`);
   },
+
+  // Partners ONUs can be assigned to (super admin: all; admin: itself + below; operator: none)
+  getInventoryAssignablePartners: async () => get('/inventory/get_assignable_partners.php'),
+
+  // Move ONUs to a partner; partnerId 0 / 'unassigned' = back to master stock
+  assignInventoryOnu: async (onuIds, partnerId, notes = '') =>
+    post('/inventory/assign_onu.php', {
+      onu_ids: Array.isArray(onuIds) ? onuIds : [onuIds],
+      partner_id: partnerId === 0 || partnerId === '0' || partnerId === 'unassigned' ? null : partnerId,
+      notes,
+    }),
 
   addInventoryOnu: async (payload) => post('/inventory/add_onu.php', payload),
 
@@ -867,5 +1077,16 @@ export const OneBssApi = {
   updateInventoryOnu: async (id, fields) => post(`/inventory/update_onu.php?id=${id}`, fields),
 
   deleteInventoryOnu: async (id) => post(`/inventory/delete_onu.php?id=${id}`, {}),
+
+  // ------------------------------------------------------------------
+  // DHCP Devices (super admin)
+  // ------------------------------------------------------------------
+  getDhcpClients: async (sync = 1) => get(`/dhcp_devices/dhcp_clients.php?sync=${sync ? 1 : 0}`),
+
+  grantDhcpDeviceAccess: async (id) => {
+    const err = requireArg(id, 'id');
+    if (err) return clientError(err);
+    return post('/dhcp_devices/dhcp_access_grant.php', { id: toNum(id) });
+  },
 };
 

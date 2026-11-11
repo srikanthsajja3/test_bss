@@ -46,11 +46,48 @@ export const isAccountVerified = (acc) => {
   return false;
 };
 
+// Customer verification on RADIUS (internet_users.verified, set by "Verify Customer" =
+// POST /api/customers/change-verify). RADIUS refuses Renewal / Schedule Renewal until it is set.
+// RADIUS sends 1 / "1" / true / "Yes" / "Verified"; anything else (or nothing yet) = not verified.
+export const isRadiusVerified = (acc) => {
+  if (!acc) return false;
+  const v = acc.verified;
+  if (v === true || v === 1) return true;
+  const t = String(v ?? '').trim().toLowerCase();
+  return t === '1' || t === 'yes' || t === 'true' || t === 'verified';
+};
+
+// Aadhaar verification of ONE internet account (internet_users.aadhar_verified, mirrors RADIUS).
+// Recharge / Advance Renewal / Combo need it; the server refuses otherwise.
+export const isAadhaarVerified = (acc) => {
+  if (!acc) return false;
+  const v = acc.aadhar_verified;
+  return v === true || v === 1 || v === '1';
+};
+
+// The operator's setting (partners.aadhaar_required_for_recharge, sent per account as
+// aadhaar_required). Missing = required, as before.
+export const isAadhaarRequired = (acc) => {
+  const v = acc ? acc.aadhaar_required : undefined;
+  return !(v === false || v === 0 || v === '0');
+};
+
+// True when Recharge / Advance renewal / Combo must wait for Aadhaar verification.
+export const aadhaarBlocksRecharge = (acc) => !!acc && isAadhaarRequired(acc) && !isAadhaarVerified(acc);
+
+// Name shown for a set-top box: the operator's device name when set, else "STB <id>".
+export const iptvLabel = (a) => {
+  const name = String(a?.device_name || '').trim();
+  if (name) return name;
+  return a?.pioneer_stb_id ? `STB ${a.pioneer_stb_id}` : a?.stb_box ? `STB ${a.stb_box}` : `IPTV #${a?.id ?? ''}`;
+};
+
 // Customer photo with graceful fallback to initials / icon
-export const CustomerPhoto = ({ uri, size = 56, radius = 14, initials = '', dark = true }) => {
+// height: give a portrait box (Aadhaar photos are ~4:5) so the face isn't cropped at the top
+export const CustomerPhoto = ({ uri, size = 56, height, radius = 14, initials = '', dark = true }) => {
   const [failed, setFailed] = useState(false);
   const src = fixDocUrl(uri);
-  const box = { width: size, height: size, borderRadius: radius };
+  const box = { width: size, height: height || size, borderRadius: radius };
   if (src && !failed) {
     return (
       <Image

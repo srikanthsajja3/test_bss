@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Image, ActivityIndicator, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, Image, ActivityIndicator, useWindowDimensions, TextInput } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { toast } from 'react-toastify';
 import { COLORS } from '../constants/theme';
 import { parseApiDate, defaultRechargeType, normaliseIptvAccount, iptvShownExpiry } from './CustomerAccountsOverview';
-import { fixDocUrl } from './internet/shared';
+import { fixDocUrl, iptvLabel } from './internet/shared';
+import { OneBssApi } from '../services/oneBssApi';
+import { formatApiDate } from './CustomerAccountsOverview';
 
 const IPTV = '#8b5cf6';
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -89,13 +91,20 @@ const InfoRow = ({ label, value, children, copy }) => (
  *  onBack()
  *  onOpenRecharge()  opens the IPTV Recharge / Advance Renewal package modal
  *  onSync()      re-sync this customer's STBs from the provider
+ *  onComboRecharge()  shown instead of Recharge while the STB is on a running combo
+ *  onDeviceNameSaved()  reload after the device name was changed
+ *  readOnly      admins: no recharge / rename
  */
-export const IptvAccountDetails = ({ customer, account, accountIndex, operatorName, onBack, onOpenRecharge, onSync }) => {
+export const IptvAccountDetails = ({ customer, account, accountIndex, operatorName, onBack, onOpenRecharge, onSync, onComboRecharge, onDeviceNameSaved, readOnly = false }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
   const [infoOpen, setInfoOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [photoFailed, setPhotoFailed] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameText, setNameText] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const [savedName, setSavedName] = useState(undefined); // shown at once; the reload confirms
 
   if (!customer || !account) return null;
 
@@ -115,6 +124,21 @@ export const IptvAccountDetails = ({ customer, account, accountIndex, operatorNa
   const vcNo = pick(account.smartcard, account.vc_number);
   const stbId = pick(account.pioneer_stb_id, account.id);
 
+  const deviceName = savedName !== undefined ? savedName : clean(account.device_name);
+  const saveName = async () => {
+    setSavingName(true);
+    const res = await OneBssApi.setIptvDeviceName(account.id, nameText.trim());
+    setSavingName(false);
+    if (!res.ok) {
+      toast.error(res.data?.message || 'Could not save the device name');
+      return;
+    }
+    toast.success(res.data?.message || 'Device name saved');
+    setSavedName(res.data?.device_name || '');
+    setEditingName(false);
+    if (onDeviceNameSaved) onDeviceNameSaved();
+  };
+
   const doSync = async () => {
     if (!onSync || syncing) return;
     setSyncing(true);
@@ -126,6 +150,7 @@ export const IptvAccountDetails = ({ customer, account, accountIndex, operatorNa
   };
 
   const leftRows = [
+    { label: 'Device name', value: deviceName || 'Not named' },
     { label: 'STB No', value: stbNo, copy: true },
     { label: 'VC Number', value: vcNo, copy: true },
     { label: 'STB ID', value: stbId },
@@ -163,7 +188,37 @@ export const IptvAccountDetails = ({ customer, account, accountIndex, operatorNa
             </View>
           )}
 
-          <Text style={styles.name} numberOfLines={2}>{name}</Text>
+          {editingName ? (
+            <View style={styles.nameEdit}>
+              <TextInput
+                style={styles.nameInput}
+                value={nameText}
+                onChangeText={(v) => setNameText(v.slice(0, 60))}
+                placeholder="e.g. Hall TV"
+                placeholderTextColor="#94a3b8"
+                onSubmitEditing={saveName}
+                autoFocus
+              />
+              <View style={{ flexDirection: 'row', gap: 6 }}>
+                <TouchableOpacity style={styles.nameGhost} onPress={() => setEditingName(false)} disabled={savingName}><Text style={styles.nameGhostText}>Cancel</Text></TouchableOpacity>
+                <TouchableOpacity style={styles.nameSave} onPress={saveName} disabled={savingName}>
+                  {savingName ? <ActivityIndicator size="small" color="#ffffff" /> : <Text style={styles.nameSaveText}>Save</Text>}
+                </TouchableOpacity>
+              </View>
+            </View>
+          ) : (
+            <View style={styles.deviceRow}>
+              <Feather name="tv" size={15} color={IPTV} />
+              <Text style={styles.deviceTitle} numberOfLines={1}>{iptvLabel({ ...account, device_name: deviceName })}</Text>
+              {readOnly ? null : (
+                <TouchableOpacity style={styles.renameBtn} onPress={() => { setNameText(deviceName || ''); setEditingName(true); }} accessibilityLabel="Device name" title={deviceName ? 'Rename this device' : 'Name this device'}>
+                  <Feather name="edit-2" size={12} color={IPTV} />
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+          {deviceName && !editingName ? <Text style={styles.deviceSub}>STB {stbId}</Text> : null}
+          <Text style={[styles.name, { marginTop: 8 }]} numberOfLines={2}>{name}</Text>
           {mobile ? (
             <TouchableOpacity style={styles.mobileRow} onPress={() => copyText(mobile, 'Mobile number')}>
               <Feather name="phone" size={13} color="#64748b" />
@@ -186,7 +241,13 @@ export const IptvAccountDetails = ({ customer, account, accountIndex, operatorNa
             </View>
           </View>
 
-          {account?.open_recharge ? (
+          {readOnly ? null : account?.combo_lock && !account?.open_recharge ? (
+            // on a running combo: only Combo Recharge (same combo) until internet and IPTV have both expired
+            <View style={styles.comboNote}>
+              <Feather name="layers" size={13} color="#be185d" />
+              <Text style={styles.comboNoteText}>On combo "{account.combo_lock.combo_name}" till {formatApiDate(account.combo_lock.until, false)}. Use Combo recharge.</Text>
+            </View>
+          ) : account?.open_recharge ? (
             // last recharge was paid but not completed by Pioneer -> Recheck instead of Recharge
             <TouchableOpacity style={[styles.rechargeBtn, { backgroundColor: '#d97706' }]} onPress={onOpenRecharge} title={account.open_recharge.message || ''}>
               <Feather name="rotate-ccw" size={15} color="#ffffff" />
@@ -277,6 +338,18 @@ const styles = StyleSheet.create({
 
   rechargeBtn: { alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, marginTop: 16, paddingVertical: 11, borderRadius: 8, backgroundColor: IPTV },
   rechargeBtnText: { fontSize: 14, fontWeight: '700', color: '#ffffff' },
+  deviceRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, marginTop: 14, maxWidth: '100%' },
+  deviceTitle: { fontSize: 16, fontWeight: '800', color: COLORS.textMain, flexShrink: 1 },
+  deviceSub: { fontSize: 12, color: '#64748b', marginTop: 2, textAlign: 'center' },
+  renameBtn: { width: 24, height: 24, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(139,92,246,0.1)' },
+  nameEdit: { alignSelf: 'stretch', gap: 8, marginTop: 14 },
+  nameInput: { height: 40, borderWidth: 1, borderColor: '#c4b5fd', borderRadius: 8, paddingHorizontal: 10, fontSize: 14, color: COLORS.textMain, backgroundColor: '#ffffff' },
+  nameGhost: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.05)' },
+  nameGhostText: { fontSize: 12.5, fontWeight: '700', color: '#334155' },
+  nameSave: { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: 8, backgroundColor: IPTV },
+  nameSaveText: { fontSize: 12.5, fontWeight: '700', color: '#ffffff' },
+  comboNote: { alignSelf: 'stretch', flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 16, padding: 8, borderRadius: 8, backgroundColor: 'rgba(236,72,153,0.08)', borderWidth: 1, borderColor: 'rgba(236,72,153,0.3)' },
+  comboNoteText: { flex: 1, fontSize: 11.5, fontWeight: '600', color: '#9d174d' },
   linkRow: { flexDirection: 'row', justifyContent: 'center', gap: 16, marginTop: 12 },
   linkBtn: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   linkBtnText: { fontSize: 12, fontWeight: '700', color: IPTV },

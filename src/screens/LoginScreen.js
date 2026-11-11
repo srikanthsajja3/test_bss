@@ -81,8 +81,10 @@ export const LoginScreen = ({ onLoginSuccess }) => {
       }
       setApiConfig(undefined, token);
       const partnerName = decoded?.partner_name || decoded?.username || u;
+      // staff login (office_staff): works as its partner, limited by its role's permissions
+      const staff = decoded?.staff_id && data.staff ? { ...data.staff, staff_id: decoded.staff_id } : null;
 
-      toast.success(`Welcome back, ${partnerName}!`);
+      toast.success(`Welcome back, ${staff ? staff.staff_name : partnerName}!`);
 
       onLoginSuccess({
         username: u,
@@ -90,6 +92,7 @@ export const LoginScreen = ({ onLoginSuccess }) => {
         partner_name: partnerName,
         partner_id: partnerId,
         token: token,
+        ...(staff ? { staff } : {}),
       });
     } catch (e) {
       toast.error('Invalid username or password. Authentication failed.');

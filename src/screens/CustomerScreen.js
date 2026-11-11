@@ -3,20 +3,25 @@ import { View, Text, StyleSheet, ScrollView, TextInput, TouchableOpacity, Modal,
 import { Feather, MaterialCommunityIcons, Ionicons, FontAwesome } from '@expo/vector-icons';
 import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi, setApiConfig, newClientRef } from '../services/oneBssApi';
+import { BulkOperationsMenu, BulkMigrateModal, BulkRechargeModal } from '../components/internet/BulkOperations';
 import { toast } from 'react-toastify';
 import { AddCustomerScreen } from './AddCustomerScreen';
 import { IptvAccountDetails } from '../components/IptvAccountDetails';
 import { InternetRechargeModal } from '../components/internet/InternetRechargeModal';
-import { PasswordModal, MacBindingsModal, SessionHistoryModal, AuthLogsModal, VerifyCustomerModal, DocumentsModal } from '../components/internet/AccountActionModals';
-import { CustomerPhoto, isSuperAdmin, isAccountVerified } from '../components/internet/shared';
+import { PasswordModal, NetworkingModal, SessionHistoryModal, AuthLogsModal, VerifyCustomerModal, DocumentsModal } from '../components/internet/AccountActionModals';
+import { can, canAny } from '../services/staffAccess';
+import { CustomerPhoto, isSuperAdmin, isAccountVerified, isAadhaarVerified, isRadiusVerified, aadhaarBlocksRecharge, iptvLabel } from '../components/internet/shared';
+import { AadhaarVerifyModal } from '../components/internet/AadhaarVerifyModal';
 import { IptvRechargeModal } from '../components/iptv/IptvRechargeModal';
 import { ComboRechargeModal } from '../components/combo/ComboRechargeModal';
 import { OttRechargeModal } from '../components/ott/OttRechargeModal';
 import { AddOttModal } from '../components/ott/AddOttModal';
 import { CustomerAccountsOverview, defaultRechargeType, formatApiDate, normaliseInternetAccount, normaliseIptvAccount } from '../components/CustomerAccountsOverview';
 import { CustomerLocationModal } from '../components/CustomerLocationModal';
+import { ColSearch, ColSelect, ColDateRange, FilterCell, dateRangeParams } from '../components/ColumnFilters';
 import { CustomerDevicesModal } from '../components/CustomerDevicesModal';
 import { OnlineSessionPanel } from '../components/internet/OnlineSessionPanel';
+import { IptvImportModal } from '../components/iptv/IptvImportModal';
 
 const calculateBalanceDays = (expiryDateStr) => {
   if (!expiryDateStr || expiryDateStr === '—' || expiryDateStr === 'N/A') {
@@ -239,6 +244,16 @@ const mapCustomersListToIptvRow = (item, index, accIndex = 0) => {
 // status buckets customers_list.php understands.
 const LIST_FILTERS_INTERNET = ['all', 'new', 'active', 'online', 'offline', 'expired', 'suspended', 'disabled'];
 const LIST_FILTERS_IPTV = ['all', 'active', 'expired', 'suspended', 'disabled', 'new'];
+const CONN_OPTIONS = [{ value: 'online', label: 'Online' }, { value: 'offline', label: 'Offline' }];
+const AADHAAR_OPTIONS = [{ value: 'yes', label: 'Verified' }, { value: 'no', label: 'Not verified' }];
+const IPTV_STATUS_OPTIONS = [
+  { value: 'active', label: 'Active' },
+  { value: 'expired', label: 'Expired' },
+  { value: 'suspended', label: 'Suspended' },
+  { value: 'disabled', label: 'Disabled' },
+  { value: 'new', label: 'New' },
+];
+
 const normalizeListFilter = (key, isIptv = false) => {
   let k = String(key || 'all').trim().toLowerCase().replace(/^iptv_?/, '');
   if (k === '' || k === 'iptv') k = 'all';
@@ -401,6 +416,21 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
   const [showPasswordMap, setShowPasswordMap] = useState({});
   const [selectedRowIds, setSelectedRowIds] = useState(new Set());
+  // Bulk Operations (internet list): ticked accounts, kept across pages { [internet_id]: row }
+  const [bulkSel, setBulkSel] = useState({});
+  const [bulkMenu, setBulkMenu] = useState(false);
+  const [bulkOp, setBulkOp] = useState(null); // 'migrate' | 'recharge'
+  const bulkRows = Object.values(bulkSel);
+  const bulkPick = (cust) => {
+    const id = cust.internet_id;
+    if (id === undefined || id === null) return;
+    setBulkSel((cur) => {
+      const next = { ...cur };
+      if (next[id]) delete next[id];
+      else next[id] = { internet_id: id, username: cust.username, full_name: cust.full_name || cust.name || '', partner_id: cust.partner_id, partner_name: cust.partner_name };
+      return next;
+    });
+  };
 
   const toggleSelectAllRows = () => {
     if (selectedRowIds.size === paginatedCustomers.length && paginatedCustomers.length > 0) {
@@ -423,6 +453,15 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [showNewPassword, setShowNewPassword] = useState(false);
   const [resettingPassword, setResettingPassword] = useState(false);
   const [showAddCustomer, setShowAddCustomer] = useState(false);
+  const [showIptvImport, setShowIptvImport] = useState(false);
+  // an operator without IPTV (no IPTV plans assigned) gets no IPTV import
+  const [ownServices, setOwnServices] = useState(null);
+  useEffect(() => {
+    if (!isOperatorRole || !user?.partner_id) return;
+    OneBssApi.getOperatorServices({ partnerId: user.partner_id }).then((res) => {
+      if (res?.ok && res.data?.data) setOwnServices(res.data.data);
+    });
+  }, [isOperatorRole, user?.partner_id]);
 
   const [sortField, setSortField] = useState(null);
   const [sortDirection, setSortDirection] = useState('asc');
@@ -433,6 +472,32 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [operatorDropdownOpen, setOperatorDropdownOpen] = useState(false);
   const [operatorSearchQuery, setOperatorSearchQuery] = useState('');
   const [selectedBranchFilter, setSelectedBranchFilter] = useState('');
+
+  // Filter row under the table header. Sent to customers_list.php, so it filters every page.
+  const EMPTY_COL_FILTERS = { username: '', stb: '', name: '', mobile: '', conn: '', aadhaar: '', plan: '', expiry: null };
+  const [colFilters, setColFilters] = useState(EMPTY_COL_FILTERS);
+  const [debouncedColText, setDebouncedColText] = useState({ username: '', stb: '', name: '', mobile: '' });
+  const [listFacets, setListFacets] = useState({ plans: [], operators: [] });
+  const setColFilter = (key, value) => setColFilters((f) => ({ ...f, [key]: value }));
+  const hasActiveColSearch = useMemo(
+    () => Object.values(colFilters).some((v) => (v && typeof v === 'object' ? !!v.preset : String(v ?? '').trim() !== '')),
+    [colFilters]
+  );
+  const resetColSearch = () => {
+    setColFilters(EMPTY_COL_FILTERS);
+    setDebouncedColText({ username: '', stb: '', name: '', mobile: '' });
+  };
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedColText({
+      username: colFilters.username.trim(), stb: colFilters.stb.trim(), name: colFilters.name.trim(), mobile: colFilters.mobile.trim(),
+    }), 400);
+    return () => clearTimeout(t);
+  }, [colFilters.username, colFilters.stb, colFilters.name, colFilters.mobile]);
+
+  const operatorFilterOptions = useMemo(() => {
+    if (listFacets.operators.length) return listFacets.operators;
+    return operators.map((o) => ({ value: o.partner_id, label: o.partner_name || o.name || `#${o.partner_id}` }));
+  }, [listFacets.operators, operators]);
 
   const selectedOpObj = useMemo(() => {
     if (!selectedOperatorId) return null;
@@ -501,12 +566,6 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           branchSet.set(val, { id: val, label: `Branch #${val} (${op.partner_name || 'Operator'})` });
         }
       }
-      if (op.partner_region && String(op.partner_region).trim()) {
-        const reg = String(op.partner_region).trim();
-        if (!branchSet.has(reg)) {
-          branchSet.set(reg, { id: reg, label: `${reg} Zone` });
-        }
-      }
     });
 
     return Array.from(branchSet.values());
@@ -546,6 +605,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         sort: q.sort,
         dir: q.dir,
         range: q.range,
+        ...(q.cols || {}),
       });
       if (seq !== listRequestSeq.current) return; // a newer request superseded this one
       const body = res?.data || {};
@@ -645,6 +705,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               balance: r.balance,
               last_loff_off: r.last_loff_off || r.last_logoff,
               partner_id: r.partner_id || r.operator_id,
+              verified: r.verified,
+              aadhar_verified: r.aadhar_verified,
             }));
 
           const iptvAccs = matchingRows
@@ -687,6 +749,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               subplan_name: listItem.subplan_name,
               expiration: listItem.expiration,
               partner_id: listItem.partner_id || listItem.operator_id,
+              verified: listItem.verified,
+              aadhar_verified: listItem.aadhar_verified,
             }],
             iptv_accounts: iptvAccs,
           };
@@ -839,7 +903,16 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     // cache hasn't caught up yet.
     if (Array.isArray(merged.internet_accounts)) {
       merged.internet_accounts = merged.internet_accounts.map((acc) =>
-        verifiedOverrides[String(acc.internet_id)] ? { ...acc, verified: 'Verified' } : acc
+      {
+        const o = verifiedOverrides[String(acc.internet_id)];
+        if (!o) return acc;
+        return {
+          ...acc,
+          ...(o.radius ? { verified: 'Verified' } : {}),
+          ...(o.aadhaar ? { aadhar_verified: 1 } : {}),
+          ...(o.kyc ? { kyc: o.kyc } : {}),
+        };
+      }
       );
     }
     return merged;
@@ -897,7 +970,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       const row = mapCustomersListToIptvRow(base, idx, accIndex);
       const acc = customer.iptv_accounts?.[accIndex] || {};
       const stb = resolveApiField(acc.pioneer_stb_id, acc.stb_box);
-      return { ...row, username: row.username || (stb ? `STB ${stb}` : `IPTV #${acc.id ?? ''}`) };
+      return { ...row, username: row.username || (acc.device_name ? acc.device_name : stb ? `STB ${stb}` : `IPTV #${acc.id ?? ''}`) };
     }
     return mapCustomersListToBroadbandRow(base, idx, accIndex);
   };
@@ -1108,6 +1181,12 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
     // A definite answer from our server (validation, wallet, provider refused + rolled back)
     const definite = res.status > 0 && res.status < 500 || data.charged === false || data.rolled_back;
+    if (definite && data.aadhaar_required) {
+      toast.warning(`${label}: ${data.message}`, { autoClose: 9000 });
+      const acc = (activeCustomer?.internet_accounts || []).find((a) => String(a.internet_id) === String(data.internet_id));
+      if (acc) setVerifyReq(acc);
+      return false;
+    }
     if (definite) {
       let reason = data.message || `HTTP ${res.status}`;
       if (res.status === 402 && data.amount_required !== undefined) {
@@ -1173,7 +1252,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     if (!open || recheckBusy.current) return;
     recheckBusy.current = true;
     const label = kind === 'iptv'
-      ? (account.pioneer_stb_id ? `STB ${account.pioneer_stb_id}` : `IPTV #${account.id}`)
+      ? iptvLabel(account)
       : kind === 'ott'
       ? `OTT ${account.subscriber_id || `#${account.id}`}`
       : (account.username || `Internet #${account.internet_id}`);
@@ -1229,6 +1308,10 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       runRecheck(acc, 'iptv');
       return;
     }
+    if (acc?.combo_lock) {
+      toast.info(`${iptvLabel(acc)} is on combo "${acc.combo_lock.combo_name}". Renew it with Combo recharge.`);
+      return;
+    }
     setIptvRechargeReq(acc);
   };
 
@@ -1237,8 +1320,17 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       runRecheck(account, 'internet');
       return;
     }
-    if (!isAccountVerified(account)) {
-      toast.warning('Verify the customer before recharging.');
+    if (account?.combo_lock) {
+      toast.info(`${account.username || 'This account'} is on combo "${account.combo_lock.combo_name}". Renew it with Combo recharge.`);
+      return;
+    }
+    if (!isRadiusVerified(account)) {
+      toast.warning(`Verify the customer ${account.username || ''} before recharging.`);
+      setVerifyCustReq(account);
+      return;
+    }
+    if (aadhaarBlocksRecharge(account)) {
+      toast.warning(`Verify Aadhaar for ${account.username || 'this account'} before recharging.`);
       setVerifyReq(account);
       return;
     }
@@ -1254,13 +1346,22 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     );
   };
 
-  const handleVerified = async () => {
+  // Aadhaar verified for ONE internet account (AadhaarVerifyModal) — only that account flips
+  const handleVerified = async (result) => {
     const acc = verifyReq;
     if (!acc) return;
-    setVerifiedOverrides((prev) => ({ ...prev, [String(acc.internet_id)]: true }));
-    markCustomerAsVerifiedLocally(acc);
-    if (activeCustomer) markCustomerAsVerifiedLocally(activeCustomer);
+    setVerifiedOverrides((prev) => ({ ...prev, [String(acc.internet_id)]: { ...(prev[String(acc.internet_id)] || {}), aadhaar: true, kyc: result?.kyc || null } }));
+    markCustomerAsVerifiedLocally({ internet_id: acc.internet_id });
     // pull the new status into the local DB, then refresh the lookup
+    if (activeCustomerId !== null) syncInternetAccounts(activeCustomerId, [acc.internet_id]);
+  };
+
+  // Customer verified on RADIUS (VerifyCustomerModal → internet_change_verification.php)
+  const [verifyCustReq, setVerifyCustReq] = useState(null); // raw internet account
+  const handleCustomerVerified = async () => {
+    const acc = verifyCustReq;
+    if (!acc) return;
+    setVerifiedOverrides((prev) => ({ ...prev, [String(acc.internet_id)]: { ...(prev[String(acc.internet_id)] || {}), radius: true } }));
     if (activeCustomerId !== null) syncInternetAccounts(activeCustomerId, [acc.internet_id]);
   };
 
@@ -1274,14 +1375,14 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       id: acc.id,
       subPlanIds,
       internetId: opts.internetId || null, // the internet account the IPTV dates follow
-      label: acc.pioneer_stb_id ? `STB ${acc.pioneer_stb_id}` : `IPTV #${acc.id}`,
+      label: iptvLabel(acc),
     });
   };
 
   // ---- Combo recharge (one internet account + one STB, combo plan + IPTV add-ons) ----
   const [comboRechargeFor, setComboRechargeFor] = useState(null); // customer record
   const runComboRecharge = async ({ internet, iptv, combo, addonIds }) => {
-    const label = `${internet.username || `Internet #${internet.internet_id}`} + ${iptv.pioneer_stb_id ? `STB ${iptv.pioneer_stb_id}` : `IPTV #${iptv.id}`}`;
+    const label = `${internet.username || `Internet #${internet.internet_id}`} + ${iptvLabel(iptv)}`;
     const clientRef = newClientRef();
     const refreshBoth = () => {
       refreshAfterRecharge('internet', internet.internet_id);
@@ -1453,15 +1554,22 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         onConfirm={confirmInternetRecharge}
       />
       <VerifyCustomerModal
+        visible={!!verifyCustReq}
+        internetId={verifyCustReq?.internet_id}
+        username={verifyCustReq?.username}
+        customerName={activeCustomer?.full_name}
+        onClose={() => setVerifyCustReq(null)}
+        onVerified={handleCustomerVerified}
+      />
+      <AadhaarVerifyModal
         visible={!!verifyReq}
-        internetId={verifyReq?.internet_id}
-        username={verifyReq?.username}
+        account={verifyReq}
         customerName={activeCustomer?.full_name}
         onClose={() => setVerifyReq(null)}
         onVerified={handleVerified}
       />
       <PasswordModal visible={!!passwordReq} internetId={passwordReq?.internet_id} username={passwordReq?.username} onClose={() => setPasswordReq(null)} />
-      <MacBindingsModal visible={!!macReq} internetId={macReq?.internet_id} username={macReq?.username} onClose={() => setMacReq(null)} />
+      <NetworkingModal visible={!!macReq} internetId={macReq?.internet_id} username={macReq?.username} onClose={() => setMacReq(null)} />
       <SessionHistoryModal visible={!!sessionReq} internetId={sessionReq?.internet_id} username={sessionReq?.username} onClose={() => setSessionReq(null)} />
       <AuthLogsModal visible={!!authLogsReq} internetId={authLogsReq?.internet_id} username={authLogsReq?.username} onClose={() => setAuthLogsReq(null)} />
       {canSeeDocuments ? <DocumentsModal visible={documentsOpen} customer={activeCustomer} onClose={() => setDocumentsOpen(false)} /> : null}
@@ -1600,15 +1708,13 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
       {/* AADHAAR VERIFY MODAL FOR EXISTING CUSTOMERS (ITEM 5 & ITEM 8) */}
       {verifyAadhaarCust && (
-        <VerifyCustomerModal
+        <AadhaarVerifyModal
           visible={!!verifyAadhaarCust}
           onClose={() => setVerifyAadhaarCust(null)}
-          internetId={verifyAadhaarCust.internet_id || verifyAadhaarCust.id}
-          username={verifyAadhaarCust.username}
+          account={{ ...verifyAadhaarCust, internet_id: verifyAadhaarCust.internet_id || verifyAadhaarCust.id }}
           customerName={verifyAadhaarCust.full_name || verifyAadhaarCust.name}
           onVerified={async () => {
-            toast.success(`Aadhaar verification completed for ${verifyAadhaarCust.full_name || verifyAadhaarCust.username}!`);
-            setVerifyAadhaarCust(null);
+            markCustomerAsVerifiedLocally({ internet_id: verifyAadhaarCust.internet_id || verifyAadhaarCust.id });
             loadCustomerDataFromApi();
           }}
         />
@@ -1841,11 +1947,37 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     } catch (e) {}
   };
 
+  // Column filters as query params (empty ones are dropped by getCustomersList)
+  const colQuery = viewMode === 'iptv'
+    ? { f_stb: debouncedColText.stb, f_name: debouncedColText.name, f_mobile: debouncedColText.mobile, f_plan: colFilters.plan, ...dateRangeParams(colFilters.expiry) }
+    : {
+        f_username: debouncedColText.username, f_conn: colFilters.conn, f_name: debouncedColText.name, f_mobile: debouncedColText.mobile,
+        f_aadhaar: colFilters.aadhaar, f_plan: colFilters.plan, ...dateRangeParams(colFilters.expiry),
+      };
+  const colQueryKey = JSON.stringify(colQuery);
+
+  // plan ids differ between internet and IPTV
+  useEffect(() => { setColFilters((f) => (f.plan ? { ...f, plan: '' } : f)); }, [viewMode]);
+
+  // dropdown options for the filter row: plans / operators that have accounts of this type
+  useEffect(() => {
+    if (!user) return undefined;
+    let live = true;
+    OneBssApi.getListFacets(viewMode === 'iptv' ? 'iptv' : 'internet', selectedOperatorId)
+      .then((res) => {
+        if (!live || !res?.ok || !res.data?.success) return;
+        setListFacets({ plans: res.data.plans || [], operators: res.data.operators || [] });
+      })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [user, viewMode, selectedOperatorId]);
+
   // Back to page 1 whenever the result set changes
   useEffect(() => {
     setCurrentPage(1);
     setSelectedRowIds(new Set());
-  }, [activeFilter, activeRange, debouncedSearch, viewMode, selectedOperatorId, pageSize, sortField, sortDirection]);
+    setBulkSel({});
+  }, [activeFilter, activeRange, debouncedSearch, viewMode, selectedOperatorId, pageSize, sortField, sortDirection, colQueryKey]);
 
   // (Re)load the page from the server whenever any list parameter changes
   listQueryRef.current = {
@@ -1858,6 +1990,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     sort: sortField || undefined,
     dir: sortField ? sortDirection : undefined,
     range: activeRange || undefined,
+    cols: colQuery,
   };
   const listQueryKey = JSON.stringify(listQueryRef.current);
   useEffect(() => {
@@ -1875,6 +2008,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           return bVal.includes(String(selectedBranchFilter).toLowerCase());
         });
       }
+
+
       return rows;
     },
     [rawCustomers, viewMode, selectedBranchFilter]
@@ -1913,12 +2048,16 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     // Internet + IPTV sync starts automatically once the saved record is shown (see autoSyncedFor).
   };
 
+  // Opened from the OTT list (customers?sub_id=..&from=ott): Back returns to the OTT list
+  const cameFromOtt = () => typeof window !== 'undefined' && /[?&]from=ott(&|$)/.test(window.location.hash);
+  const ottParam = () => (cameFromOtt() ? ['from=ott'] : []);
+
   // "Details" on an account card -> existing full detail screen for that account
   const handleOpenAccountDetails = (kind, accIndex) => {
     if (!activeCustomer) return;
     setActiveAccountSel({ kind, index: accIndex });
     if (typeof window !== 'undefined') {
-      window.location.hash = buildListHash([`sub_id=${activeCustomer.cust_id}`, `acc=${kind === 'iptv' ? 'iptv' : 'int'}_${accIndex}`]);
+      window.location.hash = buildListHash([`sub_id=${activeCustomer.cust_id}`, `acc=${kind === 'iptv' ? 'iptv' : 'int'}_${accIndex}`, ...ottParam()]);
     }
   };
 
@@ -1926,15 +2065,21 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const handleCloseSubscriberScreen = () => {
     setActiveAccountSel(null);
     if (typeof window !== 'undefined' && activeCustomerId !== null) {
-      window.location.hash = buildListHash([`sub_id=${activeCustomerId}`]);
+      window.location.hash = buildListHash([`sub_id=${activeCustomerId}`, ...ottParam()]);
     }
   };
 
-  // Account cards back -> subscriber list
+  // Account cards back -> subscriber list (or the OTT list it was opened from)
   const handleCloseCustomerOverview = () => {
+    const toOtt = cameFromOtt();
     setActiveAccountSel(null);
     setActiveCustomerId(null);
     if (typeof window !== 'undefined') {
+      if (toOtt) {
+        window.location.hash = 'ott_customers';
+        if (onSwitchMode) onSwitchMode('ott_customers');
+        return;
+      }
       window.location.hash = buildListHash();
     }
   };
@@ -1996,18 +2141,20 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         syncing={syncingFor === String(activeCustomerId)}
         syncState={syncState[String(activeCustomerId)]}
         onRefresh={() => syncAllAccountsOf(activeCustomerId)}
-        onInternetRecharge={openInternetRecharge}
-        onIptvRecharge={openIptvRecharge}
-        onRecheck={(acc) => runRecheck(acc, acc.internet_id ? 'internet' : acc.subscriber_id ? 'ott' : 'iptv')}
-        onOttRecharge={openOttRecharge}
-        onOttDeactivate={deactivateOtt}
-        onAddOtt={(c) => setAddOttFor(c)}
-        onVerify={(acc) => setVerifyReq(acc)}
+        // a staff role without a permission gets no handler = no button (staffAccess.js)
+        onInternetRecharge={can(user, 'internet.recharge') ? openInternetRecharge : null}
+        onIptvRecharge={can(user, 'iptv.recharge') ? openIptvRecharge : null}
+        onRecheck={canAny(user, [['internet.recharge'], ['iptv.recharge'], ['ott.recharge'], ['combo.recharge']]) ? (acc) => runRecheck(acc, acc.internet_id ? 'internet' : acc.subscriber_id ? 'ott' : 'iptv') : null}
+        onOttRecharge={can(user, 'ott.recharge') ? openOttRecharge : null}
+        onOttDeactivate={can(user, 'ott.deactivate') ? deactivateOtt : null}
+        onAddOtt={can(user, 'ott.customers', 'add') ? (c) => setAddOttFor(c) : null}
+        onVerify={can(user, 'internet.aadhaar') ? (acc) => setVerifyReq(acc) : null}
+        onVerifyCustomer={can(user, 'internet.verify') ? (acc) => setVerifyCustReq(acc) : null}
         onBack={handleCloseCustomerOverview}
         onOpenDetails={handleOpenAccountDetails}
-        onModifyMobile={(c) => { setModifyMobileCust(c); setNewMobileVal(c?.mobile || ''); }}
-        onAddIptv={handleAddIptvForCustomer}
-        onComboRecharge={(c) => setComboRechargeFor(c)}
+        onModifyMobile={can(user, 'internet.profile', 'edit') ? (c) => { setModifyMobileCust(c); setNewMobileVal(c?.mobile || ''); } : null}
+        onAddIptv={can(user, 'iptv.customers', 'add') ? handleAddIptvForCustomer : null}
+        onComboRecharge={can(user, 'combo.recharge') ? (c) => setComboRechargeFor(c) : null}
         // admins (super distributor / distributor / sub distributor) only view customers
         readOnly={String(user?.role || user?.account_role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'admin'}
         operatorNames={Object.fromEntries((operators || []).map((o) => [String(o.partner_id), o.partner_name]))}
@@ -2030,6 +2177,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           operatorName={String(iptvAcc.partner_id) === String(user?.partner_id) ? user?.partner_name : ''}
           onBack={handleCloseSubscriberScreen}
           onOpenRecharge={() => openIptvRecharge(iptvAcc)}
+          onDeviceNameSaved={() => fetchCustomerDetails(activeCustomerId, true)}
+          readOnly={String(user?.role || user?.account_role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'admin'}
           onSync={async () => {
             await handleIptvCustomerDetailSync({ id: `iptv_${iptvAcc.id}`, mobile: activeCustomer.mobile, name: activeCustomer.full_name });
             await fetchCustomerDetails(activeCustomerId, true);
@@ -2050,12 +2199,18 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       { id: 'basic', label: 'Basic Info', short: 'Basic', icon: 'user' },
       { id: 'online', label: 'Online Session', short: 'Online', icon: 'wifi', color: isOnline ? '#059669' : undefined, disabled: !isOnline || !currentInternetAccount, hint: 'Available while the customer is online' },
       { id: 'password', label: 'Password', short: 'Password', icon: 'key', disabled: !currentInternetAccount },
-      { id: 'mac', label: 'MAC Bindings', short: 'MAC', icon: 'globe', disabled: !currentInternetAccount },
+      { id: 'mac', label: 'Networking', short: 'Network', icon: 'globe', disabled: !currentInternetAccount },
       { id: 'sessions', label: 'Session History', short: 'Sessions', icon: 'list', disabled: !currentInternetAccount },
       { id: 'auth', label: 'Authentication Logs', short: 'Auth logs', icon: 'shield', disabled: !currentInternetAccount },
       { id: 'onu', label: 'ONU Details', short: 'ONU', icon: 'hard-drive', disabled: !currentInternetAccount },
       ...(canSeeDocuments ? [{ id: 'documents', label: 'Documents', short: 'Docs', icon: 'file-text' }] : []),
-    ];
+    ].filter((t) => ( // staff: only the tabs its role allows
+      t.id === 'password' ? can(user, 'internet.password', 'view')
+        : t.id === 'mac' ? can(user, 'internet.networking', 'view')
+          : t.id === 'sessions' || t.id === 'auth' ? can(user, 'internet.sessions')
+            : t.id === 'onu' ? canAny(user, [['networking.olt', 'view'], ['internet.customers', 'view']])
+              : true
+    ));
 
     return (
       <ScrollView
@@ -2085,7 +2240,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         <View style={{ backgroundColor: '#ffffff', borderRadius: 14, padding: 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)', marginBottom: 16, flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', gap: 16 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: isMobile ? 12 : 16, maxWidth: '100%' }}>
             {/* PROFILE AVATAR THUMBNAIL */}
-            <CustomerPhoto uri={activeCustomer?.profile_image} size={isMobile ? 52 : 64} radius={12} dark={false} />
+            <CustomerPhoto uri={activeCustomer?.profile_image} size={isMobile ? 52 : 64} height={isMobile ? 65 : 80} radius={12} dark={false} />
 
             <View style={{ flexShrink: 1, minWidth: 0 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -2134,16 +2289,41 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           </View>
           {/* RECHARGE / VERIFY */}
           {readOnlyViewer ? null : (
-            <View style={{ flexDirection: 'row' }}>
-              {currentInternetAccount && !currentInternetAccount.open_recharge && !isAccountVerified(currentInternetAccount) ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {/* operator doesn't require Aadhaar to recharge: verifying stays available */}
+              {currentInternetAccount && can(user, 'internet.aadhaar') && !aadhaarBlocksRecharge(currentInternetAccount) && !isAadhaarVerified(currentInternetAccount) ? (
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#93c5fd', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 8 }}
+                  onPress={() => setVerifyReq(currentInternetAccount)}
+                >
+                  <Feather name="shield" size={14} color="#2563eb" />
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#2563eb' }}>Verify Aadhaar</Text>
+                </TouchableOpacity>
+              ) : null}
+              {currentInternetAccount && !currentInternetAccount.open_recharge && !isRadiusVerified(currentInternetAccount) ? (!can(user, 'internet.verify') ? null :
                 <TouchableOpacity
                   style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#2563eb', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}
-                  onPress={() => setVerifyReq(currentInternetAccount)}
+                  onPress={() => setVerifyCustReq(currentInternetAccount)}
                 >
                   <Feather name="user-check" size={14} color="#ffffff" />
                   <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>Verify Customer</Text>
                 </TouchableOpacity>
-              ) : (
+              ) : currentInternetAccount && !currentInternetAccount.open_recharge && aadhaarBlocksRecharge(currentInternetAccount) ? (!can(user, 'internet.aadhaar') ? null :
+                <TouchableOpacity
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#2563eb', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}
+                  onPress={() => setVerifyReq(currentInternetAccount)}
+                >
+                  <Feather name="shield" size={14} color="#ffffff" />
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>Verify Aadhaar</Text>
+                </TouchableOpacity>
+              ) : currentInternetAccount && !currentInternetAccount.open_recharge && currentInternetAccount.combo_lock ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: 360, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: 'rgba(236,72,153,0.08)', borderWidth: 1, borderColor: 'rgba(236,72,153,0.3)' }}>
+                  <Feather name="layers" size={13} color="#be185d" />
+                  <Text style={{ flexShrink: 1, fontSize: 12, fontWeight: '600', color: '#9d174d' }}>
+                    On combo "{currentInternetAccount.combo_lock.combo_name}" till {formatApiDate(currentInternetAccount.combo_lock.until, false)}. Use Combo recharge.
+                  </Text>
+                </View>
+              ) : !(currentInternetAccount?.open_recharge ? canAny(user, [['internet.recharge'], ['combo.recharge']]) : can(user, 'internet.recharge')) ? null : (
                 <TouchableOpacity
                   style={[{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f97316', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }, !currentInternetAccount && { opacity: 0.5 }]}
                   onPress={() => currentInternetAccount && openInternetRecharge(currentInternetAccount, defaultRechargeType({ expiration: currentInternetAccount.expiration }) === 'advance')}
@@ -2205,7 +2385,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         ) : internetTab === 'password' && currentInternetAccount ? (
           <PasswordModal inline visible internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} onClose={() => setInternetTab('basic')} />
         ) : internetTab === 'mac' && currentInternetAccount ? (
-          <MacBindingsModal inline visible internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} onClose={() => setInternetTab('basic')} />
+          <NetworkingModal inline visible internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} onClose={() => setInternetTab('basic')} />
         ) : internetTab === 'sessions' && currentInternetAccount ? (
           <SessionHistoryModal inline visible internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} onClose={() => setInternetTab('basic')} />
         ) : internetTab === 'auth' && currentInternetAccount ? (
@@ -2272,16 +2452,19 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ fontSize: 12, color: '#64748b' }}>Aadhar Verification</Text>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Aadhaar (this account)</Text>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                  <Text style={{ fontSize: 13, fontWeight: '600', color: activeSubProfile.aadhar_verified ? '#000000' : '#b45309' }}>{activeSubProfile.aadhar_verified ? 'Verified' : 'Not verified'}</Text>
-                  {activeSubProfile.aadhar_verified ? <Feather name="check-circle" size={13} color="#10b981" /> : null}
+                  <Text style={{ fontSize: 13, fontWeight: '600', color: isAadhaarVerified(currentInternetAccount) ? '#000000' : '#b45309' }}>{isAadhaarVerified(currentInternetAccount) ? 'Verified' : 'Not verified'}</Text>
+                  {isAadhaarVerified(currentInternetAccount) ? <Feather name="check-circle" size={13} color="#10b981" /> : null}
                 </View>
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                <Text style={{ fontSize: 12, color: '#64748b' }}>Aadhar Verification Date</Text>
-                <Text style={{ fontSize: 12, fontWeight: '500', color: '#000000' }}>{formatApiDate(activeSubProfile.aadhar_verified_date)}</Text>
+                <Text style={{ fontSize: 12, color: '#64748b' }}>Aadhaar verified on</Text>
+                <Text style={{ fontSize: 12, fontWeight: '500', color: '#000000' }}>
+                  {formatApiDate(currentInternetAccount?.aadhar_verified_at)}
+                  {currentInternetAccount?.kyc?.masked_aadhaar ? ` · ${currentInternetAccount.kyc.masked_aadhaar}` : ''}
+                </Text>
               </View>
             </View>
           </View>
@@ -2655,7 +2838,57 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
 
 
-          {((user?.role || user?.account_role || '').toLowerCase() === 'operator') && (
+          {/* IPTV: import customers from the Pioneer export (super admin, or an operator for itself) */}
+          {viewMode === 'iptv' && (isSuperAdmin(user) || (isOperatorRole && ownServices?.iptv !== false)) ? (
+            <TouchableOpacity style={[styles.addCustomerHeaderBtn, { backgroundColor: '#7c3aed' }]} onPress={() => setShowIptvImport(true)}>
+              <Feather name="upload" size={14} color="#ffffff" />
+              <Text style={styles.addCustomerHeaderBtnText}>Import CSV</Text>
+            </TouchableOpacity>
+          ) : null}
+          <IptvImportModal
+            visible={showIptvImport}
+            user={user}
+            operators={operators.map((o) => ({ value: o.partner_id, label: o.partner_name || o.name || `#${o.partner_id}` }))}
+            onClose={() => setShowIptvImport(false)}
+            onDone={() => loadCustomerDataFromApi()}
+          />
+
+          {viewMode !== 'iptv' && canAny(user, [['internet.bulk'], ['internet.recharge']]) ? (
+            <TouchableOpacity
+              style={[styles.addCustomerHeaderBtn, { backgroundColor: '#1d4ed8' }, !bulkRows.length && { opacity: 0.6 }]}
+              onPress={() => (bulkRows.length ? setBulkMenu(true) : toast.info('Tick the customers first (the box at the start of each row).'))}
+            >
+              <Feather name="layers" size={14} color="#ffffff" />
+              <Text style={styles.addCustomerHeaderBtnText}>Bulk Operations{bulkRows.length ? ` (${bulkRows.length})` : ''}</Text>
+            </TouchableOpacity>
+          ) : null}
+          {bulkRows.length && viewMode !== 'iptv' ? (
+            <TouchableOpacity style={[styles.addCustomerHeaderBtn, { backgroundColor: '#64748b' }]} onPress={() => setBulkSel({})}>
+              <Feather name="x" size={14} color="#ffffff" />
+              <Text style={styles.addCustomerHeaderBtnText}>Clear</Text>
+            </TouchableOpacity>
+          ) : null}
+          <BulkOperationsMenu
+            visible={bulkMenu}
+            count={bulkRows.length}
+            canMigrate={isSuperAdmin(user)}
+            onClose={() => setBulkMenu(false)}
+            onPick={(k) => { setBulkMenu(false); setBulkOp(k); }}
+          />
+          <BulkMigrateModal
+            visible={bulkOp === 'migrate'}
+            rows={bulkRows}
+            onClose={() => setBulkOp(null)}
+            onDone={() => { setBulkSel({}); loadCustomerDataFromApi(); }}
+          />
+          <BulkRechargeModal
+            visible={bulkOp === 'recharge'}
+            rows={bulkRows}
+            onClose={() => setBulkOp(null)}
+            onDone={() => { setBulkSel({}); loadCustomerDataFromApi(); }}
+          />
+
+          {((user?.role || user?.account_role || '').toLowerCase() === 'operator') && can(user, 'internet.customers', 'add') && (
             <TouchableOpacity style={styles.addCustomerHeaderBtn} onPress={() => setShowAddCustomer(true)}>
               <Feather name="user-plus" size={14} color="#ffffff" />
               <Text style={styles.addCustomerHeaderBtnText}>Add Customer</Text>
@@ -2772,14 +3005,14 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             </View>
           </View>
 
-        <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: viewMode === 'iptv' ? 1040 : 1240, width: '100%' }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: viewMode === 'iptv' ? 1040 : 1280, width: '100%' }}>
           <View style={{ width: '100%' }}>
             {/* Table Header (on phones the table scrolls sideways) */}
             <View style={styles.tableHeader}>
               {viewMode === 'iptv' ? (
                 <>
                   <Text style={[styles.th, { flex: 1.7, minWidth: 140 }]}>STB / Box No.</Text>
-                  <Text style={[styles.th, { flex: 1.1, minWidth: 95 }]}>Status</Text>
+                  <Text style={[styles.th, { flex: 1.1, minWidth: 115 }]}>Status</Text>
                   <Text style={[styles.th, { flex: 1.7, minWidth: 130 }]}>Full Name</Text>
                   <Text style={[styles.th, { flex: 1.4, minWidth: 120 }]}>Mobile</Text>
                   {!isOperatorRole ? <Text style={[styles.th, { flex: 1.7, minWidth: 130 }]}>Operator / Branch</Text> : null}
@@ -2787,8 +3020,30 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 </>
               ) : (
                 <>
+                  <TouchableOpacity
+                    style={{ width: 34, alignItems: 'center', justifyContent: 'center' }}
+                    title="Tick all on this page"
+                    onPress={() => {
+                      const pageRows = paginatedCustomers.filter((c) => c.internet_id !== undefined && c.internet_id !== null);
+                      const allOn = pageRows.length > 0 && pageRows.every((c) => bulkSel[c.internet_id]);
+                      setBulkSel((cur) => {
+                        const next = { ...cur };
+                        pageRows.forEach((c) => {
+                          if (allOn) delete next[c.internet_id];
+                          else next[c.internet_id] = { internet_id: c.internet_id, username: c.username, full_name: c.full_name || c.name || '', partner_id: c.partner_id, partner_name: c.partner_name };
+                        });
+                        return next;
+                      });
+                    }}
+                  >
+                    {(() => {
+                      const pageRows = paginatedCustomers.filter((c) => c.internet_id !== undefined && c.internet_id !== null);
+                      const n = pageRows.filter((c) => bulkSel[c.internet_id]).length;
+                      return <Feather name={n && n === pageRows.length ? 'check-square' : n ? 'minus-square' : 'square'} size={16} color="#1d4ed8" />;
+                    })()}
+                  </TouchableOpacity>
                   <Text style={[styles.th, { flex: 1.5, minWidth: 120 }]}>Username</Text>
-                  <Text style={[styles.th, { flex: 1.1, minWidth: 95 }]}>Connectivity</Text>
+                  <Text style={[styles.th, { flex: 1.1, minWidth: 115 }]}>Connectivity</Text>
                   <Text style={[styles.th, { flex: 1.8, minWidth: 140 }]}>Full Name</Text>
                   <Text style={[styles.th, { flex: 1.4, minWidth: 120 }]}>Mobile</Text>
                   <Text style={[styles.th, { flex: 1.3, minWidth: 120 }]}>Aadhaar</Text>
@@ -2818,6 +3073,90 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               <Text style={[styles.th, { flex: viewMode === 'iptv' ? 0.8 : 1.6, minWidth: viewMode === 'iptv' ? 80 : 150, textAlign: 'left' }]}>
                 Actions
               </Text>
+            </View>
+
+            {/* Filter row: one control per column, filters the whole list on the server */}
+            <View style={styles.excelFilterRow}>
+              {viewMode === 'iptv' ? (
+                <>
+                  <FilterCell flex={1.7} minWidth={140}>
+                    <ColSearch value={colFilters.stb} onChange={(v) => setColFilter('stb', v)} placeholder="STB / Box" />
+                  </FilterCell>
+                  <FilterCell flex={1.1} minWidth={115}>
+                    <ColSelect
+                      value={activeFilter === 'all' ? '' : activeFilter}
+                      options={IPTV_STATUS_OPTIONS}
+                      onChange={(v) => handleSelectFilter(v || 'all')}
+                      placeholder="Status"
+                    />
+                  </FilterCell>
+                  <FilterCell flex={1.7} minWidth={130}>
+                    <ColSearch value={colFilters.name} onChange={(v) => setColFilter('name', v)} placeholder="Name" />
+                  </FilterCell>
+                  <FilterCell flex={1.4} minWidth={120}>
+                    <ColSearch value={colFilters.mobile} onChange={(v) => setColFilter('mobile', v.replace(/[^\d]/g, ''))} placeholder="Mobile" />
+                  </FilterCell>
+                  {!isOperatorRole ? (
+                    <FilterCell flex={1.7} minWidth={130}>
+                      <ColSelect value={selectedOperatorId} options={operatorFilterOptions} onChange={(v) => setSelectedOperatorId(v ? String(v) : '')} placeholder="Operator" allLabel="All operators" />
+                    </FilterCell>
+                  ) : null}
+                  <FilterCell flex={1.8} minWidth={140}>
+                    <ColSelect value={colFilters.plan} options={listFacets.plans} onChange={(v) => setColFilter('plan', v)} placeholder="Package" allLabel="All packages" />
+                  </FilterCell>
+                  <FilterCell flex={2} minWidth={140}>
+                    <ColDateRange value={colFilters.expiry} onChange={(v) => setColFilter('expiry', v)} placeholder="Expiry date" />
+                  </FilterCell>
+                  {showRegisteredCol ? <View style={{ flex: 1.3, minWidth: 110 }} /> : null}
+                  <View style={{ flex: 0.8, minWidth: 80, justifyContent: 'center' }}>
+                    {hasActiveColSearch ? (
+                      <TouchableOpacity style={styles.excelBtnReset} onPress={resetColSearch} title="Clear column filters">
+                        <Feather name="x" size={11} color="#dc2626" style={{ marginRight: 3 }} />
+                        <Text style={styles.excelBtnResetText}>Clear</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={{ width: 34 }} />
+                  <FilterCell flex={1.5} minWidth={120}>
+                    <ColSearch value={colFilters.username} onChange={(v) => setColFilter('username', v)} placeholder="Username" />
+                  </FilterCell>
+                  <FilterCell flex={1.1} minWidth={115}>
+                    <ColSelect value={colFilters.conn} options={CONN_OPTIONS} onChange={(v) => setColFilter('conn', v)} placeholder="All" />
+                  </FilterCell>
+                  <FilterCell flex={1.8} minWidth={140}>
+                    <ColSearch value={colFilters.name} onChange={(v) => setColFilter('name', v)} placeholder="Full name" />
+                  </FilterCell>
+                  <FilterCell flex={1.4} minWidth={120}>
+                    <ColSearch value={colFilters.mobile} onChange={(v) => setColFilter('mobile', v.replace(/[^\d]/g, ''))} placeholder="Mobile" />
+                  </FilterCell>
+                  <FilterCell flex={1.3} minWidth={120}>
+                    <ColSelect value={colFilters.aadhaar} options={AADHAAR_OPTIONS} onChange={(v) => setColFilter('aadhaar', v)} placeholder="All" />
+                  </FilterCell>
+                  {!isOperatorRole ? (
+                    <FilterCell flex={1.5} minWidth={120}>
+                      <ColSelect value={selectedOperatorId} options={operatorFilterOptions} onChange={(v) => setSelectedOperatorId(v ? String(v) : '')} placeholder="Operator" allLabel="All operators" />
+                    </FilterCell>
+                  ) : null}
+                  <FilterCell flex={1.8} minWidth={140}>
+                    <ColSelect value={colFilters.plan} options={listFacets.plans} onChange={(v) => setColFilter('plan', v)} placeholder="Plan" allLabel="All plans" />
+                  </FilterCell>
+                  <FilterCell flex={2.2} minWidth={140}>
+                    <ColDateRange value={colFilters.expiry} onChange={(v) => setColFilter('expiry', v)} placeholder="Expiry date" />
+                  </FilterCell>
+                  {showRegisteredCol ? <View style={{ flex: 1.3, minWidth: 110 }} /> : null}
+                  <View style={{ flex: 1.6, minWidth: 150, justifyContent: 'center' }}>
+                    {hasActiveColSearch ? (
+                      <TouchableOpacity style={styles.excelBtnReset} onPress={resetColSearch} title="Clear column filters">
+                        <Feather name="x" size={11} color="#dc2626" style={{ marginRight: 3 }} />
+                        <Text style={styles.excelBtnResetText}>Clear filters</Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+                </>
+              )}
             </View>
 
             {/* Table Rows Body Container (ONLY SUBSCRIBER LIST ROWS SCROLL) */}
@@ -3010,7 +3349,10 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 const intRowKey = cust.id && cust.id !== 'int_undefined' ? cust.id : `int_row_${idx}_${cust.cust_id ?? idx}`;
 
                 return (
-                  <View key={intRowKey} style={styles.tr}>
+                  <View key={intRowKey} style={[styles.tr, bulkSel[cust.internet_id] && { backgroundColor: '#eff6ff' }]}>
+                    <TouchableOpacity style={{ width: 34, alignItems: 'center', justifyContent: 'center' }} onPress={() => bulkPick(cust)}>
+                      <Feather name={bulkSel[cust.internet_id] ? 'check-square' : 'square'} size={16} color={bulkSel[cust.internet_id] ? '#1d4ed8' : '#94a3b8'} />
+                    </TouchableOpacity>
                     {/* Username */}
                     <View style={{ flex: 1.5, minWidth: 120, gap: 3 }}>
                       <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
@@ -3258,6 +3600,106 @@ const styles = StyleSheet.create({
     zIndex: 50,
   },
   th: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase' },
+  excelFilterRow: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    alignItems: 'center',
+    paddingVertical: 6,
+    borderBottomWidth: 2,
+    borderBottomColor: '#cbd5e1',
+    backgroundColor: '#f8fafc',
+    position: 'sticky',
+    top: 40,
+    zIndex: 49,
+  },
+  excelColSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 6,
+    height: 28,
+    paddingHorizontal: 6,
+  },
+  excelColSearchBoxActive: {
+    borderColor: '#3b82f6',
+    backgroundColor: '#eff6ff',
+  },
+  excelColSearchInput: {
+    flex: 1,
+    fontSize: 11,
+    color: '#0f172a',
+    outlineStyle: 'none',
+    padding: 0,
+  },
+  excelToggleWrap: {
+    flexDirection: 'row',
+    backgroundColor: '#e2e8f0',
+    borderRadius: 6,
+    padding: 2,
+    height: 28,
+    alignItems: 'center',
+  },
+  excelToggleBtn: {
+    flex: 1,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
+    paddingHorizontal: 2,
+  },
+  excelToggleBtnActiveAll: {
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 1,
+    elevation: 1,
+  },
+  excelToggleBtnActiveOn: {
+    backgroundColor: '#16a34a',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 1,
+    elevation: 1,
+  },
+  excelToggleBtnActiveOff: {
+    backgroundColor: '#64748b',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 1,
+    elevation: 1,
+  },
+  excelToggleText: {
+    fontSize: 9.5,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  excelToggleTextActiveAll: {
+    color: '#1d4ed8',
+    fontWeight: '800',
+  },
+  excelToggleTextActiveWhite: {
+    color: '#ffffff',
+    fontWeight: '800',
+  },
+  excelBtnReset: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fee2e2',
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+    borderRadius: 6,
+  },
+  excelBtnResetText: {
+    fontSize: 10.5,
+    fontWeight: '700',
+    color: '#dc2626',
+  },
   tr: { flexDirection: 'row', flexWrap: 'nowrap', alignItems: 'center', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.05)', minHeight: 48 },
   tdBold: { fontSize: 13, fontWeight: '700', color: COLORS.textMain },
   tdSub: { fontSize: 11, fontWeight: '700', color: COLORS.textMuted },

@@ -1,7 +1,9 @@
+// must stay first: gives Android / iOS a stand-in window.location / history so web-only code can't crash
+import './src/utils/browserPolyfill';
 import React, { useState } from 'react';
 import { StyleSheet, View, SafeAreaView, StatusBar, useWindowDimensions, Text, TouchableOpacity, Platform } from 'react-native';
 import { COLORS } from './src/constants/theme';
-import { setApiConfig, onUnauthorized, isJwtExpired, clearStoredSession } from './src/services/oneBssApi';
+import { setApiConfig, onUnauthorized, isJwtExpired, clearStoredSession, OneBssApi } from './src/services/oneBssApi';
 import { Sidebar } from './src/components/Sidebar';
 import { Header } from './src/components/Header';
 import { DashboardScreen } from './src/screens/DashboardScreen';
@@ -10,10 +12,16 @@ import { CustomerPricesPage } from './src/components/plans/CustomerPricesPage';
 import { CustomerScreen } from './src/screens/CustomerScreen';
 import { OttSubscribersScreen } from './src/screens/OttSubscribersScreen';
 import { InventoryScreen } from './src/screens/InventoryScreen';
+import { DhcpDevicesScreen } from './src/screens/DhcpDevicesScreen';
 import { IptvRenewalsScreen } from './src/screens/IptvRenewalsScreen';
 import { PayuPaymentsScreen } from './src/screens/PayuPaymentsScreen';
 import { WalletScreen } from './src/screens/WalletScreen';
+import { NasScreen } from './src/screens/NasScreen';
+import { IpPoolsScreen } from './src/screens/IpPoolsScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
+import { StaffScreen } from './src/screens/StaffScreen';
+import { ActivityLogScreen } from './src/screens/ActivityLogScreen';
+import { isStaffUser, tabAllowed, firstAllowedTab } from './src/services/staffAccess';
 import { ToastContainer, toast } from 'react-toastify';
 import { createPortal } from 'react-dom';
 
@@ -23,6 +31,7 @@ import { createPortal } from 'react-dom';
 // own portal on <body>, above everything.
 const TOAST_CONTAINER_STYLE = { zIndex: 2147483647 };
 const ToastHost = () => {
+  if (Platform.OS !== 'web') return null;
   const toasts = <ToastContainer position="top-right" autoClose={3500} theme="colored" style={TOAST_CONTAINER_STYLE} />;
   if (Platform.OS === 'web' && typeof document !== 'undefined') {
     return createPortal(toasts, document.body);
@@ -30,7 +39,48 @@ const ToastHost = () => {
   return toasts;
 };
 
+// A crash in any screen shows a message with Retry instead of a blank page.
+class ErrorBoundary extends React.Component {
+  constructor(props) {
+    super(props);
+    this.state = { hasError: false, error: null };
+  }
+  static getDerivedStateFromError(error) {
+    return { hasError: true, error };
+  }
+  componentDidCatch(error, errorInfo) {
+    console.error('App ErrorBoundary caught an error:', error, errorInfo);
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <SafeAreaView style={{ flex: 1, backgroundColor: '#0f172a', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+          <Text style={{ fontSize: 20, fontWeight: '800', color: '#ffffff', marginBottom: 12 }}>OneBSS Platform</Text>
+          <Text style={{ fontSize: 14, color: '#94a3b8', textAlign: 'center', marginBottom: 20 }}>
+            {this.state.error?.message || 'An unexpected error occurred while starting the application.'}
+          </Text>
+          <TouchableOpacity
+            onPress={() => this.setState({ hasError: false, error: null })}
+            style={{ backgroundColor: '#0284c7', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 8 }}
+          >
+            <Text style={{ color: '#ffffff', fontWeight: '700' }}>Retry</Text>
+          </TouchableOpacity>
+        </SafeAreaView>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
+  return (
+    <ErrorBoundary>
+      <MainApp />
+    </ErrorBoundary>
+  );
+}
+
+function MainApp() {
   const { width } = useWindowDimensions();
   const isDesktop = width >= 768;
 
@@ -43,7 +93,7 @@ export default function App() {
           const [routePart] = hash.split('&');
           const [rawTab, rawFilter] = routePart.split('?filter=');
           const tab = rawTab ? rawTab.split('?')[0] : '';
-          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'iptv_renewals', 'payu_payments', 'wallet'].includes(tab)) {
+          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'dhcp_devices', 'iptv_renewals', 'payu_payments', 'wallet', 'nas', 'ip_pools', 'staff', 'activity'].includes(tab)) {
             const filter = rawFilter ? rawFilter.split('?')[0].split('&')[0] : 'all';
             const rangeMatch = hash.match(/[?&]range=([a-z0-9_]+)/);
             return { tab, filter, range: rangeMatch ? rangeMatch[1] : '' };
@@ -51,7 +101,7 @@ export default function App() {
         }
         const savedTab = localStorage.getItem('onebss_active_tab');
         const savedFilter = localStorage.getItem('onebss_filter');
-        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'iptv_renewals', 'payu_payments', 'wallet'].includes(savedTab)) {
+        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'dhcp_devices', 'iptv_renewals', 'payu_payments', 'wallet', 'nas', 'ip_pools', 'staff', 'activity'].includes(savedTab)) {
           return { tab: savedTab, filter: savedFilter || 'all', range: '' };
         }
       }
@@ -97,30 +147,39 @@ export default function App() {
   const [partnerCreateRole, setPartnerCreateRole] = useState(null);
   const [partnerInitialRole, setPartnerInitialRole] = useState('');
 
-  // Back from PayU's checkout (pg/payu_callback.php sends the browser to #payu=<txnid>), or the
-  // Wallet page reloaded right after leaving for PayU (browser Back): the Wallet page checks that
+  // Back from Razorpay or PayU checkout (sends the browser to #razorpay=<txnid> or #payu=<txnid>), or
+  // the Wallet page reloaded right after leaving (browser Back): the Wallet page checks that
   // payment — success goes to the dashboard, anything else is shown on the Wallet page.
-  const [payuResumeTxn, setPayuResumeTxn] = useState(() => {
+  const [onlineResume, setOnlineResume] = useState(() => {
     try {
       if (typeof window === 'undefined') return null;
-      const m = window.location.hash.match(/^#payu=([A-Za-z0-9]{6,40})/);
-      if (m) return m[1];
+      const mRzp = window.location.hash.match(/^#razorpay=([A-Za-z0-9_-]{6,50})/);
+      if (mRzp) return { txnid: mRzp[1], gateway: 'razorpay' };
+      const mPayu = window.location.hash.match(/^#payu=([A-Za-z0-9]{6,40})/);
+      if (mPayu) return { txnid: mPayu[1], gateway: 'payu' };
       if (/^#wallet/.test(window.location.hash)) {
-        const raw = localStorage.getItem('onebss_pending_payu_txn');
-        const pending = raw ? JSON.parse(raw) : null;
-        if (pending?.txnid && Date.now() - Number(pending.at || 0) < 30 * 60 * 1000) return pending.txnid;
+        const rawRzp = localStorage.getItem('onebss_pending_razorpay_txn');
+        const pendingRzp = rawRzp ? JSON.parse(rawRzp) : null;
+        if (pendingRzp?.txnid && Date.now() - Number(pendingRzp.at || 0) < 30 * 60 * 1000) {
+          return { txnid: pendingRzp.txnid, gateway: 'razorpay' };
+        }
+        const rawPayu = localStorage.getItem('onebss_pending_payu_txn');
+        const pendingPayu = rawPayu ? JSON.parse(rawPayu) : null;
+        if (pendingPayu?.txnid && Date.now() - Number(pendingPayu.at || 0) < 30 * 60 * 1000) {
+          return { txnid: pendingPayu.txnid, gateway: 'payu' };
+        }
       }
     } catch (e) {}
     return null;
   });
   React.useEffect(() => {
-    if (!payuResumeTxn || typeof window === 'undefined') return;
+    if (!onlineResume || typeof window === 'undefined') return;
     window.history.replaceState(null, '', '#wallet');
     setActiveTabState('wallet');
     try {
       localStorage.setItem('onebss_active_tab', 'wallet');
     } catch (e) {}
-  }, [payuResumeTxn]);
+  }, [onlineResume]);
 
   const handleNavigateToPartners = (role = '') => {
     setPartnerInitialRole(role || '');
@@ -174,6 +233,8 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    // recorded in the Activity Log (sent with the current token before it is cleared; never waits)
+    try { OneBssApi.logout().catch(() => {}); } catch (e) {}
     clearStoredSession();
     try {
       if (typeof window !== 'undefined') {
@@ -212,6 +273,39 @@ export default function App() {
       }
     } catch (e) {}
   };
+
+  // Staff login: refresh its permissions from the server (a role change applies without logging in again)
+  const staffIdForRefresh = user && user.staff ? user.staff.staff_id : null;
+  React.useEffect(() => {
+    if (!staffIdForRefresh) return;
+    let gone = false;
+    OneBssApi.staffMe().then((res) => {
+      if (gone || !res.ok || !res.data?.staff) return;
+      setUserState((prev) => {
+        if (!prev || !prev.staff) return prev;
+        const next = { ...prev, staff: { ...prev.staff, ...res.data.staff } };
+        try { localStorage.setItem('onebss_user', JSON.stringify(next)); } catch (e) {}
+        return next;
+      });
+    });
+    return () => { gone = true; };
+  }, [staffIdForRefresh, globalRefreshKey]);
+
+  // Staff: a page its role doesn't allow (typed link, old saved tab) goes to the first allowed one
+  React.useEffect(() => {
+    if (!user || !isStaffUser(user) || activeTab === 'login') return;
+    if (!tabAllowed(user, activeTab === 'networking' ? 'nas' : activeTab)) {
+      const first = firstAllowedTab(user);
+      if (first && first !== activeTab) setActiveTab(first);
+    }
+  }, [activeTab, user]);
+
+  // Operators have no Partners page: a typed or old #partners link lands on the dashboard
+  React.useEffect(() => {
+    if (activeTab === 'partners' && user && String(user.role || '').toLowerCase() === 'operator') {
+      setActiveTab('dashboard');
+    }
+  }, [activeTab, user]);
 
   // Sync hash changes if user hits browser back/forward (left arrow in web)
   React.useEffect(() => {
@@ -324,7 +418,7 @@ export default function App() {
         <LoginScreen
           onLoginSuccess={(userData) => {
             handleSetUser(userData);
-            setActiveTab('dashboard');
+            setActiveTab(firstAllowedTab(userData) || 'dashboard');
           }}
         />
         <ToastHost />
@@ -333,6 +427,17 @@ export default function App() {
   }
 
   const renderActiveScreen = () => {
+    if (isStaffUser(user) && !firstAllowedTab(user)) {
+      return (
+        <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 30 }}>
+          <Text style={{ fontSize: 16, fontWeight: '800', color: '#0f172a' }}>No pages in your role yet</Text>
+          <Text style={{ fontSize: 13, color: '#64748b', marginTop: 6, textAlign: 'center' }}>Your role "{user.staff.role_name || '—'}" has no permissions. Ask your admin to tick what you need.</Text>
+        </View>
+      );
+    }
+    if (isStaffUser(user) && !tabAllowed(user, activeTab)) {
+      return null; // redirected to the first allowed page (effect above)
+    }
     switch (activeTab) {
       case 'dashboard':
         return (
@@ -344,6 +449,10 @@ export default function App() {
           />
         );
       case 'partners':
+        // operators have no partners below them (a typed #partners link goes to the dashboard)
+        if (String(user?.role || '').toLowerCase() === 'operator') {
+          return null;
+        }
         return (
           <PartnerScreen
             refreshSignal={globalRefreshKey}
@@ -363,17 +472,29 @@ export default function App() {
         // operators: one customer price per package for all their customers
         return <CustomerPricesPage key={`cp_${globalRefreshKey}`} partnerId={user?.partner_id} partnerName={user?.partner_name} readOnly={String(user?.role || '').toLowerCase() !== 'operator'} />;
       case 'inventory':
-        // super admin only (the API answers 403 to everyone else)
+        // everyone: super admin all devices, admins their tree, operators their own devices
+        return <InventoryScreen user={user} refreshSignal={globalRefreshKey} />;
+      case 'dhcp_devices':
+        // super admin only
         if (String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin') {
           return <DashboardScreen user={user} refreshSignal={globalRefreshKey} onNavigateToCustomers={handleNavigateToCustomers} onNavigateToPartners={handleNavigateToPartners} />;
         }
-        return <InventoryScreen user={user} refreshSignal={globalRefreshKey} />;
+        return <DhcpDevicesScreen user={user} refreshSignal={globalRefreshKey} />;
       case 'iptv_renewals':
         // super admin only (the API answers 403 to everyone else)
         if (String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin') {
           return <DashboardScreen user={user} refreshSignal={globalRefreshKey} onNavigateToCustomers={handleNavigateToCustomers} onNavigateToPartners={handleNavigateToPartners} />;
         }
         return <IptvRenewalsScreen refreshSignal={globalRefreshKey} />;
+      case 'nas':
+      case 'ip_pools':
+        // Networking — super admin only (the API answers 403 to everyone else)
+        if (String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin') {
+          return <DashboardScreen user={user} refreshSignal={globalRefreshKey} onNavigateToCustomers={handleNavigateToCustomers} onNavigateToPartners={handleNavigateToPartners} />;
+        }
+        return activeTab === 'nas'
+          ? <NasScreen refreshSignal={globalRefreshKey} onOpenPools={() => setActiveTab('ip_pools')} />
+          : <IpPoolsScreen refreshSignal={globalRefreshKey} />;
       case 'payu_payments':
         // super admin only
         if (String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin') {
@@ -389,11 +510,16 @@ export default function App() {
           <WalletScreen
             user={user}
             refreshSignal={globalRefreshKey}
-            resumeTxnid={payuResumeTxn}
-            onResumeHandled={() => setPayuResumeTxn(null)}
+            resumeTxnid={onlineResume?.txnid}
+            resumeGateway={onlineResume?.gateway}
+            onResumeHandled={() => setOnlineResume(null)}
             onPaid={() => setActiveTab('dashboard')}
           />
         );
+      case 'staff':
+        return <StaffScreen user={user} refreshSignal={globalRefreshKey} />;
+      case 'activity':
+        return <ActivityLogScreen user={user} refreshSignal={globalRefreshKey} />;
       default:
         return <DashboardScreen user={user} refreshSignal={globalRefreshKey} onNavigateToCustomers={handleNavigateToCustomers} onNavigateToPartners={handleNavigateToPartners} />;
     }
@@ -418,12 +544,22 @@ export default function App() {
         return { title: 'Customer Prices', subtitle: 'What your customers pay, per package' };
       case 'inventory':
         return { title: 'Inventory', subtitle: 'ONU stock, vendors and models' };
+      case 'dhcp_devices':
+        return { title: 'DHCP Devices' };
       case 'iptv_renewals':
-        return { title: 'IPTV Auto-Renewals', subtitle: 'Paid IPTV months renewed on Pioneer by the hourly cron' };
+        return { title: 'IPTV Auto-Renewals' };
       case 'payu_payments':
-        return { title: 'Online Payments', subtitle: 'Operator wallet top-ups through PayU' };
+        return { title: 'Online Payments', subtitle: 'Operator wallet top-ups (Razorpay, PayU) and gateway settings' };
+      case 'nas':
+        return { title: 'NAS' };
+      case 'ip_pools':
+        return { title: 'IP Pools' };
       case 'wallet':
         return { title: 'Wallet', subtitle: 'Add money and see your transactions' };
+      case 'staff':
+        return { title: 'Staff & Roles', subtitle: 'Your office staff, their logins and what each role may do' };
+      case 'activity':
+        return { title: 'Activity Log', subtitle: 'Who did what, and when' };
       default:
         return { title: 'OneBSS Platform', subtitle: 'Management Portal' };
     }

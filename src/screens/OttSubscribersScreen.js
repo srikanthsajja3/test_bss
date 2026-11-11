@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 import { formatApiDate } from '../components/CustomerAccountsOverview';
+import { ColSearch, ColSelect, ColDateRange, FilterCell, dateRangeParams } from '../components/ColumnFilters';
 
 const OTT = '#0ea5e9';
 const CHIPS = [
@@ -40,16 +41,49 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
   const [error, setError] = useState('');
   const seq = useRef(0);
 
+  // Filter row under the header. Sent to customers_list.php, so it filters every page.
+  const EMPTY = { subId: '', name: '', mobile: '', operator: '', pkg: '', expiry: null };
+  const [cf, setCf] = useState(EMPTY);
+  const [cfText, setCfText] = useState({ subId: '', name: '', mobile: '' });
+  const [facets, setFacets] = useState({ plans: [], operators: [] });
+  const setCol = (k, v) => setCf((f) => ({ ...f, [k]: v }));
+  const hasActiveColSearch = useMemo(
+    () => Object.values(cf).some((v) => (v && typeof v === 'object' ? !!v.preset : String(v ?? '').trim() !== '')) || status !== 'all',
+    [cf, status]
+  );
+  const resetColSearch = () => {
+    setCf(EMPTY);
+    setCfText({ subId: '', name: '', mobile: '' });
+    setStatus('all');
+  };
+  useEffect(() => {
+    const t = setTimeout(() => setCfText({ subId: cf.subId.trim(), name: cf.name.trim(), mobile: cf.mobile.trim() }), 400);
+    return () => clearTimeout(t);
+  }, [cf.subId, cf.name, cf.mobile]);
+  const colQuery = {
+    partner_id: cf.operator || undefined,
+    f_subid: cfText.subId, f_name: cfText.name, f_mobile: cfText.mobile, f_plan: cf.pkg,
+    ...dateRangeParams(cf.expiry),
+  };
+  const colKey = JSON.stringify(colQuery);
+  useEffect(() => {
+    let live = true;
+    OneBssApi.getListFacets('ott', cf.operator)
+      .then((res) => { if (live && res?.ok && res.data?.success) setFacets({ plans: res.data.plans || [], operators: res.data.operators || [] }); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [cf.operator, refreshSignal]);
+
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 350);
     return () => clearTimeout(t);
   }, [search]);
-  useEffect(() => setPage(1), [debounced, status]);
+  useEffect(() => setPage(1), [debounced, status, colKey]);
 
   const load = async () => {
     const my = ++seq.current;
     setLoading(true);
-    const res = await OneBssApi.getCustomersList(page, PAGE, 'ott', debounced, { status });
+    const res = await OneBssApi.getCustomersList(page, PAGE, 'ott', debounced, { status, ...colQuery });
     if (my !== seq.current) return;
     setLoading(false);
     if (!res.ok) {
@@ -64,33 +98,72 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
   };
   useEffect(() => {
     load();
-  }, [page, debounced, status, refreshSignal]);
+  }, [page, debounced, status, colKey, refreshSignal]);
 
   const open = (row) => {
     if (!row.cust_id) return;
-    if (typeof window !== 'undefined') window.location.hash = `customers?sub_id=${row.cust_id}`;
+    if (typeof window !== 'undefined') window.location.hash = `customers?sub_id=${row.cust_id}&from=ott`;
   };
+
+  const filteredRows = rows; // the server already applied every filter
 
   const pages = Math.max(1, Math.ceil(total / PAGE));
   const table = (
     <View style={{ flex: 1 }}>
+      {/* Table Header */}
       <View style={[styles.tr, styles.thRow]}>
         <Text style={[styles.th, { flex: 1.4, minWidth: 130 }]}>Subscriber ID</Text>
-        <Text style={[styles.th, { flex: 1, minWidth: 100 }]}>Status</Text>
+        <Text style={[styles.th, { flex: 1, minWidth: 115 }]}>Status</Text>
         <Text style={[styles.th, { flex: 1.6, minWidth: 140 }]}>Full Name</Text>
         <Text style={[styles.th, { flex: 1.2, minWidth: 110 }]}>Mobile</Text>
         {!isOperator ? <Text style={[styles.th, { flex: 1.4, minWidth: 120 }]}>Operator</Text> : null}
         <Text style={[styles.th, { flex: 1.6, minWidth: 140 }]}>Package</Text>
         <Text style={[styles.th, { flex: 1.5, minWidth: 140 }]}>Expiry</Text>
       </View>
+
+      {/* Filter row: one control per column, filters the whole list on the server */}
+      <View style={styles.excelFilterRow}>
+        <FilterCell flex={1.4} minWidth={130}>
+          <ColSearch value={cf.subId} onChange={(v) => setCol('subId', v)} placeholder="Subscriber ID" />
+        </FilterCell>
+        <FilterCell flex={1} minWidth={115}>
+          <ColSelect value={status === 'all' ? '' : status} options={CHIPS.filter((c) => c.id !== 'all').map((c) => ({ value: c.id, label: c.label }))} onChange={(v) => setStatus(v || 'all')} placeholder="Status" />
+        </FilterCell>
+        <FilterCell flex={1.6} minWidth={140}>
+          <ColSearch value={cf.name} onChange={(v) => setCol('name', v)} placeholder="Full name" />
+        </FilterCell>
+        <FilterCell flex={1.2} minWidth={110}>
+          <ColSearch value={cf.mobile} onChange={(v) => setCol('mobile', v.replace(/[^\d]/g, ''))} placeholder="Mobile" />
+        </FilterCell>
+        {!isOperator ? (
+          <FilterCell flex={1.4} minWidth={120}>
+            <ColSelect value={cf.operator} options={facets.operators} onChange={(v) => setCol('operator', v ? String(v) : '')} placeholder="Operator" allLabel="All operators" />
+          </FilterCell>
+        ) : null}
+        <FilterCell flex={1.6} minWidth={140}>
+          <ColSelect value={cf.pkg} options={facets.plans} onChange={(v) => setCol('pkg', v)} placeholder="Package" allLabel="All packages" />
+        </FilterCell>
+        <View style={{ flex: 1.5, minWidth: 140, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <ColDateRange value={cf.expiry} onChange={(v) => setCol('expiry', v)} placeholder="Expiry date" />
+          </View>
+          {hasActiveColSearch ? (
+            <TouchableOpacity style={styles.btnResetCol} onPress={resetColSearch} title="Clear filters">
+              <Feather name="x-circle" size={14} color="#dc2626" />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      </View>
+
+      {/* Data Rows */}
       {error ? (
         <Text style={[styles.empty, { color: '#b91c1c' }]}>{error}</Text>
-      ) : rows.length === 0 ? (
+      ) : filteredRows.length === 0 ? (
         <View style={{ padding: 30, alignItems: 'center' }}>
           {loading ? <ActivityIndicator size="small" color={OTT} /> : <Text style={styles.empty}>No OTT subscribers match.</Text>}
         </View>
       ) : (
-        rows.map((r) => {
+        filteredRows.map((r) => {
           const b = BADGE[r.status_key] || BADGE.disabled;
           return (
             <View key={r.ott_id} style={styles.tr}>
@@ -189,4 +262,90 @@ const styles = StyleSheet.create({
   pill: { alignSelf: 'flex-start', paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12 },
   pillText: { fontSize: 10, fontWeight: '700' },
   empty: { padding: 20, fontSize: 13, color: '#64748b', textAlign: 'center' },
+
+  // Excel Filter Row styles
+  excelFilterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    backgroundColor: '#f8fafc',
+    borderBottomWidth: 2,
+    borderBottomColor: '#cbd5e1',
+  },
+  colSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 6,
+    height: 28,
+    paddingHorizontal: 6,
+  },
+  colSearchBoxActive: {
+    borderColor: '#0ea5e9',
+    backgroundColor: '#f0f9ff',
+  },
+  colSearchInput: {
+    flex: 1,
+    fontSize: 11,
+    color: '#0f172a',
+    outlineStyle: 'none',
+    padding: 0,
+  },
+  statusToggleWrap: {
+    flexDirection: 'row',
+    backgroundColor: '#e2e8f0',
+    borderRadius: 6,
+    padding: 2,
+    height: 28,
+    alignItems: 'center',
+  },
+  statusToggleBtn: {
+    flex: 1,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
+    paddingHorizontal: 2,
+  },
+  statusToggleBtnActiveAll: {
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 1,
+    elevation: 1,
+  },
+  statusToggleBtnActiveAct: {
+    backgroundColor: '#15803d',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 1,
+    elevation: 1,
+  },
+  statusToggleBtnActiveExp: {
+    backgroundColor: '#b91c1c',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 1,
+    elevation: 1,
+  },
+  statusToggleText: {
+    fontSize: 9.5,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  statusToggleTextActiveAll: {
+    color: '#0ea5e9',
+    fontWeight: '800',
+  },
+  statusToggleTextActiveWhite: {
+    color: '#ffffff',
+    fontWeight: '800',
+  },
+  btnResetCol: {
+    padding: 4,
+  },
 });

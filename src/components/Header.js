@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, useWindowDimensions } from 'r
 import { Feather, Ionicons } from '@expo/vector-icons';
 import { COLORS, GLASS_STYLE } from '../constants/theme';
 import { OneBssApi, getOriginalSession, popOriginalSession, switchSession } from '../services/oneBssApi';
+import { can } from '../services/staffAccess';
 
 export const Header = ({
   title,
@@ -63,7 +64,7 @@ export const Header = ({
   const userRole = (user?.role || '').toLowerCase();
   const isOperator = userRole === 'operator';
   const isSuperAdminOrAdmin = userRole === 'superadmin' || userRole === 'admin';
-  const showWallet = isOperator && !isSuperAdminOrAdmin;
+  const showWallet = isOperator && !isSuperAdminOrAdmin && can(user, 'wallet.view'); // staff: only with Wallet permission
   const balanceVal = liveWalletBalance !== undefined ? liveWalletBalance : (user?.wallet_balance !== undefined ? user.wallet_balance : 0);
   const formattedBalance = `₹ ${Number(balanceVal).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`;
   const handleAddClick = onOpenCreate || onOpenCreateOperator || onOpenCreateAdmin;
@@ -108,9 +109,11 @@ export const Header = ({
               <Text style={styles.walletLbl}>{isMobile ? 'WALLET' : 'WALLET BALANCE'}</Text>
               <Text style={styles.walletVal}>{formattedBalance}</Text>
             </View>
+            {can(user, 'wallet.topup') ? (
             <View style={[styles.btnHeaderTopup, isMobile && { width: 20, height: 20, marginLeft: 6 }]}>
               <Feather name="plus" size={isMobile ? 12 : 14} color="#ffffff" />
             </View>
+            ) : null}
           </TouchableOpacity>
         )}
 

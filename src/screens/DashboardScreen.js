@@ -4,6 +4,8 @@ import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { COLORS, GLASS_CARD_INTERACTIVE } from '../constants/theme';
 import { OneBssApi, setApiConfig } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
+import { AddCustomerScreen } from './AddCustomerScreen';
+import { can } from '../services/staffAccess';
 
 export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartners, refreshSignal = 0 }) => {
   const { width } = useWindowDimensions();
@@ -19,6 +21,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
   const [dateSummary, setDateSummary] = useState(null); // customers_by_date.php?summary=1
   const [dateSummaryError, setDateSummaryError] = useState('');
   const [dashboardSearch, setDashboardSearch] = useState('');
+  const [showAddCustomer, setShowAddCustomer] = useState(false); // operator: Add Customer from the dashboard
   const [partnerCounts, setPartnerCounts] = useState({ total: 0, admins: 0, operators: 0 });
 
   const [allPartners, setAllPartners] = useState([]);
@@ -222,6 +225,18 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
     }
   };
 
+  if (showAddCustomer) {
+    return (
+      <AddCustomerScreen
+        user={user}
+        operatorId={user?.partner_id || user?.operator_id}
+        isIptvMode={false}
+        onCancel={() => setShowAddCustomer(false)}
+        onSuccess={() => setShowAddCustomer(false)}
+      />
+    );
+  }
+
   // SUPER ADMIN, ADMIN & OPERATOR DASHBOARDS
   return (
     <ScrollView
@@ -250,6 +265,19 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
       ) : null}
 
 
+
+      {/* Add Customer (operators add customers; the same form as on the customers list) */}
+      {isOperator && can(user, 'internet.customers', 'add') ? (
+        <View style={{ flexDirection: 'row', justifyContent: 'flex-end', marginBottom: 12 }}>
+          <TouchableOpacity
+            onPress={() => setShowAddCustomer(true)}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: COLORS.primary || '#2563eb', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10 }}
+          >
+            <Feather name="user-plus" size={16} color="#ffffff" />
+            <Text style={{ color: '#ffffff', fontWeight: '700', fontSize: 14 }}>Add Customer</Text>
+          </TouchableOpacity>
+        </View>
+      ) : null}
 
       {/* SEARCH INPUT IN DASHBOARD WITH FLOATING DROPDOWN */}
       <View style={{ position: 'relative', zIndex: 1000, marginBottom: 16 }}>
@@ -349,7 +377,7 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
                             #{p.partner_id || p.id} - {p.partner_name || p.name}
                           </Text>
                           <Text style={{ fontSize: 11, color: '#047857' }}>
-                            {p.company_name} • {p.partner_mobile || 'No mobile'} • {p.partner_region || 'Region —'}
+                            {p.company_name} • {p.partner_mobile || 'No mobile'}
                           </Text>
                         </View>
                       </View>

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, ActivityIndicator, useWindowDimensions, Modal, TextInput, Linking } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
-import { CustomerPhoto, isAccountVerified } from './internet/shared';
+import { CustomerPhoto, isAadhaarVerified, isRadiusVerified, aadhaarBlocksRecharge, iptvLabel, ModalShell, Btn, sharedStyles } from './internet/shared';
 import { OneBssApi } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
 import { CustomerLocationModal } from './CustomerLocationModal';
@@ -133,8 +133,8 @@ export const normaliseIptvAccount = (acc, index) => ({
   index,
   key: `iptv_${acc.id ?? index}`,
   id: acc.id,
-  title: clean(acc.pioneer_stb_id) ? `STB ${acc.pioneer_stb_id}` : `IPTV #${acc.id}`,
-  subtitle: clean(acc.branch_name) ? `Branch ${acc.branch_name} · IPTV #${acc.id}` : `IPTV #${acc.id}`,
+  title: iptvLabel(acc),
+  subtitle: [clean(acc.device_name) && clean(acc.pioneer_stb_id) ? `STB ${acc.pioneer_stb_id}` : '', clean(acc.branch_name) ? `Branch ${acc.branch_name}` : '', `IPTV #${acc.id}`].filter(Boolean).join(' · '),
   statusText: clean(acc.sts) || 'Unknown',
   statusColor: null,
   online: false,
@@ -155,12 +155,11 @@ export const normaliseIptvAccount = (acc, index) => ({
 
 // ---------- small pieces ----------
 
-const InfoRow = ({ label, children }) => (
-  <View style={styles.infoRow}>
-    <Text style={styles.infoLabel}>{label}</Text>
-    <View style={styles.infoValueWrap}>{typeof children === 'string' ? <Text style={styles.infoValue} numberOfLines={1}>{children}</Text> : children}</View>
-  </View>
-);
+const KIND = {
+  internet: { color: '#059669', soft: 'rgba(16,185,129,0.12)', icon: 'wifi', label: 'Internet' },
+  iptv: { color: '#7c3aed', soft: 'rgba(139,92,246,0.12)', icon: 'tv', label: 'IPTV' },
+  ott: { color: '#0284c7', soft: 'rgba(14,165,233,0.12)', icon: 'play-circle', label: 'OTT' },
+};
 
 const Pill = ({ text, tone }) => (
   <View style={[styles.pill, { backgroundColor: tone.bg }]}>
@@ -168,25 +167,103 @@ const Pill = ({ text, tone }) => (
   </View>
 );
 
-const AccountCard = ({ account, isMobile, onInternetRecharge, onIptvRecharge, onOttRecharge, onOttDeactivate, onVerify, onDetails, onRecheck, readOnly }) => {
+// Plan length in days from "1 Month", "3 Months", "30 Days", "1 Year" (or OTT validity_days); default 30.
+const planDays = (account) => {
+  const v = Number(account.raw?.validity_days);
+  if (v > 0) return v;
+  const m = String(account.subplanLabel || account.planLabel || '').match(/(\d+)\s*(day|month|year)/i);
+  if (!m) return 30;
+  const n = Number(m[1]);
+  return /year/i.test(m[2]) ? n * 365 : /month/i.test(m[2]) ? n * 30 : n;
+};
+
+/** How much of the current plan is left — the bar under each card's expiry. */
+const ValidityBar = ({ account }) => {
+  const d = parseApiDate(account.expiration);
+  if (!d) return <View style={styles.barTrack} />;
+  const left = (d.getTime() - Date.now()) / 86400000;
+  const pct = left <= 0 ? 100 : Math.max(4, Math.min(100, (left / planDays(account)) * 100));
+  const color = left <= 0 ? '#dc2626' : left <= 3 ? '#d97706' : KIND[account.kind].color;
+  return (
+    <View style={styles.barTrack}>
+      <View style={{ width: `${pct}%`, height: '100%', borderRadius: 2, backgroundColor: color, opacity: left <= 0 ? 0.35 : 1 }} />
+    </View>
+  );
+};
+
+const AadhaarLine = ({ raw, onVerify }) => {
+  if (isAadhaarVerified(raw)) {
+    return (
+      <View style={[styles.kycLine, styles.kycOk]}>
+        <Feather name="shield" size={13} color="#047857" />
+        <Text style={[styles.kycText, { color: '#065f46' }]} numberOfLines={1}>Aadhaar verified</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={[styles.kycLine, styles.kycBad]}>
+      <Feather name="shield-off" size={13} color="#b45309" />
+      <Text style={[styles.kycText, { color: '#92400e', flex: 1 }]} numberOfLines={1}>Aadhaar not verified</Text>
+      {onVerify ? (
+        <TouchableOpacity style={styles.kycVerifyBtn} onPress={() => onVerify(raw)}>
+          <Feather name="shield" size={11} color="#ffffff" />
+          <Text style={styles.kycVerifyText}>Verify</Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+};
+
+const AccountCard = ({ account, isMobile, onInternetRecharge, onIptvRecharge, onOttRecharge, onOttDeactivate, onVerify, onVerifyCustomer, onDetails, onRecheck, onRename, readOnly }) => {
+  const k = KIND[account.kind];
   const expiry = describeExpiry(account.expiration);
   const isInternet = account.kind === 'internet';
-  const accent = isInternet ? COLORS.primary : account.kind === 'ott' ? '#0ea5e9' : '#8b5cf6';
   const isAdvance = defaultRechargeType(account) === 'advance';
-  const verified = !isInternet || isAccountVerified(account.raw);
+  // blocks recharge only when the operator requires Aadhaar; otherwise "Verify" stays on the Aadhaar line
+  const needsAadhaar = isInternet && aadhaarBlocksRecharge(account.raw);
+  const canVerifyInline = isInternet && !readOnly && !needsAadhaar && !isAadhaarVerified(account.raw) && !!onVerify;
+  const hasDate = !!parseApiDate(account.expiration);
+  const hasPlan = account.planLabel && account.planLabel !== '—';
+
+  let primary = null;
+  if (!readOnly) {
+    // a handler left out (staff role without that permission) = no button
+    if (account.raw?.open_recharge) {
+      primary = onRecheck ? { label: 'Recheck', icon: 'rotate-ccw', bg: '#d97706', onPress: () => onRecheck(account.raw) } : null;
+    } else if (isInternet && !isRadiusVerified(account.raw)) {
+      primary = onVerifyCustomer ? { label: 'Verify Customer', icon: 'user-check', bg: '#2563eb', onPress: () => onVerifyCustomer(account.raw) } : null;
+    } else if (needsAadhaar) {
+      primary = onVerify ? { label: 'Verify Aadhaar', icon: 'shield', bg: '#2563eb', onPress: () => onVerify(account.raw) } : null;
+    } else if ((isInternet || account.kind === 'iptv') && account.raw?.combo_lock) {
+      primary = null; // shown as a note
+    } else if (account.kind === 'ott') {
+      primary = onOttRecharge ? { label: isAdvance ? 'Advance renewal' : 'Recharge', icon: isAdvance ? 'fast-forward' : 'play-circle', bg: k.color, onPress: () => onOttRecharge(account.raw) } : null;
+    } else if (isInternet) {
+      primary = onInternetRecharge ? { label: isAdvance ? 'Advance renewal' : 'Recharge', icon: isAdvance ? 'fast-forward' : 'refresh-cw', bg: '#ea580c', disabled: !account.canRechargeAny, onPress: () => onInternetRecharge(account.raw, isAdvance) } : null;
+    } else {
+      primary = onIptvRecharge ? { label: isAdvance ? 'Advance renewal' : 'Recharge', icon: isAdvance ? 'fast-forward' : 'refresh-cw', bg: k.color, onPress: () => onIptvRecharge(account.raw) } : null;
+    }
+  }
 
   return (
-    <View style={[styles.accCard, { borderTopColor: accent }, isMobile ? { width: '100%' } : null]}>
+    <View style={[styles.accCard, isMobile ? { width: '100%', maxWidth: '100%' } : null]}>
       <View style={styles.accHeader}>
-        <View style={[styles.accIcon, { backgroundColor: isInternet ? 'rgba(16,185,129,0.12)' : account.kind === 'ott' ? 'rgba(14,165,233,0.12)' : 'rgba(139,92,246,0.12)' }]}>
-          <Feather name={isInternet ? 'wifi' : account.kind === 'ott' ? 'play-circle' : 'tv'} size={18} color={accent} />
+        <View style={[styles.accIcon, { backgroundColor: k.soft }]}>
+          <Feather name={k.icon} size={17} color={k.color} />
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.accTitle} numberOfLines={1}>{account.title}</Text>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+            <Text style={[styles.accTitle, { flexShrink: 1 }]} numberOfLines={1}>{account.title}</Text>
+            {account.kind === 'iptv' && onRename && !readOnly ? (
+              <TouchableOpacity onPress={() => onRename(account.raw)} style={styles.renameBtn} title={account.raw?.device_name ? 'Rename this device' : 'Name this device'} accessibilityLabel="Device name">
+                <Feather name="edit-2" size={12} color="#7c3aed" />
+              </TouchableOpacity>
+            ) : null}
+          </View>
           {isInternet ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 }}>
-              <View style={[styles.dot, { backgroundColor: account.online ? '#10b981' : '#94a3b8' }]} />
-              <Text style={[styles.accSubtitle, { color: account.online ? '#047857' : '#64748b' }]}>{account.online ? 'Online' : 'Offline'}</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
+              <View style={[styles.dot, { backgroundColor: account.online ? '#10b981' : '#cbd5e1' }]} />
+              <Text style={[styles.accSubtitle, { color: account.online ? '#047857' : '#64748b', marginTop: 0 }]}>{account.online ? 'Online now' : 'Offline'}</Text>
             </View>
           ) : (
             <Text style={styles.accSubtitle} numberOfLines={1}>{account.subtitle}</Text>
@@ -195,77 +272,52 @@ const AccountCard = ({ account, isMobile, onInternetRecharge, onIptvRecharge, on
         <Pill text={account.statusText} tone={statusTone(account.statusText, account.statusColor)} />
       </View>
 
-      <View style={styles.accBody}>
-        <InfoRow label="Plan">{`${account.planLabel}${account.subplanLabel && account.subplanLabel !== '—' ? ` · ${account.subplanLabel}` : ''}`}</InfoRow>
-        <InfoRow label="Expiry">
-          <View style={{ alignItems: 'flex-end' }}>
-            {parseApiDate(account.expiration) ? <Text style={styles.infoValue}>{formatApiDate(account.expiration, false)}</Text> : null}
-            <Text style={[styles.expiryHint, { color: TONE[expiry.tone].fg }]}>{expiry.text}</Text>
-
-          </View>
-        </InfoRow>
+      {/* expiry first: it is what the operator came for */}
+      <View style={styles.expiryBlock}>
+        <View style={{ flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }}>
+          <Text style={[styles.expiryMain, { color: TONE[expiry.tone].fg }]}>{expiry.text}</Text>
+          {hasDate ? <Text style={styles.expiryDate}>{formatApiDate(account.expiration, false)}</Text> : null}
+        </View>
+        <ValidityBar account={account} />
       </View>
 
-      {(account.kind === 'internet' || account.kind === 'iptv') && account.raw?.customer_price !== null && account.raw?.customer_price !== undefined ? (
-        <View style={styles.custPriceRow}>
-          <Feather name="tag" size={12} color="#047857" />
-          <Text style={styles.custPriceText} numberOfLines={1}>
-            Customer price ₹{Number(account.raw.customer_price).toFixed(2)}
-            {account.kind === 'iptv' ? ' (base pack)' : ''}
-          </Text>
-        </View>
-      ) : null}
+      <View style={styles.planRow}>
+        <Feather name="package" size={13} color="#64748b" />
+        <Text style={[styles.planText, !hasPlan && { color: '#94a3b8', fontWeight: '500' }]} numberOfLines={1}>
+          {hasPlan ? `${account.planLabel}${account.subplanLabel && account.subplanLabel !== '—' ? `, ${account.subplanLabel}` : ''}` : 'No package yet'}
+        </Text>
+        {(isInternet || account.kind === 'iptv') && account.raw?.customer_price !== null && account.raw?.customer_price !== undefined ? (
+          <Text style={styles.priceText}>₹{Number(account.raw.customer_price).toFixed(0)}{account.kind === 'iptv' ? ' base' : ''}</Text>
+        ) : null}
+      </View>
+
+      {isInternet ? <AadhaarLine raw={account.raw} onVerify={canVerifyInline ? onVerify : null} /> : null}
 
       {account.raw?.open_recharge ? (
         <View style={styles.recheckNote}>
           <Feather name="alert-triangle" size={12} color="#b45309" />
           <Text style={styles.recheckNoteText} numberOfLines={2}>
-            {account.raw.open_recharge.kind === 'combo' ? 'Combo recharge' : 'Last recharge'} not completed by the provider · ₹{Number(account.raw.open_recharge.amount || 0).toFixed(2)} paid
-            {account.raw.open_recharge.message ? ` · ${account.raw.open_recharge.message}` : ''}
+            {account.raw.open_recharge.kind === 'combo' ? 'Combo recharge' : 'Last recharge'} not completed by the provider. ₹{Number(account.raw.open_recharge.amount || 0).toFixed(2)} is already paid.
+          </Text>
+        </View>
+      ) : null}
+
+      {!readOnly && !account.raw?.open_recharge && !needsAadhaar && (isInternet || account.kind === 'iptv') && account.raw?.combo_lock ? (
+        <View style={styles.comboLock}>
+          <Feather name="layers" size={13} color="#be185d" />
+          <Text style={styles.comboLockText} numberOfLines={2}>
+            On combo "{account.raw.combo_lock.combo_name}" till {formatApiDate(account.raw.combo_lock.until, false)}. Use Combo recharge.
           </Text>
         </View>
       ) : null}
 
       <View style={styles.accActions}>
-        {readOnly ? null : account.raw?.open_recharge && onRecheck ? (
-          <TouchableOpacity style={[styles.btn, styles.btnRecheck]} onPress={() => onRecheck(account.raw)}>
-            <Feather name="rotate-ccw" size={13} color="#ffffff" />
-            <Text style={styles.btnQuickText}>Recheck</Text>
+        {primary ? (
+          <TouchableOpacity style={[styles.btn, { backgroundColor: primary.bg }, primary.disabled && styles.btnDisabled]} onPress={primary.onPress} disabled={primary.disabled}>
+            <Feather name={primary.icon} size={13} color="#ffffff" />
+            <Text style={styles.btnQuickText}>{primary.label}</Text>
           </TouchableOpacity>
-        ) : !verified ? (
-          // Customer verification is mandatory before Recharge / Advance Renewal
-          <TouchableOpacity style={[styles.btn, styles.btnVerify]} onPress={() => onVerify(account.raw)}>
-            <Feather name="user-check" size={13} color="#ffffff" />
-            <Text style={styles.btnQuickText}>Verify to recharge</Text>
-          </TouchableOpacity>
-        ) : (isInternet || account.kind === 'iptv') && account.raw?.combo_lock ? (
-          // on a running combo: only Combo Recharge (same combo) until internet and IPTV have both expired
-          <View style={styles.comboLock}>
-            <Feather name="layers" size={13} color="#be185d" />
-            <Text style={styles.comboLockText} numberOfLines={2}>
-              On combo "{account.raw.combo_lock.combo_name}" till {formatApiDate(account.raw.combo_lock.until, false)} — use Combo Recharge
-            </Text>
-          </View>
-        ) : account.kind === 'ott' ? (
-          <TouchableOpacity style={[styles.btn, styles.btnOtt]} onPress={() => onOttRecharge && onOttRecharge(account.raw)}>
-            <Feather name={isAdvance ? 'fast-forward' : 'play-circle'} size={13} color="#ffffff" />
-            <Text style={styles.btnQuickText}>{isAdvance ? 'Advance Renewal' : 'Recharge'}</Text>
-          </TouchableOpacity>
-        ) : isInternet ? (
-          <TouchableOpacity
-            style={[styles.btn, styles.btnQuick, !account.canRechargeAny && styles.btnDisabled]}
-            onPress={() => onInternetRecharge(account.raw, isAdvance)}
-            disabled={!account.canRechargeAny}
-          >
-            <Feather name={isAdvance ? 'fast-forward' : 'refresh-cw'} size={13} color="#ffffff" />
-            <Text style={styles.btnQuickText}>{isAdvance ? 'Advance Renewal' : 'Recharge'}</Text>
-          </TouchableOpacity>
-        ) : (
-          <TouchableOpacity style={[styles.btn, styles.btnIptv]} onPress={() => onIptvRecharge(account.raw)}>
-            <Feather name={isAdvance ? 'fast-forward' : 'refresh-cw'} size={13} color="#ffffff" />
-            <Text style={styles.btnQuickText}>{isAdvance ? 'Advance Renewal' : 'Recharge'}</Text>
-          </TouchableOpacity>
-        )}
+        ) : null}
         {account.kind === 'ott' ? (
           isAdvance && onOttDeactivate && !readOnly ? (
             <TouchableOpacity style={[styles.btn, styles.btnDetails]} onPress={() => onOttDeactivate(account.raw)} title="Stop the current OTT package (no refund)">
@@ -283,6 +335,8 @@ const AccountCard = ({ account, isMobile, onInternetRecharge, onIptvRecharge, on
     </View>
   );
 };
+
+
 
 // Small status line for the background provider sync of this customer.
 const SyncStatus = ({ syncState, onRetry }) => {
@@ -318,33 +372,6 @@ const SyncStatus = ({ syncState, onRetry }) => {
   );
 };
 
-const Section = ({ title, icon, color, count, emptyText, emptyContent, loading, headerAction, children }) => (
-  <View style={{ marginBottom: 22 }}>
-    <View style={styles.sectionHeader}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
-        <Feather name={icon} size={15} color={color} />
-        <Text style={styles.sectionTitle}>{title}</Text>
-        <View style={styles.countBadge}><Text style={styles.countBadgeText}>{count}</Text></View>
-      </View>
-      {headerAction}
-    </View>
-    {count === 0 && loading ? (
-      <View style={[styles.emptyBox, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
-        <ActivityIndicator size="small" color={color} />
-        <Text style={styles.emptyText}>Loading accounts…</Text>
-      </View>
-    ) : count === 0 ? (
-      emptyContent ? (
-        emptyContent
-      ) : (
-        <View style={styles.emptyBox}><Text style={styles.emptyText}>{emptyText}</Text></View>
-      )
-    ) : (
-      <View style={styles.grid}>{children}</View>
-    )}
-  </View>
-);
-
 // Quick Recharge type is decided by expiry: still running -> 'advance', expired / never activated -> 'recharge'
 export const defaultRechargeType = (account) => {
   const exp = parseApiDate(account?.expiration);
@@ -365,7 +392,7 @@ export const defaultRechargeType = (account) => {
  *  onInternetRecharge(rawInternetAccount, advance)  opens the plan-picker recharge modal
  *  onVerify(rawInternetAccount)                     opens Verify Customer (required before recharge)
  */
-export const CustomerAccountsOverview = ({ customer, loading = false, syncing = false, syncState = null, onBack, onOpenDetails, onInternetRecharge, onIptvRecharge, onVerify, onRefresh, onModifyMobile: onModifyMobileProp, onAddIptv, onComboRecharge: onComboRechargeProp, onRecheck, onOttRecharge, onAddOtt: onAddOttProp, onOttDeactivate, readOnly = false, operatorNames = {} }) => {
+export const CustomerAccountsOverview = ({ customer, loading = false, syncing = false, syncState = null, onBack, onOpenDetails, onInternetRecharge, onIptvRecharge, onVerify, onVerifyCustomer, onRefresh, onModifyMobile: onModifyMobileProp, onAddIptv, onComboRecharge: onComboRechargeProp, onRecheck, onOttRecharge, onAddOtt: onAddOttProp, onOttDeactivate, readOnly = false, operatorNames = {} }) => {
   // Admins (super distributor / distributor / sub distributor) only view: no recharge, edits or adds.
   const onModifyMobile = readOnly ? null : onModifyMobileProp;
   const onComboRecharge = readOnly ? null : onComboRechargeProp;
@@ -383,10 +410,34 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
   const [branchDropdownOpen, setBranchDropdownOpen] = useState(false);
   const [iptvSyncStatus, setIptvSyncStatus] = useState(customer?.iptv_sync_status || null);
   const [locationModalVisible, setLocationModalVisible] = useState(false);
+  const [tab, setTab] = useState('all'); // all | internet | iptv | ott
+  const [renameFor, setRenameFor] = useState(null); // iptv account being named
+  const [renameText, setRenameText] = useState('');
+  const [renaming, setRenaming] = useState(false);
+  const [mergeAsk, setMergeAsk] = useState(null); // cust_id being confirmed
+  const [merging, setMerging] = useState(null);
 
   useEffect(() => {
     setIptvSyncStatus(customer?.iptv_sync_status || null);
   }, [customer?.iptv_sync_status, customer?.cust_id]);
+
+  // Hide Add IPTV / Add OTT for operators that were never given that service (no plans assigned)
+  const [services, setServices] = useState(null); // { iptv, ott } | null while unknown
+  useEffect(() => {
+    setServices(null);
+    if (!customer?.cust_id || readOnly) return undefined;
+    let alive = true;
+    OneBssApi.getOperatorServices({ custId: customer.cust_id }).then((res) => {
+      if (alive && res?.ok && res.data?.success !== false && res.data?.data) setServices(res.data.data);
+    });
+    return () => { alive = false; };
+  }, [customer?.cust_id, readOnly]);
+  const offersIptv = !services || services.iptv !== false;
+  const offersOtt = !services || services.ott !== false;
+  // The empty "Add IPTV" / "Add OTT" cards and tabs only when the operator really has that
+  // service's plans assigned (known true — not while loading, not in read-only views).
+  const showIptvSlot = services?.iptv === true && !readOnly;
+  const showOttSlot = services?.ott === true && !!onAddOtt;
 
   if (!customer) return null;
 
@@ -573,277 +624,347 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
         onInternetRecharge={onInternetRecharge}
         onIptvRecharge={onIptvRecharge}
         onVerify={onVerify}
+        onVerifyCustomer={onVerifyCustomer}
         onRecheck={onRecheck}
         onOttRecharge={onOttRecharge}
         onOttDeactivate={onOttDeactivate}
         readOnly={readOnly}
         onDetails={(a) => onOpenDetails(a.kind, a.index)}
+        onRename={(raw) => { setRenameText(raw?.device_name || ''); setRenameFor(raw); }}
       />
     ));
+
+  const saveDeviceName = async () => {
+    setRenaming(true);
+    const res = await OneBssApi.setIptvDeviceName(renameFor.id, renameText.trim());
+    setRenaming(false);
+    if (!res.ok) {
+      toast.error(res.data?.message || 'Could not save the device name');
+      return;
+    }
+    toast.success(res.data?.message || 'Device name saved');
+    renameFor.device_name = res.data?.device_name || null; // show it right away; the refresh confirms
+    setRenameFor(null);
+    if (onRefresh) onRefresh();
+  };
+
+  const openDirections = async () => {
+    const cleanMob = String(customer.mobile || customer.MobileNumber || '').replace(/\D/g, '').slice(-10);
+    let dest = '';
+    if (cleanMob && cleanMob.length === 10) {
+      try {
+        const locRes = await OneBssApi.getCustomerLocation(cleanMob);
+        const locData = locRes?.data?.data || locRes?.data || [];
+        const locRec = Array.isArray(locData) ? locData[0] : (typeof locData === 'object' ? locData : null);
+        if (locRec && locRec.latitude && locRec.longitude) dest = `${locRec.latitude},${locRec.longitude}`;
+      } catch (e) {}
+    }
+    if (!dest) dest = encodeURIComponent(clean(customer.installation_address || customer.address));
+    if (!dest) {
+      toast.warn('No location or address yet. Use Set location first.');
+      return;
+    }
+    const url = `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
+    if (typeof window !== 'undefined') window.open(url, '_blank', 'noopener,noreferrer');
+    else Linking.openURL(url).catch(() => {});
+  };
+
+  const mobile = clean(customer.mobile);
+  const address = clean(customer.installation_address || customer.address).replace(/\s+/g, ' ');
+  const aadhaarDone = internet.filter((a) => isAadhaarVerified(a.raw)).length;
+
+  const comboButton = onComboRecharge && internet.length > 0 && iptv.length > 0 ? (
+    <TouchableOpacity style={[styles.comboBtn, isMobile && { alignSelf: 'stretch', justifyContent: 'center' }]} onPress={() => onComboRecharge(customer)} title="Renew internet + IPTV together with a combo plan">
+      <Feather name="layers" size={15} color="#ffffff" />
+      <Text style={styles.comboBtnText}>Combo recharge</Text>
+    </TouchableOpacity>
+  ) : null;
+
+  const contactBlock = (
+    <View style={{ gap: 8, marginTop: isMobile ? 0 : 8 }}>
+      <View style={styles.contactRow}>
+        {mobile ? (
+          <TouchableOpacity style={styles.contactChip} onPress={() => Linking.openURL(`tel:${mobile}`).catch(() => {})} title="Call">
+            <Feather name="phone" size={13} color="#0f766e" />
+            <Text style={[styles.contactText, { color: '#0f766e', fontWeight: '700' }]}>{mobile}</Text>
+          </TouchableOpacity>
+        ) : null}
+        {onModifyMobile ? (
+          <TouchableOpacity style={styles.miniBtn} onPress={() => onModifyMobile(customer)} title="Change mobile number">
+            <Feather name="edit-2" size={11} color="#2563eb" />
+            <Text style={styles.miniBtnText}>Change</Text>
+          </TouchableOpacity>
+        ) : null}
+        {clean(customer.email) ? (
+          <View style={styles.contactChip}>
+            <Feather name="mail" size={13} color="#64748b" />
+            <Text style={styles.contactText} numberOfLines={1}>{clean(customer.email)}</Text>
+          </View>
+        ) : null}
+        <View style={styles.contactChip}>
+          <Feather name="calendar" size={13} color="#64748b" />
+          <Text style={styles.contactText}>Since {formatApiDate(customer.registered_date, false)}</Text>
+        </View>
+      </View>
+      <View style={[styles.contactRow, { alignItems: 'flex-start', flexWrap: 'nowrap' }]}>
+        <Feather name="map-pin" size={13} color="#64748b" style={{ marginTop: 2 }} />
+        <Text style={[styles.contactText, { flex: 1 }]} numberOfLines={3}>{address || 'No address yet'}</Text>
+      </View>
+      <View style={styles.contactRow}>
+        <TouchableOpacity style={styles.miniBtn} onPress={openDirections} title="Open Google Maps directions">
+          <Feather name="navigation" size={11} color="#2563eb" />
+          <Text style={styles.miniBtnText}>Directions</Text>
+        </TouchableOpacity>
+        {!readOnly ? (
+          <TouchableOpacity style={styles.miniBtn} onPress={() => setLocationModalVisible(true)} title="Pin the customer's location">
+            <Feather name="crosshair" size={11} color="#2563eb" />
+            <Text style={styles.miniBtnText}>Set location</Text>
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    </View>
+  );
+
+  const noDevicesEarly = iptvSyncStatus === 'no_devices' || customer?.iptv_sync_status === 'no_devices';
+  const tabs = [
+    { id: 'all', label: 'All', count: all.length },
+    { id: 'internet', label: 'Internet', count: internet.length },
+    { id: 'iptv', label: 'IPTV', count: iptv.length, hide: !iptv.length && !showIptvSlot && !noDevicesEarly },
+    { id: 'ott', label: 'OTT', count: ott.length, hide: !ott.length && !showOttSlot },
+  ];
+  // a tab that is hidden (no accounts, service not offered) falls back to All
+  const curTab = tabs.some((t) => t.id === tab && !t.hide) ? tab : 'all';
+  const shownList = curTab === 'all' ? all : curTab === 'internet' ? internet : curTab === 'iptv' ? iptv : ott;
+
+
+  const addIptvButton = readOnly || !offersIptv || !onAddIptv ? null : (
+    <TouchableOpacity style={[styles.addBtn, { borderColor: 'rgba(139,92,246,0.4)' }]} disabled={submittingIptv} onPress={handleAddIptvDirect}>
+      {submittingIptv ? <ActivityIndicator size="small" color="#7c3aed" /> : <Feather name="plus" size={13} color="#7c3aed" />}
+      <Text style={[styles.addBtnText, { color: '#7c3aed' }]}>{submittingIptv ? 'Adding IPTV…' : 'Add IPTV'}</Text>
+    </TouchableOpacity>
+  );
+  const addOttButton = onAddOtt && offersOtt ? (
+    <TouchableOpacity style={[styles.addBtn, { borderColor: 'rgba(14,165,233,0.4)' }]} onPress={() => onAddOtt(customer)}>
+      <Feather name="plus" size={13} color="#0284c7" />
+      <Text style={[styles.addBtnText, { color: '#0284c7' }]}>Add OTT</Text>
+    </TouchableOpacity>
+  ) : null;
+  const noDevices = iptvSyncStatus === 'no_devices' || customer?.iptv_sync_status === 'no_devices';
+
+  // A card in the accounts grid for a service the customer doesn't have (yet)
+  const emptyFor = (kind) => {
+    const k = KIND[kind];
+    const cardStyle = [styles.accCard, styles.emptyCard, isMobile ? { width: '100%', maxWidth: '100%' } : null];
+    if (kind === 'iptv' && noDevices) {
+      // registered with Pioneer, but no set-top box linked to the login yet
+      return (
+        <View key="empty-iptv" style={cardStyle}>
+          <View style={styles.regPill}>
+            <Text style={styles.regPillText}>Customer Registered</Text>
+          </View>
+          <Text style={styles.emptyEmoji}>📺</Text>
+          <Text style={styles.emptyTitle}>No devices linked</Text>
+          <Text style={styles.emptySub}>Login to the Pioneer Digital TV to enable recharge</Text>
+          <Text style={styles.emptyHint}>Please refresh the page after logging in to see the devices</Text>
+          {onRefresh ? (
+            <TouchableOpacity style={styles.emptyRefresh} onPress={onRefresh}>
+              <Feather name="refresh-cw" size={12} color="#c2410c" />
+              <Text style={styles.emptyRefreshText}>Refresh</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+      );
+    }
+    const button = kind === 'iptv' ? addIptvButton : kind === 'ott' ? addOttButton : null;
+    return (
+      <View key={`empty-${kind}`} style={cardStyle}>
+        <View style={[styles.emptyIconCircle, { backgroundColor: `${k.color}14` }]}>
+          <Feather name={k.icon} size={24} color={k.color} />
+        </View>
+        <Text style={[styles.emptySub, { fontSize: 14, fontWeight: '600', color: '#334155' }]}>No {k.label} account yet.</Text>
+        {button ? <View style={{ marginTop: 6 }}>{button}</View> : null}
+      </View>
+    );
+  };
 
   return (
     <ScrollView
       style={styles.container}
-      contentContainerStyle={{ paddingHorizontal: isMobile ? 12 : 24, paddingVertical: isMobile ? 14 : 24, width: '100%' }}
+      contentContainerStyle={{ paddingHorizontal: isMobile ? 12 : 24, paddingVertical: isMobile ? 14 : 22, width: '100%', maxWidth: 1320, alignSelf: 'center' }}
     >
-      <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 16 }}>
-        <TouchableOpacity style={[styles.backBtn, { marginBottom: 0 }]} onPress={onBack}>
-          <Feather name="arrow-left" size={16} color={COLORS.textMain} />
-          <Text style={styles.backBtnText}>Back to Subscribers</Text>
+      <View style={styles.topBar}>
+        <TouchableOpacity style={styles.backBtn} onPress={onBack}>
+          <Feather name="arrow-left" size={15} color={COLORS.textMain} />
+          <Text style={styles.backBtnText}>Subscribers</Text>
         </TouchableOpacity>
         <SyncStatus syncState={syncState} onRetry={onRefresh} />
       </View>
 
-      {/* CUSTOMER IDENTITY */}
-      <View style={[styles.identityCard, { flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center' }]}>
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, flex: 1, minWidth: 0 }}>
-          <CustomerPhoto uri={customer.profile_image} size={isMobile ? 64 : 76} initials={initials} />
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              <Text style={styles.custName}>{name}</Text>
-              <Text style={styles.custId}>#{customer.cust_id}</Text>
-              {isAccountVerified(customer) ? (
-                <Pill text="Aadhaar verified" tone={TONE.ok} />
-              ) : (
-                <Pill text="KYC pending" tone={TONE.warn} />
-              )}
+      {/* WHO */}
+      <View style={styles.identityCard}>
+        <View style={[styles.identityMain, isMobile && { padding: 14, gap: 12 }]}>
+          <View style={styles.idTop}>
+            <CustomerPhoto uri={customer.profile_image} size={isMobile ? 56 : 72} height={isMobile ? 70 : 90} radius={12} initials={initials} />
+            <View style={{ flex: 1, minWidth: 0, gap: 2 }}>
+              <Text style={[styles.custName, isMobile && { fontSize: 18 }]} numberOfLines={2}>{name}</Text>
+              <Text style={styles.custId}>Customer #{customer.cust_id}</Text>
+              {!isMobile ? contactBlock : null}
             </View>
-            <View style={styles.metaRow}>
-              <View style={styles.metaItem}>
-                <Feather name="phone" size={12} color="#64748b" />
-                <Text style={styles.metaText}>{clean(customer.mobile) || '—'}</Text>
-                {onModifyMobile ? (
-                  <TouchableOpacity
-                    onPress={() => onModifyMobile(customer)}
-                    style={{ marginLeft: 6, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: 'rgba(139, 92, 246, 0.1)', flexDirection: 'row', alignItems: 'center', gap: 3 }}
-                    title="Modify Mobile Number"
-                  >
-                    <Feather name="edit-2" size={10} color="#8b5cf6" />
-                    <Text style={{ fontSize: 10, fontWeight: '700', color: '#8b5cf6' }}>Edit</Text>
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-              <View style={styles.metaItem}><Feather name="mail" size={12} color="#64748b" /><Text style={styles.metaText}>{clean(customer.email) || '—'}</Text></View>
-              <View style={styles.metaItem}><Feather name="calendar" size={12} color="#64748b" /><Text style={styles.metaText}>Since {formatApiDate(customer.registered_date, false)}</Text></View>
-            </View>
-            <View style={[styles.metaItem, { marginTop: 4, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 }]}>
-              <Feather name="map-pin" size={12} color="#64748b" />
-              <Text style={styles.metaText} numberOfLines={1}>
-                {clean(customer.installation_address || customer.address)
-                  ? clean(customer.installation_address || customer.address).replace(/\s+/g, ' ')
-                  : 'No address set'}
+            {!isMobile && comboButton ? comboButton : null}
+          </View>
+          {isMobile ? contactBlock : null}
+          {isMobile && comboButton ? <View style={{ alignSelf: 'stretch' }}>{comboButton}</View> : null}
+        </View>
+
+        <View style={styles.identityStrip}>
+          <View style={styles.stripStats}>
+            <Text style={styles.stripStat}><Text style={styles.stripNum}>{activeCount}</Text> of {all.length} active</Text>
+            {internet.length ? (
+              <Text style={[styles.stripStat, aadhaarDone < internet.length && { color: '#b45309' }]}>
+                <Text style={[styles.stripNum, aadhaarDone < internet.length && { color: '#b45309' }]}>{aadhaarDone}</Text> of {internet.length} internet Aadhaar verified
               </Text>
-              <TouchableOpacity
-                onPress={async () => {
-                  const cleanMob = String(customer.mobile || customer.MobileNumber || '').replace(/\D/g, '').slice(-10);
-                  let dest = '';
-                  if (cleanMob && cleanMob.length === 10) {
-                    try {
-                      const locRes = await OneBssApi.getCustomerLocation(cleanMob);
-                      const locData = locRes?.data?.data || locRes?.data || [];
-                      const locRec = Array.isArray(locData) ? locData[0] : (typeof locData === 'object' ? locData : null);
-                      if (locRec && locRec.latitude && locRec.longitude) {
-                        dest = `${locRec.latitude},${locRec.longitude}`;
-                      }
-                    } catch (e) {}
-                  }
-                  if (!dest) {
-                    dest = encodeURIComponent(clean(customer.installation_address || customer.address));
-                  }
-                  if (!dest) {
-                    toast.warn('No location or address yet — use “Set location” first.');
-                    return;
-                  }
-                  const url = `https://www.google.com/maps/dir/?api=1&destination=${dest}`;
-                  if (typeof window !== 'undefined') {
-                    window.open(url, '_blank', 'noopener,noreferrer');
-                  } else {
-                    Linking.openURL(url).catch(() => {});
-                  }
-                }}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 4,
-                  backgroundColor: 'rgba(37, 99, 235, 0.08)',
-                  paddingHorizontal: 8,
-                  paddingVertical: 3,
-                  borderRadius: 4,
-                  borderWidth: 1,
-                  borderColor: 'rgba(37, 99, 235, 0.25)',
-                  marginLeft: 4,
-                }}
-                title="Open Google Maps Directions"
-              >
-                <Feather name="navigation" size={11} color="#2563eb" />
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#2563eb' }}>Directions</Text>
-              </TouchableOpacity>
-
-              {!readOnly ? (
-              <TouchableOpacity
-                onPress={() => setLocationModalVisible(true)}
-                style={{
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 4,
-                  backgroundColor: 'rgba(139, 92, 246, 0.08)',
-                  paddingHorizontal: 8,
-                  paddingVertical: 3,
-                  borderRadius: 4,
-                  borderWidth: 1,
-                  borderColor: 'rgba(139, 92, 246, 0.25)',
-                  marginLeft: 2,
-                }}
-                title="Edit Location & Pin GPS"
-              >
-                <Feather name="edit-2" size={11} color="#8b5cf6" />
-                <Text style={{ fontSize: 11, fontWeight: '700', color: '#8b5cf6' }}>Set location</Text>
-              </TouchableOpacity>
-              ) : null}
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryBox}><Text style={styles.summaryNum}>{internet.length}</Text><Text style={styles.summaryLbl}>Internet</Text></View>
-          <View style={styles.summaryBox}><Text style={styles.summaryNum}>{iptv.length}</Text><Text style={styles.summaryLbl}>IPTV</Text></View>
-          <View style={styles.summaryBox}><Text style={styles.summaryNum}>{ott.length}</Text><Text style={styles.summaryLbl}>OTT</Text></View>
-          <View style={styles.summaryBox}><Text style={[styles.summaryNum, { color: '#047857' }]}>{activeCount}</Text><Text style={styles.summaryLbl}>Active</Text></View>
-          {onComboRecharge && internet.length > 0 && iptv.length > 0 ? (
-            <TouchableOpacity style={styles.comboBtn} onPress={() => onComboRecharge(customer)} title="Renew internet + IPTV together with a combo plan">
-              <Feather name="layers" size={15} color="#ffffff" />
-              <Text style={styles.comboBtnText}>Combo Recharge</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
-
-      </View>
-
-        {/* Online recharge: off until the operator turns it on. The customer then pays the
-            operator's customer price of the package (set once per operator, Customer Prices). */}
-        {Array.isArray(customer.online_recharge) && customer.online_recharge.length > 0 ? (
-          <View style={{ gap: 6, marginBottom: 18 }}>
-            {customer.online_recharge.map((o) => {
-              const key = String(o.partner_id);
-              const on = onlineOverride[key] !== undefined ? onlineOverride[key] : !!o.enabled;
-              return (
-                <TouchableOpacity
-                  key={key}
-                  style={[styles.onlineRow, on && styles.onlineRowOn, (readOnly || savingOnline === key) && { opacity: readOnly ? 0.9 : 0.6 }]}
-                  disabled={readOnly || savingOnline === key}
-                  onPress={async () => {
-                    setSavingOnline(key);
-                    const res = await OneBssApi.setCustomerOnlineAccess(customer.cust_id, o.partner_id, !on);
-                    setSavingOnline(null);
-                    if (!res.ok) {
-                      toast.error(res.data?.message || 'Could not change online recharge.');
-                      return;
-                    }
-                    setOnlineOverride((prev) => ({ ...prev, [key]: !on }));
-                    toast.success(res.data?.message || (on ? 'Online recharge turned off.' : 'Online recharge turned on.'));
-                  }}
-                >
-                  <View style={[styles.switchTrack, { backgroundColor: on ? '#10b981' : '#cbd5e1', alignItems: on ? 'flex-end' : 'flex-start' }]}>
-                    <View style={styles.switchKnob} />
-                  </View>
-                  <Text style={[styles.onlineRowText, on && { color: '#047857' }]} numberOfLines={2}>
-                    Online recharge {on ? 'ON' : 'OFF'}
-                    {customer.online_recharge.length > 1 ? ` · ${operatorNames[key] || `operator #${key}`}` : ''}
-                    {on ? ' — Now the customer can use online recharge' : ''}
-                  </Text>
-                  {savingOnline === key ? <ActivityIndicator size="small" color="#10b981" /> : null}
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ) : null}
-
-      <Section title="Internet Accounts" icon="wifi" color={COLORS.primary} count={internet.length} loading={loading} emptyText="No internet accounts for this customer.">
-        {renderCards(internet)}
-      </Section>
-
-      <Section
-        title="IPTV Accounts"
-        icon="tv"
-        color="#8b5cf6"
-        count={iptv.length}
-        loading={loading}
-        emptyText="No IPTV accounts for this customer."
-        emptyContent={
-          <View style={styles.emptyBoxCustom}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <View style={styles.emptyIconBadge}>
-                <Feather name="tv" size={18} color="#8b5cf6" />
-              </View>
-              <Text style={styles.emptyPrimaryText}>No IPTV accounts for this customer.</Text>
-            </View>
-            <View style={{ marginTop: 12, alignItems: 'flex-start' }}>
-              {(iptvSyncStatus === 'no_devices' || customer?.iptv_sync_status === 'no_devices') ? (
-                <View style={styles.noDevicesBadge}>
-                  <Feather name="check-circle" size={14} color="#16a34a" />
-                  <Text style={styles.noDevicesText}>
-                    customer registered successfully , No devices found
-                  </Text>
-                </View>
-              ) : readOnly ? null : (
-                <TouchableOpacity
-                  style={styles.addIptvBtn}
-                  disabled={submittingIptv}
-                  onPress={handleAddIptvDirect}
-                >
-                  {submittingIptv ? (
-                    <ActivityIndicator size="small" color="#ffffff" />
-                  ) : (
-                    <Feather name="plus-circle" size={13} color="#ffffff" />
-                  )}
-                  <Text style={styles.addIptvBtnText}>
-                    {submittingIptv ? 'Adding IPTV...' : 'Add IPTV'}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </View>
-          </View>
-        }
-      >
-        {renderCards(iptv)}
-      </Section>
-
-      <Section
-        title="OTT Accounts"
-        icon="play-circle"
-        color="#0ea5e9"
-        count={ott.length}
-        loading={loading}
-        emptyText="No OTT account for this customer."
-        headerAction={
-          onAddOtt && ott.length > 0 ? (
-            <TouchableOpacity style={[styles.addIptvBtn, { backgroundColor: '#0ea5e9' }]} onPress={() => onAddOtt(customer)}>
-              <Feather name="plus-circle" size={13} color="#ffffff" />
-              <Text style={styles.addIptvBtnText}>Add OTT</Text>
-            </TouchableOpacity>
-          ) : null
-        }
-        emptyContent={
-          <View style={styles.emptyBoxCustom}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <View style={[styles.emptyIconBadge, { backgroundColor: 'rgba(14,165,233,0.12)' }]}>
-                <Feather name="play-circle" size={18} color="#0ea5e9" />
-              </View>
-              <Text style={styles.emptyPrimaryText}>No OTT account for this customer.</Text>
-            </View>
-            {onAddOtt ? (
-              <View style={{ marginTop: 12, alignItems: 'flex-start' }}>
-                <TouchableOpacity style={[styles.addIptvBtn, { backgroundColor: '#0ea5e9' }]} onPress={() => onAddOtt(customer)}>
-                  <Feather name="plus-circle" size={13} color="#ffffff" />
-                  <Text style={styles.addIptvBtnText}>Add OTT</Text>
-                </TouchableOpacity>
-              </View>
             ) : null}
           </View>
+          {Array.isArray(customer.online_recharge) && customer.online_recharge.length > 0 ? (
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+              {customer.online_recharge.map((o) => {
+                const key = String(o.partner_id);
+                const on = onlineOverride[key] !== undefined ? onlineOverride[key] : !!o.enabled;
+                return (
+                  <TouchableOpacity
+                    key={key}
+                    style={[styles.onlineRow, on && styles.onlineRowOn, (readOnly || savingOnline === key) && { opacity: readOnly ? 0.9 : 0.6 }]}
+                    disabled={readOnly || savingOnline === key}
+                    title={on ? 'The customer can recharge online' : 'The customer cannot recharge online'}
+                    onPress={async () => {
+                      setSavingOnline(key);
+                      const res = await OneBssApi.setCustomerOnlineAccess(customer.cust_id, o.partner_id, !on);
+                      setSavingOnline(null);
+                      if (!res.ok) {
+                        toast.error(res.data?.message || 'Could not change online recharge.');
+                        return;
+                      }
+                      setOnlineOverride((prev) => ({ ...prev, [key]: !on }));
+                      toast.success(res.data?.message || (on ? 'Online recharge turned off.' : 'Online recharge turned on.'));
+                    }}
+                  >
+                    <View style={[styles.switchTrack, { backgroundColor: on ? '#10b981' : '#cbd5e1', alignItems: on ? 'flex-end' : 'flex-start' }]}>
+                      <View style={styles.switchKnob} />
+                    </View>
+                    <Text style={[styles.onlineRowText, on && { color: '#047857' }]} numberOfLines={1}>
+                      Online recharge {on ? 'on' : 'off'}{customer.online_recharge.length > 1 ? ` (${operatorNames[key] || `operator #${key}`})` : ''}
+                    </Text>
+                    {savingOnline === key ? <ActivityIndicator size="small" color="#10b981" /> : null}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          ) : null}
+        </View>
+      </View>
+
+      {/* Same person saved twice (older Add Customer runs) — offer to merge into this record */}
+      {!readOnly && Array.isArray(customer.same_person_records) && customer.same_person_records.length ? (
+        <View style={{ gap: 8, marginBottom: 16 }}>
+          {customer.same_person_records.map((d) => {
+            const parts = [d.accounts?.internet ? `${d.accounts.internet} internet` : '', d.accounts?.iptv ? `${d.accounts.iptv} IPTV` : '', d.accounts?.ott ? `${d.accounts.ott} OTT` : ''].filter(Boolean).join(', ');
+            return (
+              <View key={d.cust_id} style={styles.dupBox}>
+                <Feather name="copy" size={15} color="#1d4ed8" />
+                <Text style={styles.dupText}>
+                  The same person is also saved as customer #{d.cust_id} ({d.full_name}{parts ? `, ${parts}` : ''}). Merge it here so all accounts show on one page.
+                </Text>
+                {mergeAsk === d.cust_id ? (
+                  <View style={{ flexDirection: 'row', gap: 6 }}>
+                    <TouchableOpacity style={styles.dupGhost} onPress={() => setMergeAsk(null)} disabled={!!merging}><Text style={styles.dupGhostText}>Cancel</Text></TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.dupBtn}
+                      disabled={!!merging}
+                      onPress={async () => {
+                        setMerging(d.cust_id);
+                        const res = await OneBssApi.mergeCustomers(customer.cust_id, d.cust_id);
+                        setMerging(null);
+                        setMergeAsk(null);
+                        if (!res.ok) {
+                          toast.error(res.data?.error || res.data?.message || 'Could not merge the customers');
+                          return;
+                        }
+                        toast.success(`Customer #${d.cust_id} merged into #${customer.cust_id}.`);
+                        if (onRefresh) onRefresh();
+                      }}
+                    >
+                      {merging === d.cust_id ? <ActivityIndicator size="small" color="#ffffff" /> : <Text style={styles.dupBtnText}>Yes, merge #{d.cust_id}</Text>}
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <TouchableOpacity style={styles.dupBtn} onPress={() => setMergeAsk(d.cust_id)}>
+                    <Feather name="git-merge" size={13} color="#ffffff" />
+                    <Text style={styles.dupBtnText}>Merge</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            );
+          })}
+        </View>
+      ) : null}
+
+      {/* ACCOUNTS */}
+      <View style={styles.tabsRow}>
+        <View style={styles.tabs}>
+          {tabs.filter((t) => !t.hide).map((t) => (
+            <TouchableOpacity key={t.id} style={[styles.tab, curTab === t.id && styles.tabOn]} onPress={() => setTab(t.id)}>
+              <Text style={[styles.tabText, curTab === t.id && styles.tabTextOn]}>{t.label}</Text>
+              <Text style={[styles.tabCount, curTab === t.id && styles.tabTextOn]}>{t.count}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          {ott.length > 0 ? addOttButton : null}
+        </View>
+      </View>
+
+      {loading && !all.length ? (
+        <View style={[styles.emptyBox, { flexDirection: 'row' }]}>
+          <ActivityIndicator size="small" color={COLORS.primary} />
+          <Text style={styles.emptyText}>Loading accounts…</Text>
+        </View>
+      ) : (
+        <View style={styles.grid}>
+          {renderCards(shownList)}
+          {curTab !== 'all' && !shownList.length ? emptyFor(curTab) : null}
+          {curTab === 'all' && !iptv.length && (showIptvSlot || noDevices) ? emptyFor('iptv') : null}
+          {curTab === 'all' && !ott.length && showOttSlot ? emptyFor('ott') : null}
+        </View>
+      )}
+
+
+      <ModalShell
+        visible={!!renameFor}
+        title="Device name"
+        icon="tv"
+        iconColor="#7c3aed"
+        onClose={() => setRenameFor(null)}
+        busy={renaming}
+        maxWidth={420}
+        footer={
+          <>
+            <Btn label="Cancel" kind="ghost" onPress={() => setRenameFor(null)} disabled={renaming} />
+            <Btn label="Save" onPress={saveDeviceName} loading={renaming} />
+          </>
         }
       >
-        {renderCards(ott)}
-      </Section>
+        <Text style={sharedStyles.label}>NAME FOR STB {renameFor?.pioneer_stb_id || renameFor?.id}</Text>
+        <TextInput
+          style={sharedStyles.input}
+          value={renameText}
+          onChangeText={(v) => setRenameText(v.slice(0, 60))}
+          placeholder="e.g. Hall TV"
+          placeholderTextColor="#94a3b8"
+          onSubmitEditing={saveDeviceName}
+          autoFocus
+        />
+        <Text style={{ fontSize: 12, color: '#64748b', marginTop: 8 }}>Shown instead of the STB number. Leave empty to show the STB number again.</Text>
+      </ModalShell>
 
       {/* Edit Customer Location Popup Modal */}
       <CustomerLocationModal
@@ -970,20 +1091,20 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
 
 const styles = StyleSheet.create({
   container: { flex: 1, width: '100%', backgroundColor: COLORS.bgSecondary },
-  backBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: COLORS.glassBorder, marginBottom: 16 },
+  backBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e5e9f0' },
   backBtnText: { fontSize: 12, fontWeight: '700', color: COLORS.textMain },
 
-  identityCard: { backgroundColor: '#ffffff', borderRadius: 14, padding: 18, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)', marginBottom: 22, justifyContent: 'space-between', gap: 16 },
+  identityCard: { backgroundColor: '#ffffff', borderRadius: 16, borderWidth: 1, borderColor: '#e5e9f0', marginBottom: 16 },
   avatar: { width: 56, height: 56, borderRadius: 14, backgroundColor: '#0f172a', justifyContent: 'center', alignItems: 'center' },
   avatarText: { color: '#ffffff', fontSize: 20, fontWeight: '700' },
-  custName: { fontSize: 18, fontWeight: '700', color: COLORS.textMain },
+  custName: { fontSize: 21, fontWeight: '800', color: COLORS.textMain, letterSpacing: -0.3 },
   custId: { fontSize: 13, color: '#64748b', fontWeight: '600' },
   metaRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, marginTop: 6 },
   metaItem: { flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 0 },
   metaText: { fontSize: 12, color: '#4b5563', flexShrink: 1 },
   summaryRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 },
   btnRecheck: { backgroundColor: '#d97706' },
-  recheckNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginHorizontal: 14, marginBottom: 8, padding: 8, borderRadius: 8, backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a' },
+  recheckNote: { flexDirection: 'row', alignItems: 'flex-start', gap: 6, marginBottom: 10, padding: 8, borderRadius: 8, backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a' },
   recheckNoteText: { flex: 1, fontSize: 11, color: '#92400e' },
   custPriceRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginHorizontal: 14, marginBottom: 8, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, backgroundColor: 'rgba(16,185,129,0.06)', borderWidth: 1, borderColor: 'rgba(16,185,129,0.25)' },
   custPriceText: { flex: 1, fontSize: 11.5, fontWeight: '600', color: '#047857' },
@@ -992,7 +1113,7 @@ const styles = StyleSheet.create({
   onlineRowText: { flex: 1, fontSize: 12, fontWeight: '600', color: '#64748b' },
   switchTrack: { width: 34, height: 20, borderRadius: 10, padding: 2 },
   switchKnob: { width: 16, height: 16, borderRadius: 8, backgroundColor: '#ffffff' },
-  comboBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'center', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: '#ec4899' },
+  comboBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', paddingHorizontal: 14, paddingVertical: 10, borderRadius: 10, backgroundColor: '#db2777' },
   comboBtnText: { fontSize: 13, fontWeight: '700', color: '#ffffff' },
   summaryBox: { minWidth: 72, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 10, backgroundColor: COLORS.bgSecondary, borderWidth: 1, borderColor: COLORS.glassBorder, alignItems: 'center' },
   summaryNum: { fontSize: 18, fontWeight: '800', color: COLORS.textMain },
@@ -1002,13 +1123,23 @@ const styles = StyleSheet.create({
   sectionTitle: { fontSize: 15, fontWeight: '700', color: COLORS.textMain },
   countBadge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 999, backgroundColor: 'rgba(0,0,0,0.06)' },
   countBadgeText: { fontSize: 11, fontWeight: '700', color: '#4b5563' },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 16 },
-  emptyBox: { padding: 18, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', borderColor: 'rgba(0,0,0,0.15)', backgroundColor: '#ffffff' },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 14, alignItems: 'stretch' },
+  emptyBox: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 14, borderRadius: 12, borderWidth: 1, borderStyle: 'dashed', borderColor: '#cbd5e1', backgroundColor: '#ffffff' },
   emptyText: { fontSize: 12, color: '#64748b' },
+  emptyCard: { alignItems: 'center', justifyContent: 'center', minHeight: 230, gap: 6, paddingVertical: 20 },
+  emptyIconCircle: { width: 52, height: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  emptyEmoji: { fontSize: 44, lineHeight: 54, marginVertical: 2 },
+  emptyTitle: { fontSize: 16, fontWeight: '700', color: '#1e293b', textAlign: 'center' },
+  emptySub: { fontSize: 13, color: '#64748b', textAlign: 'center' },
+  emptyHint: { fontSize: 13, fontWeight: '600', color: '#c2410c', textAlign: 'center', marginTop: 6 },
+  emptyRefresh: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, backgroundColor: '#fff7ed', borderWidth: 1, borderColor: '#fed7aa' },
+  emptyRefreshText: { fontSize: 12.5, fontWeight: '700', color: '#c2410c' },
+  regPill: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 999, backgroundColor: '#e7f6ec', marginBottom: 4 },
+  regPillText: { fontSize: 13, fontWeight: '700', color: '#15803d' },
 
-  accCard: { flexGrow: 1, flexBasis: 340, maxWidth: 560, backgroundColor: '#ffffff', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)', borderTopWidth: 3, padding: 16, boxShadow: '0px 2px 10px rgba(0,0,0,0.04)' },
-  accHeader: { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 12 },
-  accIcon: { width: 38, height: 38, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  accCard: { flexGrow: 1, flexBasis: 300, maxWidth: 420, backgroundColor: '#ffffff', borderRadius: 12, borderWidth: 2, borderColor: 'rgb(203, 213, 225)', borderLeftWidth: 4, borderRightWidth: 4, paddingHorizontal: 16, paddingTop: 14, paddingBottom: 14, flexDirection: 'column' },
+  accHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 12 },
+  accIcon: { width: 34, height: 34, borderRadius: 9, justifyContent: 'center', alignItems: 'center' },
   accTitle: { fontSize: 15, fontWeight: '700', color: COLORS.textMain },
   accSubtitle: { fontSize: 11, color: '#64748b', marginTop: 2 },
   accBody: { gap: 9, paddingVertical: 12, borderTopWidth: 1, borderBottomWidth: 1, borderColor: '#f1f5f9', marginBottom: 14 },
@@ -1018,13 +1149,13 @@ const styles = StyleSheet.create({
   infoValue: { fontSize: 12, fontWeight: '600', color: COLORS.textMain, textAlign: 'right' },
   expiryHint: { fontSize: 11, fontWeight: '700', marginTop: 1 },
   realExpiry: { fontSize: 10.5, color: '#64748b', marginTop: 1 },
-  comboLock: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: 'rgba(236,72,153,0.08)', borderWidth: 1, borderColor: 'rgba(236,72,153,0.3)' },
+  comboLock: { flexDirection: 'row', alignItems: 'center', gap: 6, flexShrink: 1, paddingHorizontal: 10, paddingVertical: 7, borderRadius: 8, backgroundColor: 'rgba(236,72,153,0.08)', borderWidth: 1, borderColor: 'rgba(236,72,153,0.3)' , marginBottom: 10 },
   comboLockText: { fontSize: 11.5, fontWeight: '600', color: '#9d174d', flexShrink: 1 },
   dot: { width: 8, height: 8, borderRadius: 4 },
   pill: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
   pillText: { fontSize: 11, fontWeight: '700' },
 
-  accActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  accActions: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 'auto', paddingTop: 4 },
   btn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 9, borderRadius: 8 },
   btnQuick: { backgroundColor: '#f97316' },
   btnQuickText: { fontSize: 12, fontWeight: '700', color: '#ffffff' },
@@ -1224,4 +1355,49 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#15803d',
   },
+
+  // ---- customer page ----
+  topBar: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 14 },
+  identityMain: { padding: 18, gap: 12 },
+  identityStrip: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingHorizontal: 18, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#eef2f7', backgroundColor: '#fbfcfd', borderBottomLeftRadius: 16, borderBottomRightRadius: 16 },
+  stripStats: { flexDirection: 'row', flexWrap: 'wrap', gap: 18 },
+  stripStat: { fontSize: 12.5, color: '#475569' },
+  stripNum: { fontSize: 14, fontWeight: '800', color: COLORS.textMain },
+  contactRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8, marginTop: 6 },
+  contactChip: { flexDirection: 'row', alignItems: 'center', gap: 5, minWidth: 0 },
+  contactText: { fontSize: 12.5, color: '#475569' },
+  inlineLink: { fontSize: 12, fontWeight: '700', color: '#2563eb' },
+  idTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 14 },
+  dupBox: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe' },
+  dupText: { flex: 1, minWidth: 220, fontSize: 12.5, color: '#1e3a8a', lineHeight: 18 },
+  dupBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, backgroundColor: '#2563eb', minWidth: 70, justifyContent: 'center' },
+  dupBtnText: { fontSize: 12, fontWeight: '700', color: '#ffffff' },
+  dupGhost: { paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#bfdbfe' },
+  dupGhostText: { fontSize: 12, fontWeight: '700', color: '#1e3a8a' },
+  miniBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 999, borderWidth: 1, borderColor: '#bfdbfe', backgroundColor: '#eff6ff' },
+  miniBtnText: { fontSize: 11.5, fontWeight: '700', color: '#2563eb' },
+  renameBtn: { width: 22, height: 22, borderRadius: 6, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(139,92,246,0.1)' },
+  tabsRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 12 },
+  tabs: { flexDirection: 'row', gap: 4, padding: 4, borderRadius: 12, backgroundColor: '#eef2f6' },
+  tab: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 7, borderRadius: 9 },
+  tabOn: { backgroundColor: '#ffffff', boxShadow: '0px 1px 3px rgba(15,23,42,0.12)' },
+  tabText: { fontSize: 13, fontWeight: '600', color: '#64748b' },
+  tabTextOn: { color: COLORS.textMain, fontWeight: '800' },
+  tabCount: { fontSize: 12, fontWeight: '700', color: '#94a3b8' },
+  addBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderStyle: 'dashed', backgroundColor: '#ffffff' },
+  addBtnText: { fontSize: 12, fontWeight: '700' },
+  expiryBlock: { gap: 6, marginBottom: 10 },
+  expiryMain: { fontSize: 13.5, fontWeight: '700' },
+  expiryDate: { fontSize: 12, color: '#64748b', fontWeight: '500' },
+  barTrack: { height: 3, borderRadius: 2, backgroundColor: '#eef2f6', overflow: 'hidden' },
+  planRow: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingVertical: 8, marginBottom: 6 },
+  planText: { flex: 1, fontSize: 12.5, color: COLORS.textMain, fontWeight: '600' },
+  priceText: { fontSize: 12, fontWeight: '700', color: '#047857' },
+  kycLine: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, marginBottom: 12 },
+  kycOk: { backgroundColor: 'rgba(16,185,129,0.07)' },
+  kycBad: { backgroundColor: '#fffbeb', borderWidth: 1, borderColor: '#fde68a' },
+  kycText: { flex: 1, fontSize: 12, fontWeight: '600' },
+  kycVerifyBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 6, backgroundColor: '#2563eb' },
+  kycVerifyText: { fontSize: 11.5, fontWeight: '700', color: '#ffffff' },
+  kycLink: { fontSize: 12, fontWeight: '700', color: '#2563eb' },
 });

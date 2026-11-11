@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, TextInput, ActivityIndicator,
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../../constants/theme';
 import { OneBssApi } from '../../services/oneBssApi';
-import { ModalShell, Btn, KV, Note } from '../internet/shared';
+import { ModalShell, Btn, KV, Note, iptvLabel } from '../internet/shared';
 import { parseApiDate, formatApiDate } from '../CustomerAccountsOverview';
 import { FtaIncluded } from './FtaIncluded';
 import { pickFta, ownedChannels, overlapReason, selectedConflicts } from './packRules';
@@ -263,7 +263,7 @@ export const IptvRechargeModal = ({ visible, onClose, account, onConfirm }) => {
   };
 
   if (!account) return null;
-  const stbLabel = account.pioneer_stb_id ? `STB ${account.pioneer_stb_id}` : `IPTV #${account.id}`;
+  const stbLabel = iptvLabel(account);
   const title = isAdvance ? 'Advance Renewal' : 'Recharge';
 
   const tabBadge = (key) => {

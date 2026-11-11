@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../../constants/theme';
 import { OneBssApi } from '../../services/oneBssApi';
-import { ModalShell, Btn, KV, Note, isAccountVerified, SearchBox, matchesSearch } from '../internet/shared';
+import { ModalShell, Btn, KV, Note, isAadhaarVerified, aadhaarBlocksRecharge, isRadiusVerified, SearchBox, matchesSearch, iptvLabel } from '../internet/shared';
 import { parseApiDate, formatApiDate } from '../CustomerAccountsOverview';
 import { FtaIncluded } from '../iptv/FtaIncluded';
 import { pickFta, ownedChannels, overlapReason, selectedConflicts } from '../iptv/packRules';
@@ -19,7 +19,7 @@ const isActiveDate = (d) => {
   return !!(dt && dt.getTime() > Date.now());
 };
 const internetLabel = (a) => a?.username || `Internet #${a?.internet_id}`;
-const stbLabel = (a) => (a?.pioneer_stb_id ? `STB ${a.pioneer_stb_id}` : `IPTV #${a?.id}`);
+const stbLabel = (a) => iptvLabel(a);
 
 // One selectable account row (used only when the customer has more than one of a kind)
 const AccountOption = ({ on, title, sub, active, onPress, disabled }) => (
@@ -112,7 +112,8 @@ export const ComboRechargeModal = ({ visible, onClose, customer, onConfirm }) =>
 
   const internetAcc = internetAccounts.find((a) => String(a.internet_id) === String(internetId)) || null;
   const iptvAcc = iptvAccounts.find((a) => String(a.id) === String(iptvId)) || null;
-  const verified = internetAcc ? isAccountVerified(internetAcc) : true;
+  const verified = internetAcc ? !aadhaarBlocksRecharge(internetAcc) : true; // ok to recharge as far as Aadhaar goes
+  const custVerified = internetAcc ? isRadiusVerified(internetAcc) : true; // RADIUS "Verify Customer" done
 
   // load combos / add-ons for the chosen pair
   useEffect(() => {
@@ -364,7 +365,7 @@ export const ComboRechargeModal = ({ visible, onClose, customer, onConfirm }) =>
             kind="orange"
             onPress={confirm}
             loading={submitting}
-            disabled={!combo || !ready || !verified || loading || shortWallet || !ftaPack || conflicts.size > 0}
+            disabled={!combo || !ready || !verified || !custVerified || loading || shortWallet || !ftaPack || conflicts.size > 0}
           />
         </>
       }
@@ -421,7 +422,8 @@ export const ComboRechargeModal = ({ visible, onClose, customer, onConfirm }) =>
         </View>
       </View>
 
-      {!verified ? <Note tone="error" text={`Verify the customer on ${internetLabel(internetAcc)} before recharging.`} /> : null}
+      {!custVerified ? <Note tone="error" text={`${internetLabel(internetAcc)} is not verified yet — use Verify Customer on the customer page before recharging.`} /> : null}
+      {!verified ? <Note tone="error" text={`Aadhaar is not verified for ${internetLabel(internetAcc)} — verify it from the customer page before recharging.`} /> : null}
 
       {!ready ? (
         internetAccounts.length && iptvAccounts.length ? <Note tone="info" text="Choose the internet account and the set-top box to renew together." /> : null

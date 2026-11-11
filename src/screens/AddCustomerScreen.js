@@ -804,6 +804,28 @@ const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new'
     };
   }, [operatorId, applyToken]);
 
+  // RADIUS branches this operator works in; with more than one the operator picks the branch
+  const [branches, setBranches] = useState([]); // [{ id, name }]
+  const [selectedBranchId, setSelectedBranchId] = useState('');
+  useEffect(() => {
+    if (!operatorId) return;
+    let alive = true;
+    (async () => {
+      applyToken();
+      try {
+        const res = await OneBssApi.getRadiusBranches(operatorId);
+        if (!alive || !res?.ok || res.data?.success === false) return;
+        const list = (res.data.branches || []).filter((b) => b.selected).map((b) => ({ id: String(b.id), name: b.name }));
+        setBranches(list);
+        setSelectedBranchId((cur) => (cur && list.some((b) => b.id === cur) ? cur : list.length === 1 ? list[0].id : ''));
+      } catch (e) {
+        // older server: no branch choice, the server uses the operator's only branch
+      }
+    })();
+    return () => { alive = false; };
+  }, [operatorId, applyToken]);
+  const needsBranch = branches.length > 1;
+
   const selectPackage = (id) => {
     setSelectedPackageId(String(id));
     setSelectedSubPlanId('');
@@ -891,7 +913,8 @@ const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new'
     /^[0-9]{10}$/.test(mobile) &&
     isEmail(email) &&
     !!selectedPackage &&
-    selectedSubPlanId !== '';
+    selectedSubPlanId !== '' &&
+    (!needsBranch || selectedBranchId !== '');
 
   const step1Hint =
     usernameCheck.status === 'taken' || usernameCheck.status === 'invalid'
@@ -1230,6 +1253,7 @@ const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new'
       }
     }
     if (!effectiveInstallation.trim()) { toast.error('Installation address is required'); return false; }
+    if (needsBranch && !selectedBranchId) { toast.error('Please choose the branch for this customer'); return false; }
     if (!selectedPackage) { toast.error('Please select a package'); return false; }
     if (!selectedSubPlanId) { toast.error('Please select a sub-plan'); return false; }
     if (!username.trim() || !password.trim()) { toast.error('Username and password are required'); return false; }
@@ -1278,6 +1302,7 @@ const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new'
       operator_id: operatorId,
       package_id: selectedPackage.id,
       sub_plan_id: selectedSubPlanId,
+      ...(selectedBranchId ? { branch_id: selectedBranchId } : {}),
       username: username.trim(),
       password,
       mobile,
@@ -1330,6 +1355,19 @@ const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new'
 
   const renderPlanPickers = (locked) => (
     <>
+      {needsBranch ? field(
+        <>
+          <Label>BRANCH</Label>
+          <Dropdown
+            items={branches.map((b) => ({ id: b.id, label: `${b.name} (#${b.id})` }))}
+            selected={selectedBranchId}
+            onSelect={(id) => setSelectedBranchId(String(id))}
+            placeholder="-- Select Branch --"
+            emptyText="No branches"
+            disabled={locked}
+          />
+        </>
+      ) : null}
       {field(
         <>
           <Label>PACKAGE</Label>

@@ -15,15 +15,25 @@ import { toast } from 'react-toastify';
 import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 import { isSuperAdmin } from '../components/internet/shared';
+import { can } from '../services/staffAccess';
+import { BulkInventoryScannerModal } from '../components/BulkInventoryScannerModal';
+import { InwardStockModal } from '../components/InwardStockModal';
+import { HardwareCatalogView } from '../components/HardwareCatalogView';
+import { AddDeviceView } from '../components/AddDeviceView';
+import { ConfiguredBoxesView } from '../components/ConfiguredBoxesView';
+import { SafeSelect } from '../components/SafeSelect';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 // Status styling configuration matching OneBSS WCAG high-contrast standards
 const STATUS_CONFIG = {
-  in_stock:  { label: 'IN STOCK',  fg: '#047857', bg: '#dcfce7', border: '#86efac', icon: 'check-circle' },
-  assigned:  { label: 'ASSIGNED',  fg: '#1d4ed8', bg: '#dbeafe', border: '#93c5fd', icon: 'user-check' },
-  reserved:  { label: 'RESERVED',  fg: '#b45309', bg: '#fef3c7', border: '#fcd34d', icon: 'clock' },
-  faulty:    { label: 'FAULTY',    fg: '#b91c1c', bg: '#fee2e2', border: '#fca5a5', icon: 'alert-triangle' },
-  in_repair: { label: 'IN REPAIR', fg: '#7e22ce', bg: '#f3e8ff', border: '#d8b4fe', icon: 'tool' },
-  retired:   { label: 'RETIRED',   fg: '#475569', bg: '#f1f5f9', border: '#cbd5e1', icon: 'archive' },
+  not_configured: { label: 'NOT CONFIGURED', fg: '#d97706', bg: '#fef3c7', border: '#fcd34d', icon: 'alert-circle' },
+  in_stock:       { label: 'NOT CONFIGURED', fg: '#d97706', bg: '#fef3c7', border: '#fcd34d', icon: 'alert-circle' },
+  configured:     { label: 'CONFIGURED',     fg: '#0284c7', bg: '#e0f2fe', border: '#7dd3fc', icon: 'check-square' },
+  assigned:       { label: 'ASSIGNED',       fg: '#1d4ed8', bg: '#dbeafe', border: '#93c5fd', icon: 'user-check' },
+  reserved:       { label: 'RESERVED',       fg: '#b45309', bg: '#fef3c7', border: '#fcd34d', icon: 'clock' },
+  faulty:         { label: 'FAULTY',         fg: '#b91c1c', bg: '#fee2e2', border: '#fca5a5', icon: 'alert-triangle' },
+  in_repair:      { label: 'IN REPAIR',      fg: '#7e22ce', bg: '#f3e8ff', border: '#d8b4fe', icon: 'tool' },
+  retired:        { label: 'RETIRED',        fg: '#475569', bg: '#f1f5f9', border: '#cbd5e1', icon: 'archive' },
 };
 
 const getStatusStyle = (status) => STATUS_CONFIG[status] || {
@@ -40,22 +50,33 @@ const PON_COLORS = {
   XPON: { fg: '#7c3aed', bg: '#ede9fe' },
 };
 
-// Unified Table Column Dimensions ensuring pixel-perfect alignment between header and rows
+// Unified Table Column Dimensions ensuring pixel-perfect alignment between header, filters and rows
 const TABLE_COLS = {
-  id:       { width: 45, paddingRight: 6 },
-  serial:   { flex: 1.6, minWidth: 165, paddingRight: 10 },
-  mac:      { flex: 1.4, minWidth: 145, paddingRight: 10 },
-  vendor:   { flex: 1.8, minWidth: 175, paddingRight: 10 },
-  pon:      { width: 90, paddingRight: 8 },
-  status:   { width: 135, paddingRight: 8 },
-  purchase: { width: 105, paddingRight: 8 },
-  actions:  { width: 85, alignItems: 'flex-end' },
+  select:   { width: 36, paddingRight: 4, alignItems: 'center', justifyContent: 'center' },
+  id:       { width: 40, paddingRight: 6 },
+  serial:   { flex: 1.4, minWidth: 140, paddingRight: 8 },
+  mac:      { flex: 1.3, minWidth: 130, paddingRight: 8 },
+  vendor:   { flex: 1.5, minWidth: 145, paddingRight: 8 },
+  pon:      { width: 85, paddingRight: 8 },
+  batch:    { width: 105, paddingRight: 8 },
+  status:   { width: 125, paddingRight: 8 },
+  assigned: { flex: 1.4, minWidth: 140, paddingRight: 8 },
+  purchase: { width: 95, paddingRight: 8 },
+  actions:  { width: 105, alignItems: 'flex-end', justifyContent: 'center' },
 };
 
 export const InventoryScreen = ({ user, refreshSignal }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
   const isSuper = isSuperAdmin(user);
+  const rawRole = String(user?.role || user?.account_role || '').toLowerCase().replace(/[\s_-]+/g, '');
+  const isOperator = rawRole === 'operator' || (!isSuper && Boolean(user?.partner_id));
+  // master stock (catalog, inward, add / edit devices) and assigning: super admin only; a super admin
+  // staff member also needs the permission in their role (the server checks the same)
+  const canManageInventory = isSuper && !isOperator && can(user, 'inventory.devices', 'add');
+  const canAssign = isSuper && !isOperator && can(user, 'inventory.assign');
+  const canEditDevice = isSuper && !isOperator && can(user, 'inventory.devices', 'edit');
+  const canDeleteDevice = isSuper && !isOperator && can(user, 'inventory.devices', 'delete');
 
   // Dynamic Data states (loaded live from database)
   const [loading, setLoading] = useState(true);
@@ -64,17 +85,30 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
   const [totalCount, setTotalCount] = useState(0);
   const [stats, setStats] = useState({
     total: 0,
+    not_configured: 0,
     in_stock: 0,
+    configured: 0,
     assigned: 0,
     reserved: 0,
     faulty: 0,
     in_repair: 0,
     retired: 0,
+    in_master_stock: 0,
+    assigned_to_operators: 0,
     by_type: [],
     by_vendor: [],
   });
   const [vendors, setVendors] = useState([]);
   const [allModels, setAllModels] = useState([]);
+
+  // Partner Assignment & Hierarchy states
+  const [assignablePartners, setAssignablePartners] = useState([]);
+  const [selectedPartnerFilter, setSelectedPartnerFilter] = useState('all');
+  const [selectedOnuIds, setSelectedOnuIds] = useState([]);
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [assignTargetPartnerId, setAssignTargetPartnerId] = useState('');
+  const [assignNotes, setAssignNotes] = useState('');
+  const [assigningItem, setAssigningItem] = useState(null);
 
   // Filtering & Pagination states
   const [selectedStatus, setSelectedStatus] = useState('all');
@@ -85,8 +119,132 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
   const [pageSize, setPageSize] = useState(25);
   const [viewMode, setViewMode] = useState('table'); // 'table' (default) or 'cards' on mobile
 
+  // Active Full-Page Tab: 'devices' | 'inward' | 'catalog' | 'scanner' | 'add'
+  const [inventoryTab, setInventoryTab] = useState('devices');
+  const [selectedInwardBatchForScanner, setSelectedInwardBatchForScanner] = useState(null);
+  const [selectedBatchFilter, setSelectedBatchFilter] = useState(null);
+
+  // Strictly restrict operator logins to 'devices' view (no warehouse administrative pages)
+  useEffect(() => {
+    if (isOperator && inventoryTab !== 'devices') {
+      setInventoryTab('devices');
+    }
+  }, [isOperator, inventoryTab]);
+
+  // Column-specific search filters (Excel filter row beneath table header)
+  const [colSearch, setColSearch] = useState({
+    serial: '',
+    mac: '',
+    vendor: 'all',
+    pon: 'all',
+    batch: 'all',
+    status: 'all',
+    assigned: 'all',
+    purchase: '',
+  });
+
+  const hasActiveColSearch = useMemo(() => {
+    return (
+      Boolean(colSearch.serial.trim()) ||
+      Boolean(colSearch.mac.trim()) ||
+      (colSearch.vendor !== 'all' && Boolean(colSearch.vendor)) ||
+      colSearch.pon !== 'all' ||
+      (colSearch.batch !== 'all' && Boolean(colSearch.batch)) ||
+      colSearch.status !== 'all' ||
+      (colSearch.assigned !== 'all' && Boolean(colSearch.assigned)) ||
+      Boolean(colSearch.purchase.trim())
+    );
+  }, [colSearch]);
+
+  const clearColSearch = () => {
+    setColSearch({
+      serial: '',
+      mac: '',
+      vendor: 'all',
+      pon: 'all',
+      batch: 'all',
+      status: 'all',
+      assigned: 'all',
+      purchase: '',
+    });
+  };
+
+  // Dropdown filter options for column filters
+  const vendorFilterOptions = useMemo(() => {
+    const opts = [{ value: 'all', label: 'All Vendors' }];
+    const seen = new Set();
+    vendors.forEach((v) => {
+      const name = v.vendor_name || v.name;
+      if (name && !seen.has(name.toLowerCase())) {
+        seen.add(name.toLowerCase());
+        opts.push({ value: name, label: name });
+      }
+    });
+    onus.forEach((o) => {
+      if (o.vendor_name && !seen.has(o.vendor_name.toLowerCase())) {
+        seen.add(o.vendor_name.toLowerCase());
+        opts.push({ value: o.vendor_name, label: o.vendor_name });
+      }
+    });
+    return opts;
+  }, [vendors, onus]);
+
+  const ponFilterOptions = [
+    { value: 'all', label: 'All PON' },
+    { value: 'GPON', label: 'GPON' },
+    { value: 'EPON', label: 'EPON' },
+    { value: 'XPON', label: 'XPON' },
+  ];
+
+  const batchFilterOptions = useMemo(() => {
+    const opts = [{ value: 'all', label: 'All Batches' }];
+    const seen = new Set();
+    onus.forEach((o) => {
+      if (o.batch_id && !seen.has(String(o.batch_id))) {
+        seen.add(String(o.batch_id));
+        const label = `Batch #${o.batch_id}${o.batch_lr_number ? ` (${o.batch_lr_number})` : ''}`;
+        opts.push({ value: String(o.batch_id), label });
+      }
+    });
+    return opts;
+  }, [onus]);
+
+  const statusFilterOptions = [
+    { value: 'all', label: 'All Status' },
+    { value: 'not_configured', label: 'Not Configured' },
+    { value: 'configured', label: 'Configured' },
+    { value: 'assigned', label: 'Assigned' },
+    { value: 'reserved', label: 'Reserved' },
+    { value: 'faulty', label: 'Faulty' },
+    { value: 'in_repair', label: 'In Repair' },
+    { value: 'retired', label: 'Retired' },
+  ];
+
+  const assignedFilterOptions = useMemo(() => {
+    const opts = [
+      { value: 'all', label: 'All Assigned' },
+      { value: 'master', label: 'Master Stock' },
+    ];
+    const seen = new Set();
+    assignablePartners.forEach((p) => {
+      const name = p.partner_name || p.name;
+      if (name && !seen.has(name.toLowerCase())) {
+        seen.add(name.toLowerCase());
+        opts.push({ value: name, label: name });
+      }
+    });
+    onus.forEach((o) => {
+      if (o.assigned_partner_name && !seen.has(o.assigned_partner_name.toLowerCase())) {
+        seen.add(o.assigned_partner_name.toLowerCase());
+        opts.push({ value: o.assigned_partner_name, label: o.assigned_partner_name });
+      }
+    });
+    return opts;
+  }, [assignablePartners, onus]);
+
   // Modals state
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showBulkScannerModal, setShowBulkScannerModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [deleteItem, setDeleteItem] = useState(null);
   const [actionLoading, setActionLoading] = useState(false);
@@ -110,20 +268,21 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
   const [newModelId, setNewModelId] = useState('');
   const [newSerialNo, setNewSerialNo] = useState('');
   const [newMacAddress, setNewMacAddress] = useState('');
-  const [newStatus, setNewStatus] = useState('in_stock');
+  const [newStatus, setNewStatus] = useState('not_configured');
   const [newPurchaseDate, setNewPurchaseDate] = useState('');
 
   // Edit form fields
-  const [editStatus, setEditStatus] = useState('in_stock');
+  const [editStatus, setEditStatus] = useState('not_configured');
   const [editMac, setEditMac] = useState('');
   const [editSerial, setEditSerial] = useState('');
 
-  // 1. Fetch live Stats & Vendors from DB
+  // 1. Fetch live Stats, Vendors, and Assignable Partners from DB
   const loadStatsAndVendors = async () => {
     try {
-      const [statsRes, vendorsRes] = await Promise.all([
-        OneBssApi.getInventoryStats(),
+      const [statsRes, vendorsRes, partnersRes] = await Promise.all([
+        OneBssApi.getInventoryStats(selectedPartnerFilter),
         OneBssApi.getInventoryVendorsAndModels(),
+        OneBssApi.getInventoryAssignablePartners(),
       ]);
       if (statsRes.ok && statsRes.data?.stats) {
         setStats(statsRes.data.stats);
@@ -131,6 +290,9 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
       if (vendorsRes.ok && vendorsRes.data?.vendors) {
         setVendors(vendorsRes.data.vendors);
         setAllModels(vendorsRes.data.all_models || []);
+      }
+      if (partnersRes.ok && Array.isArray(partnersRes.data?.data)) {
+        setAssignablePartners(partnersRes.data.data);
       }
     } catch (e) {
       console.error('Error loading inventory metadata:', e);
@@ -148,13 +310,15 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
         offset: (page - 1) * pageSize,
       };
       if (selectedStatus !== 'all') params.status = selectedStatus;
+      if (selectedPartnerFilter !== 'all') params.partner_id = selectedPartnerFilter;
       if (selectedVendor !== 'all') params.vendor_id = selectedVendor;
       if (selectedType !== 'all') params.type = selectedType;
+      if (selectedBatchFilter) params.batch_id = selectedBatchFilter;
       if (searchQuery.trim()) params.search = searchQuery.trim();
 
       const res = await OneBssApi.getInventoryOnus(params);
       if (res.ok && res.data) {
-        setOnus(res.data.data || []);
+        setOnus(res.data.onus || res.data.data || []);
         setTotalCount(res.data.total || 0);
       } else {
         toast.error(res.data?.message || 'Failed to load ONU inventory');
@@ -165,15 +329,132 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [pageSize, page, selectedStatus, selectedVendor, selectedType, searchQuery]);
+  }, [pageSize, page, selectedStatus, selectedPartnerFilter, selectedVendor, selectedType, selectedBatchFilter, searchQuery]);
+
+  // Client-side Column-specific filtered rows
+  const filteredOnus = useMemo(() => {
+    let rows = onus;
+    if (colSearch.serial.trim()) {
+      const q = colSearch.serial.toLowerCase().trim();
+      rows = rows.filter((o) => String(o.serial_no || '').toLowerCase().includes(q));
+    }
+    if (colSearch.mac.trim()) {
+      const q = colSearch.mac.toLowerCase().trim();
+      rows = rows.filter((o) => String(o.mac_address || '').toLowerCase().includes(q));
+    }
+    if (colSearch.vendor !== 'all' && colSearch.vendor) {
+      const q = colSearch.vendor.toLowerCase().trim();
+      rows = rows.filter((o) => {
+        const v = `${o.vendor_name || ''} ${o.model_name || ''}`.toLowerCase();
+        return v.includes(q);
+      });
+    }
+    if (colSearch.pon !== 'all' && colSearch.pon) {
+      rows = rows.filter((o) => String(o.pon_type || '').toUpperCase() === colSearch.pon.toUpperCase());
+    }
+    if (colSearch.batch !== 'all' && colSearch.batch) {
+      const q = colSearch.batch.toLowerCase().trim();
+      rows = rows.filter((o) => {
+        const b = String(o.batch_id || '');
+        const lr = String(o.batch_lr_number || '').toLowerCase();
+        return b === q || lr.includes(q);
+      });
+    }
+    if (colSearch.status !== 'all' && colSearch.status) {
+      if (colSearch.status === 'not_configured' || colSearch.status === 'in_stock') {
+        rows = rows.filter((o) => o.status === 'not_configured' || o.status === 'in_stock');
+      } else {
+        rows = rows.filter((o) => String(o.status || '').toLowerCase() === colSearch.status.toLowerCase());
+      }
+    }
+    if (colSearch.assigned !== 'all' && colSearch.assigned) {
+      if (colSearch.assigned === 'master') {
+        rows = rows.filter((o) => !o.assigned_partner_id);
+      } else {
+        const q = colSearch.assigned.toLowerCase().trim();
+        rows = rows.filter((o) => String(o.assigned_partner_name || '').toLowerCase().includes(q));
+      }
+    }
+    if (colSearch.purchase.trim()) {
+      const q = colSearch.purchase.toLowerCase().trim();
+      rows = rows.filter((o) => String(o.purchase_date || '').toLowerCase().includes(q));
+    }
+    return rows;
+  }, [onus, colSearch]);
 
   useEffect(() => {
     loadStatsAndVendors();
-  }, [refreshSignal]);
+  }, [refreshSignal, selectedPartnerFilter]);
 
   useEffect(() => {
     loadOnus();
   }, [loadOnus, refreshSignal]);
+
+  // Bulk Selection & Assignment helpers
+  const toggleSelectItem = (id) => {
+    setSelectedOnuIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]
+    );
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedOnuIds.length === onus.length && onus.length > 0) {
+      setSelectedOnuIds([]);
+    } else {
+      setSelectedOnuIds(onus.map((o) => o.id));
+    }
+  };
+
+  const openAssignModal = (item = null) => {
+    if (assignablePartners.length === 0) {
+      OneBssApi.getInventoryAssignablePartners().then((res) => {
+        if (res.ok && Array.isArray(res.data?.data)) {
+          setAssignablePartners(res.data.data);
+        }
+      });
+    }
+    if (item) {
+      setAssigningItem(item);
+      setSelectedOnuIds([item.id]);
+      setAssignTargetPartnerId(item.assigned_partner_id ? String(item.assigned_partner_id) : '');
+    } else {
+      setAssigningItem(null);
+      setAssignTargetPartnerId('');
+    }
+    setAssignNotes('');
+    setShowAssignModal(true);
+  };
+
+  const handleAssignSubmit = async () => {
+    if (selectedOnuIds.length === 0) {
+      toast.warn('Please select at least one device to assign.');
+      return;
+    }
+    if (assignTargetPartnerId === '') {
+      toast.warn('Please select a target operator / location.');
+      return;
+    }
+    setActionLoading(true);
+    try {
+      const res = await OneBssApi.assignInventoryOnu(selectedOnuIds, assignTargetPartnerId, assignNotes);
+      if (res.ok) {
+        toast.success(res.data?.message || 'Device(s) assigned successfully!');
+        setShowAssignModal(false);
+        setSelectedOnuIds([]);
+        setAssigningItem(null);
+        setAssignNotes('');
+        setAssignTargetPartnerId('');
+        loadStatsAndVendors();
+        loadOnus();
+      } else {
+        toast.error(res.data?.message || 'Failed to assign device(s)');
+      }
+    } catch (e) {
+      toast.error('Network error assigning device');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
   // Copy helper
   const copyToClipboard = (text, label) => {
@@ -213,7 +494,7 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
       setNewModelId('');
       setNewSerialNo('');
       setNewMacAddress('');
-      setNewStatus('in_stock');
+      setNewStatus('not_configured');
       setNewPurchaseDate('');
       loadStatsAndVendors();
       loadOnus();
@@ -240,6 +521,27 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
       loadOnus();
     } else {
       toast.error(res.data?.message || 'Failed to update ONU');
+    }
+  };
+
+  // Handle Bulk Mark as Configured
+  const handleBulkMarkAsConfigured = async () => {
+    if (selectedOnuIds.length === 0) return;
+    setActionLoading(true);
+    let successCount = 0;
+    try {
+      for (const id of selectedOnuIds) {
+        const res = await OneBssApi.updateInventoryOnu(id, { status: 'configured' });
+        if (res.ok) successCount++;
+      }
+      toast.success(`${successCount} device(s) marked as Configured!`);
+      setSelectedOnuIds([]);
+      loadStatsAndVendors();
+      loadOnus();
+    } catch (e) {
+      toast.error('Failed to update devices to configured');
+    } finally {
+      setActionLoading(false);
     }
   };
 
@@ -323,14 +625,15 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
     }
   };
 
-  // Access Denied screen for non-superadmin
-  if (!isSuper) {
+  // Access Denied screen for unpermitted accounts
+  const isAllowedRole = isSuper || isOperator || ['superadmin', 'admin', 'operator'].includes(rawRole);
+  if (!isAllowedRole) {
     return (
       <View style={styles.centerContainer}>
         <Feather name="shield-off" size={48} color={COLORS.accentRose} />
         <Text style={styles.deniedTitle}>Access Restricted</Text>
         <Text style={styles.deniedSub}>
-          Only Super Administrator accounts have permission to access Hardware Inventory Management.
+          You do not have permission to access Hardware Inventory Management.
         </Text>
       </View>
     );
@@ -345,27 +648,194 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
         {/* ======================================================== */}
         {/* 1. Header Actions Bar                                    */}
         {/* ======================================================== */}
-        <View style={[styles.headerRow, { justifyContent: 'flex-end' }, isMobile && styles.headerRowMobile]}>
-          <View style={[styles.headerActions, isMobile && styles.headerActionsMobile]}>
-            <TouchableOpacity
-              style={[styles.catalogBtn, isMobile && { flex: 1, justifyContent: 'center' }]}
-              onPress={() => setShowCatalogModal(true)}
-            >
-              <Feather name="layers" size={13} color="#334155" />
-              <Text style={styles.catalogBtnText}>Vendors & Models</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={[styles.addBtn, isMobile && { flex: 1.2, justifyContent: 'center' }]} onPress={() => setShowAddModal(true)}>
-              <Feather name="plus-circle" size={14} color="#ffffff" />
-              <Text style={styles.addBtnText}>Add Device</Text>
-            </TouchableOpacity>
+        <View style={[styles.headerRow, isMobile && styles.headerRowMobile]}>
+          <View>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: '#64748b', textTransform: 'uppercase', letterSpacing: 0.5 }}>
+              {isSuper ? 'Master Inventory' : isOperator ? 'My Assigned Devices' : 'Branch Inventory'}
+            </Text>
           </View>
+
+          {!isOperator && canManageInventory && (
+            <View style={[styles.headerActions, isMobile && styles.headerActionsMobile]}>
+              <TouchableOpacity
+                style={[styles.navTabBtn, inventoryTab === 'devices' && styles.navTabBtnActive]}
+                onPress={() => setInventoryTab('devices')}
+              >
+                <Feather name="box" size={13} color={inventoryTab === 'devices' ? '#ffffff' : '#334155'} />
+                <Text style={[styles.navTabBtnText, inventoryTab === 'devices' && styles.navTabBtnTextActive]}>
+                  Devices
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.navTabBtn, inventoryTab === 'configured' && styles.navTabBtnActive]}
+                onPress={() => setInventoryTab('configured')}
+              >
+                <MaterialCommunityIcons name="checkbox-marked-circle-outline" size={15} color={inventoryTab === 'configured' ? '#ffffff' : '#334155'} />
+                <Text style={[styles.navTabBtnText, inventoryTab === 'configured' && styles.navTabBtnTextActive]}>
+                  Configured Boxes
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.navTabBtn, inventoryTab === 'inward' && styles.navTabBtnActive]}
+                onPress={() => setInventoryTab('inward')}
+              >
+                <MaterialCommunityIcons name="truck-delivery" size={15} color={inventoryTab === 'inward' ? '#ffffff' : '#334155'} />
+                <Text style={[styles.navTabBtnText, inventoryTab === 'inward' && styles.navTabBtnTextActive]}>
+                  Inward Stock
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.navTabBtn, inventoryTab === 'catalog' && styles.navTabBtnActive]}
+                onPress={() => setInventoryTab('catalog')}
+              >
+                <Feather name="layers" size={13} color={inventoryTab === 'catalog' ? '#ffffff' : '#334155'} />
+                <Text style={[styles.navTabBtnText, inventoryTab === 'catalog' && styles.navTabBtnTextActive]}>
+                  Vendors & Models
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.navTabBtn, inventoryTab === 'scanner' && styles.navTabBtnActive]}
+                onPress={() => setInventoryTab('scanner')}
+              >
+                <Feather name="maximize" size={13} color={inventoryTab === 'scanner' ? '#ffffff' : '#334155'} />
+                <Text style={[styles.navTabBtnText, inventoryTab === 'scanner' && styles.navTabBtnTextActive]}>
+                  Bulk Scan
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.navTabBtn, inventoryTab === 'add' && styles.navTabBtnActive]}
+                onPress={() => setInventoryTab('add')}
+              >
+                <Feather name="plus-circle" size={13} color={inventoryTab === 'add' ? '#ffffff' : '#334155'} />
+                <Text style={[styles.navTabBtnText, inventoryTab === 'add' && styles.navTabBtnTextActive]}>
+                  Add Device
+                </Text>
+              </TouchableOpacity>
+            </View>
+          )}
         </View>
 
         {/* ======================================================== */}
-        {/* 2. KPI Metrics Cards (Responsive 2x2 grid on mobile)     */}
+        {/* Full-Page View: CONFIGURED BOXES                         */}
         {/* ======================================================== */}
-        <View style={[styles.metricsGrid, isMobile && styles.metricsGridMobile]}>
+        {!isOperator && inventoryTab === 'configured' && (
+          <ConfiguredBoxesView
+            user={user}
+            vendors={vendors}
+            allModels={allModels}
+            assignablePartners={assignablePartners}
+            onReload={() => {
+              loadStatsAndVendors();
+              loadOnus();
+            }}
+            onBack={() => setInventoryTab('devices')}
+            onOpenAssignModal={(ids) => {
+              setSelectedOnuIds(ids);
+              setShowAssignModal(true);
+            }}
+          />
+        )}
+
+        {/* ======================================================== */}
+        {/* Full-Page View 1: INWARD STOCK                           */}
+        {/* ======================================================== */}
+        {!isOperator && inventoryTab === 'inward' && (
+          <InwardStockModal
+            isFullPage={true}
+            onClose={() => setInventoryTab('devices')}
+            onOpenScannerForBatch={(batch) => {
+              setSelectedInwardBatchForScanner(batch);
+              setInventoryTab('scanner');
+            }}
+            onFilterByBatch={(batchId) => {
+              setSelectedBatchFilter(batchId);
+              setInventoryTab('devices');
+            }}
+          />
+        )}
+
+        {/* ======================================================== */}
+        {/* Full-Page View 2: BULK SCANNER (GUN / CAMERA / PASTE)    */}
+        {/* ======================================================== */}
+        {!isOperator && inventoryTab === 'scanner' && (
+          <BulkInventoryScannerModal
+            isFullPage={true}
+            onClose={() => {
+              setInventoryTab('devices');
+              setSelectedInwardBatchForScanner(null);
+            }}
+            vendors={vendors}
+            allModels={allModels}
+            inwardBatch={selectedInwardBatchForScanner}
+            onSuccess={() => {
+              loadStatsAndVendors();
+              loadOnus();
+            }}
+          />
+        )}
+
+        {/* ======================================================== */}
+        {/* Full-Page View 3: VENDORS & MODELS HARDWARE CATALOG      */}
+        {/* ======================================================== */}
+        {!isOperator && inventoryTab === 'catalog' && (
+          <HardwareCatalogView
+            vendors={vendors}
+            allModels={allModels}
+            onReload={loadStatsAndVendors}
+            onBack={() => setInventoryTab('devices')}
+          />
+        )}
+
+        {/* ======================================================== */}
+        {/* Full-Page View 4: ADD PHYSICAL DEVICE                     */}
+        {/* ======================================================== */}
+        {!isOperator && inventoryTab === 'add' && (
+          <AddDeviceView
+            vendors={vendors}
+            allModels={allModels}
+            onReload={() => {
+              loadStatsAndVendors();
+              loadOnus();
+            }}
+            onBack={() => setInventoryTab('devices')}
+            onSwitchToBulkScan={() => setInventoryTab('scanner')}
+          />
+        )}
+
+        {/* ======================================================== */}
+        {/* Full-Page View 5: MASTER DEVICES INVENTORY               */}
+        {/* ======================================================== */}
+        {(isOperator || inventoryTab === 'devices') && (
+          <View>
+            {/* Active Inward Batch Filter Pill */}
+            {selectedBatchFilter && (
+              <View style={styles.batchFilterActiveBar}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <MaterialCommunityIcons name="truck-delivery" size={16} color="#0369a1" />
+                  <Text style={styles.batchFilterActiveText}>
+                    Showing devices from Inward Consignment Batch #{selectedBatchFilter}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => {
+                    setSelectedBatchFilter(null);
+                    setPage(1);
+                  }}
+                  style={styles.batchFilterClearBtn}
+                >
+                  <Feather name="x" size={13} color="#0369a1" />
+                  <Text style={styles.batchFilterClearText}>Reset Filter</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* 2. KPI Metrics Cards */}
+            <View style={[styles.metricsGrid, isMobile && styles.metricsGridMobile]}>
           {/* Card: Total */}
           <TouchableOpacity
             style={[styles.metricCard, isMobile && styles.metricCardMobile, selectedStatus === 'all' && styles.metricCardActive]}
@@ -380,18 +850,36 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
             <Text style={[styles.metricCardVal, isMobile && { fontSize: 20 }]}>{stats.total}</Text>
           </TouchableOpacity>
 
-          {/* Card: In Stock */}
+          {/* Card: Not Configured (formerly In Stock) */}
           <TouchableOpacity
-            style={[styles.metricCard, isMobile && styles.metricCardMobile, selectedStatus === 'in_stock' && styles.metricCardActive]}
-            onPress={() => { setSelectedStatus('in_stock'); setPage(1); }}
+            style={[styles.metricCard, isMobile && styles.metricCardMobile, (selectedStatus === 'not_configured' || selectedStatus === 'in_stock') && styles.metricCardActive]}
+            onPress={() => { setSelectedStatus('not_configured'); setPage(1); }}
           >
             <View style={styles.metricCardHead}>
-              <Text style={[styles.metricCardLabel, { color: '#047857' }]}>IN STOCK</Text>
-              <View style={[styles.metricIconBox, { backgroundColor: '#dcfce7' }]}>
-                <Feather name="check-circle" size={14} color="#10b981" />
+              <Text style={[styles.metricCardLabel, { color: '#d97706' }]}>NOT CONFIGURED</Text>
+              <View style={[styles.metricIconBox, { backgroundColor: '#fef3c7' }]}>
+                <Feather name="box" size={14} color="#d97706" />
               </View>
             </View>
-            <Text style={[styles.metricCardVal, { color: '#047857' }, isMobile && { fontSize: 20 }]}>{stats.in_stock}</Text>
+            <Text style={[styles.metricCardVal, { color: '#d97706' }, isMobile && { fontSize: 20 }]}>
+              {(stats.not_configured ?? 0) + (stats.in_stock ?? 0)}
+            </Text>
+          </TouchableOpacity>
+
+          {/* Card: Configured Boxes */}
+          <TouchableOpacity
+            style={[styles.metricCard, isMobile && styles.metricCardMobile, selectedStatus === 'configured' && styles.metricCardActive]}
+            onPress={() => { setSelectedStatus('configured'); setPage(1); }}
+          >
+            <View style={styles.metricCardHead}>
+              <Text style={[styles.metricCardLabel, { color: '#0284c7' }]}>CONFIGURED</Text>
+              <View style={[styles.metricIconBox, { backgroundColor: '#e0f2fe' }]}>
+                <MaterialCommunityIcons name="checkbox-marked-circle-outline" size={15} color="#0284c7" />
+              </View>
+            </View>
+            <Text style={[styles.metricCardVal, { color: '#0284c7' }, isMobile && { fontSize: 20 }]}>
+              {stats.configured || onus.filter((o) => o.status === 'configured').length}
+            </Text>
           </TouchableOpacity>
 
           {/* Card: Assigned */}
@@ -432,14 +920,17 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
             {[
               { id: 'all', label: 'All ONUs', count: stats.total },
-              { id: 'in_stock', label: 'In Stock', count: stats.in_stock },
+              { id: 'not_configured', label: 'Not Configured', count: (stats.not_configured ?? 0) + (stats.in_stock ?? 0) },
+              { id: 'configured', label: 'Configured Boxes', count: stats.configured || onus.filter((o) => o.status === 'configured').length },
               { id: 'assigned', label: 'Assigned', count: stats.assigned },
               { id: 'reserved', label: 'Reserved', count: stats.reserved },
               { id: 'faulty', label: 'Faulty', count: stats.faulty },
               { id: 'in_repair', label: 'In Repair', count: stats.in_repair },
               { id: 'retired', label: 'Retired', count: stats.retired },
             ].map((chip) => {
-              const active = selectedStatus === chip.id;
+              const active =
+                selectedStatus === chip.id ||
+                (chip.id === 'not_configured' && (selectedStatus === 'not_configured' || selectedStatus === 'in_stock'));
               return (
                 <TouchableOpacity
                   key={chip.id}
@@ -481,8 +972,28 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
             ) : null}
           </View>
 
-          {/* Dropdown Filters (Vendor & PON Type) */}
+          {/* Dropdown Filters (Operator/Location, Vendor & PON Type) */}
           <View style={[styles.dropdownFiltersRow, isMobile && { width: '100%', gap: 8 }]}>
+            {/* Operator / Location Filter (Superadmin and Admin) */}
+            {!isOperator && (
+              <View style={[styles.selectWrap, isMobile && { flex: 1 }]}>
+                <Text style={styles.selectLabel}>Operator:</Text>
+                <select
+                  style={styles.nativeSelect}
+                  value={selectedPartnerFilter}
+                  onChange={(e) => { setSelectedPartnerFilter(e.target.value); setPage(1); }}
+                >
+                  <option value="all">All Locations</option>
+                  <option value="0">Master Stock (Unassigned)</option>
+                  {assignablePartners.map((p) => (
+                    <option key={p.partner_id} value={p.partner_id}>
+                      {p.partner_name} ({p.role})
+                    </option>
+                  ))}
+                </select>
+              </View>
+            )}
+
             {/* Vendor Filter */}
             <View style={[styles.selectWrap, isMobile && { flex: 1 }]}>
               <Text style={styles.selectLabel}>Vendor:</Text>
@@ -552,25 +1063,58 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
               <Text style={styles.emptySub}>
                 {searchQuery || selectedStatus !== 'all' || selectedVendor !== 'all'
                   ? 'No devices match your filters.'
-                  : 'No devices found.'}
+                  : isSuper
+                  ? 'No devices found in master inventory.'
+                  : 'No devices have been assigned to your account yet.'}
               </Text>
-              <TouchableOpacity style={styles.emptyAddBtn} onPress={() => setShowAddModal(true)}>
-                <Feather name="plus" size={14} color="#ffffff" />
-                <Text style={styles.emptyAddBtnText}>Add Device</Text>
-              </TouchableOpacity>
+              {canManageInventory && (
+                <TouchableOpacity style={styles.emptyAddBtn} onPress={() => setInventoryTab('add')}>
+                  <Feather name="plus" size={14} color="#ffffff" />
+                  <Text style={styles.emptyAddBtnText}>Add Device</Text>
+                </TouchableOpacity>
+              )}
             </View>
           ) : isMobile && viewMode === 'cards' ? (
             /* ===================================================== */
             /* MOBILE VIEW: Touch-Friendly Card List                 */
             /* ===================================================== */
             <View style={styles.mobileListContainer}>
+              {/* Bulk Action Bar on Mobile */}
+              {canAssign && selectedOnuIds.length > 0 && (
+                <View style={styles.bulkActionBar}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={styles.bulkBadge}>
+                      <Text style={styles.bulkBadgeText}>{selectedOnuIds.length}</Text>
+                    </View>
+                    <Text style={styles.bulkActionText}>selected</Text>
+                  </View>
+                  <TouchableOpacity
+                    style={styles.bulkActionBtn}
+                    onPress={() => openAssignModal(null)}
+                  >
+                    <Feather name="send" size={12} color="#ffffff" />
+                    <Text style={styles.bulkActionBtnText}>Assign</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               {onus.map((item) => {
                 const st = getStatusStyle(item.status);
                 const pon = PON_COLORS[item.pon_type] || { fg: '#334155', bg: '#f1f5f9' };
+                const isSelected = selectedOnuIds.includes(item.id);
+
                 return (
-                  <View key={item.id} style={styles.mCard}>
+                  <View key={item.id} style={[styles.mCard, isSelected && { borderColor: COLORS.primary, backgroundColor: '#f0f9ff' }]}>
                     {/* Card Header: Vendor & Model + Status Badge */}
                     <View style={styles.mCardHead}>
+                      {canAssign && (
+                        <TouchableOpacity
+                          style={[styles.checkboxBtn, isSelected && styles.checkboxBtnActive, { marginRight: 8 }]}
+                          onPress={() => toggleSelectItem(item.id)}
+                        >
+                          {isSelected && <Feather name="check" size={12} color="#ffffff" />}
+                        </TouchableOpacity>
+                      )}
                       <View style={{ flex: 1, paddingRight: 8 }}>
                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
                           <Text style={styles.mVendorText}>{item.vendor_name}</Text>
@@ -582,23 +1126,43 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
                       </View>
 
                       {/* Clickable Status Pill */}
-                      <TouchableOpacity
-                        style={[styles.statusBadge, { backgroundColor: st.bg, borderColor: st.border }]}
-                        onPress={() => {
-                          setEditItem(item);
-                          setEditStatus(item.status);
-                          setEditMac(item.mac_address || '');
-                          setEditSerial(item.serial_no);
-                        }}
-                      >
-                        <Feather name={st.icon} size={11} color={st.fg} />
-                        <Text style={[styles.statusBadgeText, { color: st.fg }]}>{st.label}</Text>
-                        <Feather name="chevron-down" size={10} color={st.fg} />
-                      </TouchableOpacity>
+                      {canEditDevice && (
+                        <TouchableOpacity
+                          style={[styles.statusBadge, { backgroundColor: st.bg, borderColor: st.border }]}
+                          onPress={() => {
+                            setEditItem(item);
+                            setEditStatus(item.status);
+                            setEditMac(item.mac_address || '');
+                            setEditSerial(item.serial_no);
+                          }}
+                        >
+                          <Feather name={st.icon} size={11} color={st.fg} />
+                          <Text style={[styles.statusBadgeText, { color: st.fg }]}>{st.label}</Text>
+                          <Feather name="chevron-down" size={10} color={st.fg} />
+                        </TouchableOpacity>
+                      )}
                     </View>
 
                     {/* Card Body: Identifiers */}
                     <View style={styles.mCardBody}>
+                      {/* Assigned Operator Row */}
+                      <View style={styles.mCardDataRow}>
+                        <Text style={styles.mLabel}>Assigned:</Text>
+                        {item.assigned_partner_name ? (
+                          <View style={styles.assignedBadge}>
+                            <Feather name="user-check" size={10} color="#0284c7" />
+                            <Text style={styles.assignedBadgeText} numberOfLines={1}>
+                              {item.assigned_partner_name}
+                            </Text>
+                          </View>
+                        ) : (
+                          <View style={styles.unassignedBadge}>
+                            <Feather name="box" size={10} color="#64748b" />
+                            <Text style={styles.unassignedBadgeText}>Master Stock</Text>
+                          </View>
+                        )}
+                      </View>
+
                       {/* Serial Number Row */}
                       <View style={styles.mCardDataRow}>
                         <Text style={styles.mLabel}>SN:</Text>
@@ -640,26 +1204,40 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
 
                     {/* Card Footer: Quick Actions */}
                     <View style={styles.mCardFooter}>
-                      <TouchableOpacity
-                        style={[styles.mActionBtn, { borderColor: '#cbd5e1' }]}
-                        onPress={() => {
-                          setEditItem(item);
-                          setEditStatus(item.status);
-                          setEditMac(item.mac_address || '');
-                          setEditSerial(item.serial_no);
-                        }}
-                      >
-                        <Feather name="edit-2" size={13} color="#2563eb" />
-                        <Text style={[styles.mActionBtnText, { color: '#2563eb' }]}>Edit / Status</Text>
-                      </TouchableOpacity>
+                      {canAssign && (
+                        <TouchableOpacity
+                          style={[styles.mActionBtn, { borderColor: '#bfdbfe', backgroundColor: '#eff6ff' }]}
+                          onPress={() => openAssignModal(item)}
+                        >
+                          <Feather name="send" size={13} color="#2563eb" />
+                          <Text style={[styles.mActionBtnText, { color: '#2563eb' }]}>Assign</Text>
+                        </TouchableOpacity>
+                      )}
 
-                      <TouchableOpacity
-                        style={[styles.mActionBtn, { borderColor: '#fee2e2', backgroundColor: '#fff5f5' }]}
-                        onPress={() => setDeleteItem(item)}
-                      >
-                        <Feather name="trash-2" size={13} color="#dc2626" />
-                        <Text style={[styles.mActionBtnText, { color: '#dc2626' }]}>Delete</Text>
-                      </TouchableOpacity>
+                      {canEditDevice && (
+                        <TouchableOpacity
+                          style={[styles.mActionBtn, { borderColor: '#cbd5e1' }]}
+                          onPress={() => {
+                            setEditItem(item);
+                            setEditStatus(item.status);
+                            setEditMac(item.mac_address || '');
+                            setEditSerial(item.serial_no);
+                          }}
+                        >
+                          <Feather name="edit-2" size={13} color="#475569" />
+                          <Text style={[styles.mActionBtnText, { color: '#475569' }]}>Edit / Status</Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {canDeleteDevice && (
+                        <TouchableOpacity
+                          style={[styles.mActionBtn, { borderColor: '#fee2e2', backgroundColor: '#fff5f5' }]}
+                          onPress={() => setDeleteItem(item)}
+                        >
+                          <Feather name="trash-2" size={13} color="#dc2626" />
+                          <Text style={[styles.mActionBtnText, { color: '#dc2626' }]}>Delete</Text>
+                        </TouchableOpacity>
+                      )}
                     </View>
                   </View>
                 );
@@ -669,155 +1247,497 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
             /* ===================================================== */
             /* TABLE VIEW: Available on BOTH Mobile & Desktop        */
             /* ===================================================== */
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={true}
-              contentContainerStyle={{ minWidth: 960, width: isMobile ? undefined : '100%' }}
-            >
-              <View style={[styles.tableContainer, { minWidth: 960, width: '100%' }]}>
-                {/* Table Header */}
-                <View style={styles.tableHeaderRow}>
-                  <View style={TABLE_COLS.id}>
-                    <Text style={styles.th}>#</Text>
+            <View>
+              {/* Bulk Selection Bar */}
+              {canAssign && selectedOnuIds.length > 0 && (
+                <View style={styles.bulkActionBar}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <View style={styles.bulkBadge}>
+                      <Text style={styles.bulkBadgeText}>{selectedOnuIds.length}</Text>
+                    </View>
+                    <Text style={styles.bulkActionText}>
+                      {selectedOnuIds.length === 1 ? '1 device selected' : `${selectedOnuIds.length} devices selected`}
+                    </Text>
                   </View>
-                  <View style={TABLE_COLS.serial}>
-                    <Text style={styles.th}>SERIAL NUMBER</Text>
-                  </View>
-                  <View style={TABLE_COLS.mac}>
-                    <Text style={styles.th}>MAC ADDRESS</Text>
-                  </View>
-                  <View style={TABLE_COLS.vendor}>
-                    <Text style={styles.th}>VENDOR & MODEL</Text>
-                  </View>
-                  <View style={TABLE_COLS.pon}>
-                    <Text style={styles.th}>PON TYPE</Text>
-                  </View>
-                  <View style={TABLE_COLS.status}>
-                    <Text style={styles.th}>STATUS</Text>
-                  </View>
-                  <View style={TABLE_COLS.purchase}>
-                    <Text style={styles.th}>PURCHASED</Text>
-                  </View>
-                  <View style={TABLE_COLS.actions}>
-                    <Text style={[styles.th, { textAlign: 'right' }]}>ACTIONS</Text>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                    <TouchableOpacity
+                      style={[styles.bulkActionBtn, { backgroundColor: '#0284c7' }]}
+                      onPress={handleBulkMarkAsConfigured}
+                      disabled={actionLoading}
+                    >
+                      <MaterialCommunityIcons name="checkbox-marked-circle-outline" size={13} color="#ffffff" />
+                      <Text style={styles.bulkActionBtnText}>Mark as Configured</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={styles.bulkActionBtn}
+                      onPress={() => openAssignModal(null)}
+                    >
+                      <Feather name="send" size={13} color="#ffffff" />
+                      <Text style={styles.bulkActionBtnText}>Assign Selected to Operator</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.clearSelectionBtn}
+                      onPress={() => setSelectedOnuIds([])}
+                    >
+                      <Text style={styles.clearSelectionText}>Clear</Text>
+                    </TouchableOpacity>
                   </View>
                 </View>
+              )}
 
-                {/* Table Rows */}
-                {onus.map((item, idx) => {
-                  const st = getStatusStyle(item.status);
-                  const pon = PON_COLORS[item.pon_type] || { fg: '#334155', bg: '#f1f5f9' };
-                  return (
-                    <View key={item.id} style={[styles.tr, idx % 2 === 1 && styles.trEven]}>
-                      {/* ID */}
-                      <View style={TABLE_COLS.id}>
-                        <Text style={[styles.td, { color: '#94a3b8', fontSize: 11 }]}>
-                          {item.id}
-                        </Text>
-                      </View>
-
-                      {/* Serial Number with Copy */}
-                      <View style={[TABLE_COLS.serial, styles.tdCell]}>
-                        {item.serial_no ? (
-                          <>
-                            <Text style={styles.serialText} selectable>{item.serial_no}</Text>
-                            <TouchableOpacity
-                              style={styles.iconCopyBtn}
-                              onPress={() => copyToClipboard(item.serial_no, 'Serial Number')}
-                              title="Copy Serial Number"
-                            >
-                              <Feather name="copy" size={11} color="#64748b" />
-                            </TouchableOpacity>
-                          </>
-                        ) : (
-                          <Text style={{ color: '#cbd5e1', fontSize: 12 }}>—</Text>
-                        )}
-                      </View>
-
-                      {/* MAC Address with Copy */}
-                      <View style={[TABLE_COLS.mac, styles.tdCell]}>
-                        {item.mac_address ? (
-                          <>
-                            <Text style={styles.macText} selectable>{item.mac_address}</Text>
-                            <TouchableOpacity
-                              style={styles.iconCopyBtn}
-                              onPress={() => copyToClipboard(item.mac_address, 'MAC Address')}
-                              title="Copy MAC"
-                            >
-                              <Feather name="copy" size={11} color="#64748b" />
-                            </TouchableOpacity>
-                          </>
-                        ) : (
-                          <Text style={{ color: '#cbd5e1', fontSize: 12 }}>—</Text>
-                        )}
-                      </View>
-
-                      {/* Vendor & Model */}
-                      <View style={[TABLE_COLS.vendor, { flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center' }]}>
-                        <Text style={styles.vendorNameText} numberOfLines={1}>{item.vendor_name}</Text>
-                        <Text style={styles.modelNameText} numberOfLines={1}>{item.model_name}</Text>
-                      </View>
-
-                      {/* PON Type Badge */}
-                      <View style={TABLE_COLS.pon}>
-                        <View style={[styles.ponBadge, { backgroundColor: pon.bg }]}>
-                          <Text style={[styles.ponBadgeText, { color: pon.fg }]}>{item.pon_type}</Text>
-                        </View>
-                      </View>
-
-                      {/* Status Badge */}
-                      <View style={TABLE_COLS.status}>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={true}
+                contentContainerStyle={{ minWidth: 1240, width: isMobile ? undefined : '100%' }}
+              >
+                <View style={[styles.tableContainer, { minWidth: 1240, width: '100%' }]}>
+                  {/* Table Header */}
+                  <View style={styles.tableHeaderRow}>
+                    {canAssign && (
+                      <View style={TABLE_COLS.select}>
                         <TouchableOpacity
-                          style={[styles.statusBadge, { backgroundColor: st.bg, borderColor: st.border }]}
-                          onPress={() => {
-                            setEditItem(item);
-                            setEditStatus(item.status);
-                            setEditMac(item.mac_address || '');
-                            setEditSerial(item.serial_no);
-                          }}
-                          title="Click to change status"
+                          style={[
+                            styles.checkboxBtn,
+                            selectedOnuIds.length === filteredOnus.length && filteredOnus.length > 0 && styles.checkboxBtnActive,
+                          ]}
+                          onPress={toggleSelectAll}
+                          title="Select all on this page"
                         >
-                          <Feather name={st.icon} size={11} color={st.fg} />
-                          <Text style={[styles.statusBadgeText, { color: st.fg }]}>{st.label}</Text>
-                          <Feather name="chevron-down" size={10} color={st.fg} style={{ marginLeft: 2 }} />
+                          {selectedOnuIds.length === filteredOnus.length && filteredOnus.length > 0 && (
+                            <Feather name="check" size={12} color="#ffffff" />
+                          )}
                         </TouchableOpacity>
                       </View>
+                    )}
+                    <View style={TABLE_COLS.id}>
+                      <Text style={styles.th}>#</Text>
+                    </View>
+                    <View style={TABLE_COLS.serial}>
+                      <Text style={styles.th}>SERIAL NUMBER</Text>
+                    </View>
+                    <View style={TABLE_COLS.mac}>
+                      <Text style={styles.th}>MAC ADDRESS</Text>
+                    </View>
+                    <View style={TABLE_COLS.vendor}>
+                      <Text style={styles.th}>VENDOR & MODEL</Text>
+                    </View>
+                    <View style={TABLE_COLS.pon}>
+                      <Text style={styles.th}>PON TYPE</Text>
+                    </View>
+                    <View style={TABLE_COLS.batch}>
+                      <Text style={styles.th}>BATCH</Text>
+                    </View>
+                    <View style={TABLE_COLS.status}>
+                      <Text style={styles.th}>STATUS</Text>
+                    </View>
+                    <View style={TABLE_COLS.assigned}>
+                      <Text style={styles.th}>ASSIGNED TO</Text>
+                    </View>
+                    <View style={TABLE_COLS.purchase}>
+                      <Text style={styles.th}>PURCHASED</Text>
+                    </View>
+                    <View style={TABLE_COLS.actions}>
+                      <Text style={[styles.th, { textAlign: 'right' }]}>ACTIONS</Text>
+                    </View>
+                  </View>
 
-                      {/* Purchase Date */}
-                      <View style={TABLE_COLS.purchase}>
-                        <Text style={[styles.td, { fontSize: 12, color: '#475569' }]}>
-                          {item.purchase_date || '—'}
-                        </Text>
-                      </View>
+                  {/* First Line Filter Option (Excel Column Filter Row) */}
+                  <View style={styles.excelFilterRow}>
+                    {canAssign && (
+                      <View style={TABLE_COLS.select} />
+                    )}
+                    <View style={TABLE_COLS.id} />
 
-                      {/* Action Buttons */}
-                      <View style={[TABLE_COLS.actions, { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6 }]}>
-                        <TouchableOpacity
-                          style={styles.rowActionBtn}
-                          onPress={() => {
-                            setEditItem(item);
-                            setEditStatus(item.status);
-                            setEditMac(item.mac_address || '');
-                            setEditSerial(item.serial_no);
-                          }}
-                          title="Edit ONU"
-                        >
-                          <Feather name="edit-2" size={13} color="#2563eb" />
-                        </TouchableOpacity>
-
-                        <TouchableOpacity
-                          style={[styles.rowActionBtn, { borderColor: '#fee2e2' }]}
-                          onPress={() => setDeleteItem(item)}
-                          title="Delete ONU"
-                        >
-                          <Feather name="trash-2" size={13} color="#dc2626" />
-                        </TouchableOpacity>
+                    {/* Serial Filter */}
+                    <View style={TABLE_COLS.serial}>
+                      <View style={[styles.excelColSearchBox, colSearch.serial && styles.excelColSearchBoxActive]}>
+                        <Feather name="search" size={10} color={colSearch.serial ? '#0284c7' : '#94a3b8'} style={{ marginRight: 3 }} />
+                        <TextInput
+                          style={styles.excelColSearchInput}
+                          placeholder="Filter Serial..."
+                          placeholderTextColor="#94a3b8"
+                          value={colSearch.serial}
+                          onChangeText={(val) => setColSearch((c) => ({ ...c, serial: val }))}
+                        />
+                        {colSearch.serial ? (
+                          <TouchableOpacity onPress={() => setColSearch((c) => ({ ...c, serial: '' }))}>
+                            <Feather name="x" size={10} color="#64748b" />
+                          </TouchableOpacity>
+                        ) : null}
                       </View>
                     </View>
-                  );
-                })}
-              </View>
-            </ScrollView>
+
+                    {/* MAC Filter */}
+                    <View style={TABLE_COLS.mac}>
+                      <View style={[styles.excelColSearchBox, colSearch.mac && styles.excelColSearchBoxActive]}>
+                        <Feather name="search" size={10} color={colSearch.mac ? '#0284c7' : '#94a3b8'} style={{ marginRight: 3 }} />
+                        <TextInput
+                          style={styles.excelColSearchInput}
+                          placeholder="Filter MAC..."
+                          placeholderTextColor="#94a3b8"
+                          value={colSearch.mac}
+                          onChangeText={(val) => setColSearch((c) => ({ ...c, mac: val }))}
+                        />
+                        {colSearch.mac ? (
+                          <TouchableOpacity onPress={() => setColSearch((c) => ({ ...c, mac: '' }))}>
+                            <Feather name="x" size={10} color="#64748b" />
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                    </View>
+
+                    {/* Vendor & Model Dropdown Filter */}
+                    <View style={TABLE_COLS.vendor}>
+                      <SafeSelect
+                        value={colSearch.vendor}
+                        onChange={(val) => setColSearch((c) => ({ ...c, vendor: val }))}
+                        options={vendorFilterOptions}
+                        placeholder=""
+                        title="Filter Vendor"
+                        selectStyle={{
+                          height: 28,
+                          fontSize: 11,
+                          fontWeight: '600',
+                          paddingLeft: 6,
+                          paddingRight: 6,
+                          borderRadius: 6,
+                          border: colSearch.vendor !== 'all' ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                          backgroundColor: colSearch.vendor !== 'all' ? '#f0f9ff' : '#ffffff',
+                          color: colSearch.vendor !== 'all' ? '#0369a1' : '#334155',
+                        }}
+                      />
+                    </View>
+
+                    {/* PON Type Dropdown Filter */}
+                    <View style={TABLE_COLS.pon}>
+                      <SafeSelect
+                        value={colSearch.pon}
+                        onChange={(val) => setColSearch((c) => ({ ...c, pon: val }))}
+                        options={ponFilterOptions}
+                        placeholder=""
+                        title="Filter PON Type"
+                        selectStyle={{
+                          height: 28,
+                          fontSize: 11,
+                          fontWeight: '600',
+                          paddingLeft: 6,
+                          paddingRight: 6,
+                          borderRadius: 6,
+                          border: colSearch.pon !== 'all' ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                          backgroundColor: colSearch.pon !== 'all' ? '#f0f9ff' : '#ffffff',
+                          color: colSearch.pon !== 'all' ? '#0369a1' : '#334155',
+                        }}
+                      />
+                    </View>
+
+                    {/* Batch ID Dropdown Filter */}
+                    <View style={TABLE_COLS.batch}>
+                      <SafeSelect
+                        value={colSearch.batch}
+                        onChange={(val) => setColSearch((c) => ({ ...c, batch: val }))}
+                        options={batchFilterOptions}
+                        placeholder=""
+                        title="Filter Batch"
+                        selectStyle={{
+                          height: 28,
+                          fontSize: 11,
+                          fontWeight: '600',
+                          paddingLeft: 6,
+                          paddingRight: 6,
+                          borderRadius: 6,
+                          border: colSearch.batch !== 'all' ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                          backgroundColor: colSearch.batch !== 'all' ? '#f0f9ff' : '#ffffff',
+                          color: colSearch.batch !== 'all' ? '#0369a1' : '#334155',
+                        }}
+                      />
+                    </View>
+
+                    {/* Status Dropdown Filter */}
+                    <View style={TABLE_COLS.status}>
+                      <SafeSelect
+                        value={colSearch.status}
+                        onChange={(val) => setColSearch((c) => ({ ...c, status: val }))}
+                        options={statusFilterOptions}
+                        placeholder=""
+                        title="Filter Status"
+                        selectStyle={{
+                          height: 28,
+                          fontSize: 11,
+                          fontWeight: '600',
+                          paddingLeft: 6,
+                          paddingRight: 6,
+                          borderRadius: 6,
+                          border: colSearch.status !== 'all' ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                          backgroundColor: colSearch.status !== 'all' ? '#f0f9ff' : '#ffffff',
+                          color: colSearch.status !== 'all' ? '#0369a1' : '#334155',
+                        }}
+                      />
+                    </View>
+
+                    {/* Assigned To Dropdown Filter */}
+                    <View style={TABLE_COLS.assigned}>
+                      <SafeSelect
+                        value={colSearch.assigned}
+                        onChange={(val) => setColSearch((c) => ({ ...c, assigned: val }))}
+                        options={assignedFilterOptions}
+                        placeholder=""
+                        title="Filter Assigned Partner"
+                        selectStyle={{
+                          height: 28,
+                          fontSize: 11,
+                          fontWeight: '600',
+                          paddingLeft: 6,
+                          paddingRight: 6,
+                          borderRadius: 6,
+                          border: colSearch.assigned !== 'all' ? '1.5px solid #0284c7' : '1px solid #cbd5e1',
+                          backgroundColor: colSearch.assigned !== 'all' ? '#f0f9ff' : '#ffffff',
+                          color: colSearch.assigned !== 'all' ? '#0369a1' : '#334155',
+                        }}
+                      />
+                    </View>
+
+                    {/* Purchase Date Filter */}
+                    <View style={TABLE_COLS.purchase}>
+                      <View style={[styles.excelColSearchBox, colSearch.purchase && styles.excelColSearchBoxActive]}>
+                        <TextInput
+                          style={styles.excelColSearchInput}
+                          placeholder="Date..."
+                          placeholderTextColor="#94a3b8"
+                          value={colSearch.purchase}
+                          onChangeText={(val) => setColSearch((c) => ({ ...c, purchase: val }))}
+                        />
+                        {colSearch.purchase ? (
+                          <TouchableOpacity onPress={() => setColSearch((c) => ({ ...c, purchase: '' }))}>
+                            <Feather name="x" size={10} color="#64748b" />
+                          </TouchableOpacity>
+                        ) : null}
+                      </View>
+                    </View>
+
+                    {/* Reset Column Filters Action */}
+                    <View style={[TABLE_COLS.actions, { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end' }]}>
+                      {hasActiveColSearch ? (
+                        <TouchableOpacity
+                          style={styles.clearColFiltersBtn}
+                          onPress={clearColSearch}
+                          title="Clear all column filters"
+                        >
+                          <Feather name="filter" size={10} color="#b91c1c" style={{ marginRight: 3 }} />
+                          <Text style={styles.clearColFiltersText}>Reset</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  {/* Table Rows */}
+                  {filteredOnus.length === 0 ? (
+                    <View style={{ padding: 32, alignItems: 'center', justifyContent: 'center' }}>
+                      <Feather name="filter" size={24} color="#94a3b8" style={{ marginBottom: 8 }} />
+                      <Text style={{ fontSize: 13, fontWeight: '700', color: '#64748b' }}>
+                        No ONUs match your active column filters.
+                      </Text>
+                      <TouchableOpacity
+                        onPress={clearColSearch}
+                        style={{ marginTop: 10, paddingHorizontal: 12, paddingVertical: 6, backgroundColor: '#f1f5f9', borderRadius: 6 }}
+                      >
+                        <Text style={{ fontSize: 12, fontWeight: '700', color: '#0284c7' }}>Reset Column Filters</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : filteredOnus.map((item, idx) => {
+                    const st = getStatusStyle(item.status);
+                    const pon = PON_COLORS[item.pon_type] || { fg: '#334155', bg: '#f1f5f9' };
+                    const isSelected = selectedOnuIds.includes(item.id);
+
+                    return (
+                      <View
+                        key={item.id}
+                        style={[
+                          styles.tr,
+                          idx % 2 === 1 && styles.trEven,
+                          isSelected && { backgroundColor: '#f0f9ff' },
+                        ]}
+                      >
+                        {/* Checkbox */}
+                        {canAssign && (
+                          <View style={TABLE_COLS.select}>
+                            <TouchableOpacity
+                              style={[styles.checkboxBtn, isSelected && styles.checkboxBtnActive]}
+                              onPress={() => toggleSelectItem(item.id)}
+                            >
+                              {isSelected && <Feather name="check" size={12} color="#ffffff" />}
+                            </TouchableOpacity>
+                          </View>
+                        )}
+
+                        {/* ID */}
+                        <View style={TABLE_COLS.id}>
+                          <Text style={[styles.td, { color: '#94a3b8', fontSize: 11 }]}>
+                            {item.id}
+                          </Text>
+                        </View>
+
+                        {/* Serial Number with Copy */}
+                        <View style={[TABLE_COLS.serial, styles.tdCell]}>
+                          {item.serial_no ? (
+                            <>
+                              <Text style={styles.serialText} selectable>{item.serial_no}</Text>
+                              <TouchableOpacity
+                                style={styles.iconCopyBtn}
+                                onPress={() => copyToClipboard(item.serial_no, 'Serial Number')}
+                                title="Copy Serial Number"
+                              >
+                                <Feather name="copy" size={11} color="#64748b" />
+                              </TouchableOpacity>
+                            </>
+                          ) : (
+                            <Text style={{ color: '#cbd5e1', fontSize: 12 }}>—</Text>
+                          )}
+                        </View>
+
+                        {/* MAC Address with Copy */}
+                        <View style={[TABLE_COLS.mac, styles.tdCell]}>
+                          {item.mac_address ? (
+                            <>
+                              <Text style={styles.macText} selectable>{item.mac_address}</Text>
+                              <TouchableOpacity
+                                style={styles.iconCopyBtn}
+                                onPress={() => copyToClipboard(item.mac_address, 'MAC Address')}
+                                title="Copy MAC"
+                              >
+                                <Feather name="copy" size={11} color="#64748b" />
+                              </TouchableOpacity>
+                            </>
+                          ) : (
+                            <Text style={{ color: '#cbd5e1', fontSize: 12 }}>—</Text>
+                          )}
+                        </View>
+
+                        {/* Vendor & Model */}
+                        <View style={[TABLE_COLS.vendor, { flexDirection: 'column', alignItems: 'flex-start', justifyContent: 'center' }]}>
+                          <Text style={styles.vendorNameText} numberOfLines={1}>{item.vendor_name}</Text>
+                          <Text style={styles.modelNameText} numberOfLines={1}>{item.model_name}</Text>
+                        </View>
+
+                        {/* PON Type Badge */}
+                        <View style={TABLE_COLS.pon}>
+                          <View style={[styles.ponBadge, { backgroundColor: pon.bg }]}>
+                            <Text style={[styles.ponBadgeText, { color: pon.fg }]}>{item.pon_type}</Text>
+                          </View>
+                        </View>
+
+                        {/* Batch Column */}
+                        <View style={TABLE_COLS.batch}>
+                          {item.batch_id ? (
+                            <TouchableOpacity
+                              style={styles.batchCellBtn}
+                              onPress={() => {
+                                setSelectedBatchFilter(item.batch_id);
+                                setPage(1);
+                              }}
+                              title={`Filter by Consignment Batch #${item.batch_id}${item.batch_lr_number ? ` (LR: ${item.batch_lr_number})` : ''}`}
+                            >
+                              <View style={styles.batchPill}>
+                                <Text style={styles.batchPillText}>#{item.batch_id}</Text>
+                              </View>
+                              {item.batch_lr_number ? (
+                                <Text style={styles.batchLrSubText} numberOfLines={1}>
+                                  {item.batch_lr_number}
+                                </Text>
+                              ) : null}
+                            </TouchableOpacity>
+                          ) : (
+                            <Text style={{ color: '#cbd5e1', fontSize: 12 }}>—</Text>
+                          )}
+                        </View>
+
+                        {/* Status Badge */}
+                        <View style={TABLE_COLS.status}>
+                          {canEditDevice && (
+                            <TouchableOpacity
+                              style={[styles.statusBadge, { backgroundColor: st.bg, borderColor: st.border }]}
+                              onPress={() => {
+                                setEditItem(item);
+                                setEditStatus(item.status);
+                                setEditMac(item.mac_address || '');
+                                setEditSerial(item.serial_no);
+                              }}
+                              title="Click to change status"
+                            >
+                              <Feather name={st.icon} size={11} color={st.fg} />
+                              <Text style={[styles.statusBadgeText, { color: st.fg }]}>{st.label}</Text>
+                              <Feather name="chevron-down" size={10} color={st.fg} style={{ marginLeft: 2 }} />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+
+                        {/* Assigned To Column */}
+                        <View style={TABLE_COLS.assigned}>
+                          {item.assigned_partner_name ? (
+                            <View style={styles.assignedBadge}>
+                              <Feather name="user-check" size={11} color="#0284c7" />
+                              <Text style={styles.assignedBadgeText} numberOfLines={1}>
+                                {item.assigned_partner_name}
+                              </Text>
+                            </View>
+                          ) : (
+                            <View style={styles.unassignedBadge}>
+                              <Feather name="box" size={11} color="#64748b" />
+                              <Text style={styles.unassignedBadgeText}>Master Stock</Text>
+                            </View>
+                          )}
+                        </View>
+
+                        {/* Purchase Date */}
+                        <View style={TABLE_COLS.purchase}>
+                          <Text style={[styles.td, { fontSize: 12, color: '#475569' }]}>
+                            {item.purchase_date || '—'}
+                          </Text>
+                        </View>
+
+                        {/* Action Buttons */}
+                        <View style={[TABLE_COLS.actions, { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 5 }]}>
+                          {canAssign && (
+                            <TouchableOpacity
+                              style={[styles.rowActionBtn, { backgroundColor: '#eff6ff', borderColor: '#bfdbfe' }]}
+                              onPress={() => openAssignModal(item)}
+                              title="Assign to Operator"
+                            >
+                              <Feather name="send" size={12} color="#2563eb" />
+                            </TouchableOpacity>
+                          )}
+
+                          {canEditDevice && (
+                            <TouchableOpacity
+                              style={styles.rowActionBtn}
+                              onPress={() => {
+                                setEditItem(item);
+                                setEditStatus(item.status);
+                                setEditMac(item.mac_address || '');
+                                setEditSerial(item.serial_no);
+                              }}
+                              title="Edit ONU"
+                            >
+                              <Feather name="edit-2" size={12} color="#475569" />
+                            </TouchableOpacity>
+                          )}
+
+                          {canDeleteDevice && (
+                            <TouchableOpacity
+                              style={[styles.rowActionBtn, { borderColor: '#fee2e2', backgroundColor: '#fff5f5' }]}
+                              onPress={() => setDeleteItem(item)}
+                              title="Delete ONU"
+                            >
+                              <Feather name="trash-2" size={12} color="#dc2626" />
+                            </TouchableOpacity>
+                          )}
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              </ScrollView>
+            </View>
           )}
 
           {/* ===================================================== */}
@@ -826,7 +1746,8 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
           {onus.length > 0 && (
             <View style={[styles.paginationBar, isMobile && styles.paginationBarMobile]}>
               <Text style={styles.paginationInfo}>
-                Showing {Math.min((page - 1) * pageSize + 1, totalCount)} to {Math.min(page * pageSize, totalCount)} of {totalCount} ONUs
+                Showing {filteredOnus.length > 0 ? Math.min((page - 1) * pageSize + 1, totalCount) : 0} to {Math.min(page * pageSize, totalCount)} of {totalCount} ONUs
+                {hasActiveColSearch ? ` (${filteredOnus.length} matched column filters)` : ''}
               </Text>
 
               <View style={styles.paginationControls}>
@@ -868,13 +1789,119 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
             </View>
           )}
         </View>
+        </View>
+      )}
 
       </ScrollView>
 
       {/* ======================================================== */}
+      {/* Modal: ASSIGN / MOVE ONU TO OPERATOR                    */}
+      {/* ======================================================== */}
+      {showAssignModal && (
+        <Modal transparent animationType="fade" visible={showAssignModal} onRequestClose={() => setShowAssignModal(false)}>
+          <View style={styles.modalBackdrop}>
+            <View style={[styles.modalBox, isMobile && { width: '92%', maxHeight: '90%' }]}>
+              {/* Head */}
+              <View style={styles.modalHead}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                  <Feather name="send" size={17} color={COLORS.primary} />
+                  <Text style={styles.modalTitle}>
+                    {selectedOnuIds.length === 1 ? 'Assign Device to Operator' : `Assign ${selectedOnuIds.length} Devices`}
+                  </Text>
+                </View>
+                <TouchableOpacity onPress={() => setShowAssignModal(false)}>
+                  <Feather name="x" size={18} color="#64748b" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Body */}
+              <ScrollView style={{ padding: 18, maxHeight: 460 }}>
+                {/* Summary Box */}
+                <View style={styles.assignSummaryBox}>
+                  <Text style={styles.assignSummaryTitle}>
+                    {selectedOnuIds.length === 1 && assigningItem ? (
+                      `ONU #${assigningItem.id} — ${assigningItem.serial_no || assigningItem.mac_address} (${assigningItem.vendor_name} ${assigningItem.model_name})`
+                    ) : (
+                      `Transferring ${selectedOnuIds.length} selected ONU device(s)`
+                    )}
+                  </Text>
+                  {assigningItem && (
+                    <Text style={styles.assignSummarySub}>
+                      Current Holder: {assigningItem.assigned_partner_name ? assigningItem.assigned_partner_name : 'Master Stock (Unassigned)'}
+                    </Text>
+                  )}
+                </View>
+
+                {/* Target Partner Dropdown */}
+                <View style={styles.formGroup}>
+                  <Text style={styles.formLabel}>
+                    Assign / Move To <Text style={{ color: '#dc2626' }}>*</Text>
+                  </Text>
+                  <select
+                    style={styles.formSelect}
+                    value={assignTargetPartnerId}
+                    onChange={(e) => setAssignTargetPartnerId(e.target.value)}
+                  >
+                    <option value="">-- Choose Operator / Location --</option>
+                    <option value="0">Master Stock (Unassigned)</option>
+                    {assignablePartners.map((p) => (
+                      <option key={p.partner_id} value={p.partner_id}>
+                        {p.partner_name} {p.company_name ? `(${p.company_name})` : ''} - {p.role}
+                      </option>
+                    ))}
+                  </select>
+                  <Text style={{ fontSize: 11, color: '#64748b', marginTop: 5 }}>
+                    Devices will move along the hierarchy to the selected operator or branch.
+                  </Text>
+                </View>
+
+                {/* Optional Transfer Note */}
+                <View style={styles.formGroup}>
+                  <Text style={styles.formLabel}>Notes / Remarks (Optional)</Text>
+                  <TextInput
+                    style={styles.formInput}
+                    placeholder="e.g. Field dispatch, batch #3 handover, technician assignment"
+                    placeholderTextColor="#94a3b8"
+                    value={assignNotes}
+                    onChangeText={setAssignNotes}
+                  />
+                </View>
+              </ScrollView>
+
+              {/* Footer */}
+              <View style={styles.modalFooter}>
+                <TouchableOpacity
+                  style={styles.cancelBtn}
+                  onPress={() => setShowAssignModal(false)}
+                  disabled={actionLoading}
+                >
+                  <Text style={styles.cancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[styles.submitBtn, { backgroundColor: COLORS.primary }]}
+                  onPress={handleAssignSubmit}
+                  disabled={actionLoading}
+                >
+                  {actionLoading ? (
+                    <ActivityIndicator size="small" color="#ffffff" />
+                  ) : (
+                    <>
+                      <Feather name="check" size={14} color="#ffffff" style={{ marginRight: 5 }} />
+                      <Text style={styles.submitBtnText}>Confirm Transfer</Text>
+                    </>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* ======================================================== */}
       {/* 6. Modal: ADD NEW ONU                                     */}
       {/* ======================================================== */}
-      {showAddModal && (
+      {isSuper && showAddModal && (
         <Modal transparent animationType="fade" visible={showAddModal} onRequestClose={() => setShowAddModal(false)}>
           <View style={styles.modalBackdrop}>
             <View style={[styles.modalBox, isMobile && { width: '92%', maxHeight: '90%' }]}>
@@ -891,6 +1918,26 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
 
               {/* Modal Body */}
               <ScrollView style={{ padding: 18, maxHeight: 460 }}>
+                {/* Bulk Scanner Fast-Track Banner */}
+                <TouchableOpacity
+                  style={styles.addModalScanBanner}
+                  onPress={() => {
+                    setShowAddModal(false);
+                    setShowBulkScannerModal(true);
+                  }}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}>
+                    <View style={styles.addModalScanIconBox}>
+                      <Feather name="maximize" size={15} color="#0284c7" />
+                    </View>
+                    <View>
+                      <Text style={styles.addModalScanBannerTitle}>Import Multiple Devices via Scanner</Text>
+                      <Text style={styles.addModalScanBannerSub}>Use Barcode Gun or Camera to scan MAC & Serials in bulk</Text>
+                    </View>
+                  </View>
+                  <Feather name="arrow-right" size={15} color="#0284c7" />
+                </TouchableOpacity>
+
                 {/* 1. Vendor Selection */}
                 <View style={styles.formGroup}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 5 }}>
@@ -985,10 +2032,13 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
                     value={newStatus}
                     onChange={(e) => setNewStatus(e.target.value)}
                   >
-                    <option value="in_stock">In Stock</option>
+                    <option value="not_configured">Not Configured</option>
+                    <option value="configured">Configured</option>
                     <option value="reserved">Reserved</option>
                     <option value="assigned">Assigned</option>
                     <option value="faulty">Faulty</option>
+                    <option value="in_repair">In Repair</option>
+                    <option value="retired">Retired</option>
                   </select>
                 </View>
 
@@ -1070,7 +2120,8 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
                     value={editStatus}
                     onChange={(e) => setEditStatus(e.target.value)}
                   >
-                    <option value="in_stock">In Stock</option>
+                    <option value="not_configured">Not Configured</option>
+                    <option value="configured">Configured</option>
                     <option value="reserved">Reserved</option>
                     <option value="assigned">Assigned</option>
                     <option value="faulty">Faulty</option>
@@ -1552,6 +2603,62 @@ const styles = StyleSheet.create({
     width: '100%',
     gap: 8,
   },
+  navTabBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  navTabBtnActive: {
+    backgroundColor: '#0f172a',
+    borderColor: '#0f172a',
+  },
+  navTabBtnText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#334155',
+  },
+  navTabBtnTextActive: {
+    color: '#ffffff',
+  },
+  batchFilterActiveBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 16,
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  batchFilterActiveText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#0369a1',
+  },
+  batchFilterClearBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#e0f2fe',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  batchFilterClearText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    color: '#0369a1',
+  },
   refreshBtn: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1583,6 +2690,51 @@ const styles = StyleSheet.create({
     fontSize: 12.5,
     fontWeight: '700',
     color: '#ffffff',
+  },
+  scanBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: '#0284c7',
+    borderRadius: 8,
+    paddingHorizontal: 13,
+    paddingVertical: 8,
+    elevation: 2,
+    boxShadow: '0 2px 6px rgba(2, 132, 199, 0.3)',
+  },
+  scanBtnText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  addModalScanBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 10,
+    borderRadius: 8,
+    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+    marginBottom: 14,
+  },
+  addModalScanIconBox: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    backgroundColor: '#e0f2fe',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addModalScanBannerTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0369a1',
+  },
+  addModalScanBannerSub: {
+    fontSize: 11,
+    color: '#64748b',
+    marginTop: 1,
   },
 
   // Metrics
@@ -1868,6 +3020,99 @@ const styles = StyleSheet.create({
     backgroundColor: '#f8fafc',
     borderBottomWidth: 1,
     borderBottomColor: '#e2e8f0',
+  },
+  excelFilterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderBottomWidth: 2,
+    borderBottomColor: '#cbd5e1',
+    backgroundColor: '#f8fafc',
+  },
+  excelColSearchBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#cbd5e1',
+    borderRadius: 6,
+    height: 28,
+    paddingHorizontal: 6,
+  },
+  excelColSearchBoxActive: {
+    borderColor: '#0284c7',
+    backgroundColor: '#f0f9ff',
+  },
+  excelColSearchInput: {
+    flex: 1,
+    fontSize: 11,
+    color: '#0f172a',
+    padding: 0,
+    height: '100%',
+  },
+  excelToggleWrap: {
+    flexDirection: 'row',
+    backgroundColor: '#e2e8f0',
+    borderRadius: 6,
+    padding: 2,
+    height: 28,
+    alignItems: 'center',
+  },
+  excelToggleBtn: {
+    flex: 1,
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
+    paddingHorizontal: 2,
+  },
+  excelToggleBtnActive: {
+    backgroundColor: '#ffffff',
+  },
+  excelToggleText: {
+    fontSize: 9.5,
+    fontWeight: '700',
+    color: '#64748b',
+  },
+  excelToggleTextActive: {
+    color: '#0284c7',
+    fontWeight: '800',
+  },
+  clearColFiltersBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fee2e2',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#fca5a5',
+  },
+  clearColFiltersText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#b91c1c',
+  },
+  batchCellBtn: {
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 2,
+  },
+  batchPill: {
+    backgroundColor: '#e0f2fe',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  batchPillText: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: '#0369a1',
+  },
+  batchLrSubText: {
+    fontSize: 10,
+    color: '#64748b',
   },
   th: {
     fontSize: 10.5,
@@ -2343,6 +3588,121 @@ const styles = StyleSheet.create({
   catalogModelDesc: {
     fontSize: 10.5,
     color: '#64748b',
+    marginTop: 3,
+  },
+
+  // Assignment Badges & Controls
+  checkboxBtn: {
+    width: 18,
+    height: 18,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: '#cbd5e1',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+  },
+  checkboxBtnActive: {
+    borderColor: COLORS.primary,
+    backgroundColor: COLORS.primary,
+  },
+  assignedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#eff6ff',
+    borderWidth: 1,
+    borderColor: '#bfdbfe',
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 6,
+    maxWidth: 145,
+  },
+  assignedBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#1d4ed8',
+  },
+  unassignedBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+  },
+  unassignedBadgeText: {
+    fontSize: 10.5,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  bulkActionBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#0f172a',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    marginBottom: 12,
+  },
+  bulkBadge: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 10,
+  },
+  bulkBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: '#ffffff',
+  },
+  bulkActionText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+    color: '#f8fafc',
+  },
+  bulkActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  bulkActionBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#ffffff',
+  },
+  clearSelectionBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+  },
+  clearSelectionText: {
+    fontSize: 12,
+    color: '#94a3b8',
+  },
+  assignSummaryBox: {
+    backgroundColor: '#f0f9ff',
+    borderWidth: 1,
+    borderColor: '#bae6fd',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 14,
+  },
+  assignSummaryTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#0369a1',
+  },
+  assignSummarySub: {
+    fontSize: 11.5,
+    color: '#0284c7',
     marginTop: 3,
   },
 });

@@ -18,9 +18,55 @@ import { CustomerPricesPage } from '../components/plans/CustomerPricesPage';
 import { PartnerDevices } from '../components/partners/PartnerDevices';
 import { OttPlansPage } from '../components/ott/OttPlansPage';
 import { PlanCardList } from '../components/plans/PlanCardList';
+
+/**
+ * Operator setting: must an internet account be Aadhaar-verified before Recharge / Advance renewal /
+ * Combo? (partners.aadhaar_required_for_recharge, default on). When off, recharges go through and
+ * the Verify Aadhaar button stays on the customer's card.
+ */
+const AadhaarForRechargeTile = ({ partner, onChanged }) => {
+  const raw = partner?.aadhaar_required_for_recharge;
+  const on = !(raw === 0 || raw === '0' || raw === false);
+  const [busy, setBusy] = useState(false);
+  const toggle = async () => {
+    if (busy || !partner) return;
+    const next = on ? 0 : 1;
+    setBusy(true);
+    const res = await OneBssApi.updatePartner(partner.partner_id || partner.id, { aadhaar_required_for_recharge: next });
+    setBusy(false);
+    if (!res.ok || res.data?.success === false) {
+      toast.error(res.data?.message || 'Could not change the Aadhaar setting');
+      return;
+    }
+    onChanged(next);
+    toast.success(next ? 'Aadhaar verification is now required before recharge' : 'Recharge is now allowed without Aadhaar verification');
+  };
+  return (
+    <TouchableOpacity style={styles.pdTile} onPress={toggle} disabled={busy} accessibilityRole="switch" accessibilityState={{ checked: on }}>
+      <View style={[styles.pdTileIcon, { backgroundColor: on ? '#2563eb18' : '#94a3b818' }]}>
+        <Feather name={on ? 'shield' : 'shield-off'} size={16} color={on ? '#2563eb' : '#64748b'} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.pdTileLabel}>Aadhaar for Recharge</Text>
+        <Text style={styles.pdTileHint} numberOfLines={1}>{on ? 'Required before recharge' : 'Not required · Verify still shown'}</Text>
+      </View>
+      {busy ? (
+        <ActivityIndicator size="small" color="#2563eb" />
+      ) : (
+        <View style={{ width: 38, height: 22, borderRadius: 11, padding: 2, backgroundColor: on ? '#2563eb' : '#cbd5e1', alignItems: on ? 'flex-end' : 'flex-start' }}>
+          <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: '#ffffff' }} />
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+};
 import { PlanPriceTable } from '../components/plans/PlanPriceTable';
 import { OperatorPlansView } from '../components/plans/OperatorPlansView';
 import { CreateAccountModal } from '../components/CreateAccountModal';
+import { PartnerMoveModal } from '../components/partners/PartnerMoveModal';
+import { RadiusBranchesModal, radiusBranchCount } from '../components/partners/RadiusBranchesModal';
+import { PgGatewaysModal, pgGatewaysHint } from '../components/partners/PgGatewaysModal';
+import { can } from '../services/staffAccess';
 import { SearchSelect } from '../components/internet/shared';
 import { toast } from 'react-toastify';
 
@@ -106,7 +152,14 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   // wallet change, plan change or recharge. The backend refuses it too (auth_middleware.php).
   const readOnly = !isSuperAdminUser;
   // An admin may switch into a partner below it only while the super admin drives the session.
-  const canImpersonate = isSuperAdminUser || (isAdminUser && !!user?.is_impersonation);
+  const canImpersonate = (isSuperAdminUser || (isAdminUser && !!user?.is_impersonation)) && can(user, 'partners.login_as');
+  // staff login: what its role allows on this page (a partner login: everything)
+  const pAdd = can(user, 'partners.list', 'add');
+  const pEdit = can(user, 'partners.list', 'edit');
+  const pWallet = can(user, 'partners.wallet');
+  const pPlans = can(user, 'partners.plans');
+  const pPass = can(user, 'partners.password');
+  const pMove = can(user, 'partners.move');
   // Admin page: the partners that admin created (same table as the main page)
   const [adminChildren, setAdminChildren] = useState([]);
   const [loadingAdminChildren, setLoadingAdminChildren] = useState(false);
@@ -183,9 +236,16 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
 
   // Batch 2 Action States
   const [walletAction, setWalletAction] = useState('credit'); // 'credit' | 'debit'
+  // separate Internet / IPTV / OTT wallets: which one the credit / debit goes to
+  const [walletTarget, setWalletTarget] = useState('');
+  const [walletModeBusy, setWalletModeBusy] = useState(false);
   const [confirmStatusPartner, setConfirmStatusPartner] = useState(null);
+  // hierarchy changes (super admin): { partner, mode: 'role' | 'move' }, and customer migration
+  const [moveReq, setMoveReq] = useState(null);
+  const [radiusBranchPartner, setRadiusBranchPartner] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [kycPartner, setKycPartner] = useState(null);
+  const [pgGatewaysPartner, setPgGatewaysPartner] = useState(null);
   const [initialKycProviders, setInitialKycProviders] = useState([]);
   const [assignedKycProviders, setAssignedKycProviders] = useState([]);
   const [loadingKycProviders, setLoadingKycProviders] = useState(false);
@@ -351,6 +411,15 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
   };
 
+  // Opened from an expanded row of the tree: the Back trail is every admin above it.
+  const handleOpenFromTree = (partner, trail) => {
+    setPartnerTrail(trail);
+    setSelectedPartner(partner);
+    if (typeof window !== 'undefined' && partner) {
+      window.location.hash = `partners?partner_id=${partner.partner_id || partner.id}${trailHash(trail)}`;
+    }
+  };
+
   // Back from a partner page: one level up the trail, or the main list.
   const handleClosePartnerDetails = () => {
     if (partnerTrail.length) {
@@ -421,6 +490,17 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
   };
 
+  // after a move / role change: the partner's parent, level and chain changed — reload it
+  const refreshMovedPartner = async (partnerId) => {
+    const r = await OneBssApi.getPartnerById(partnerId);
+    if (r.ok && r.data?.data) {
+      setPartnerTrail([]);
+      setSelectedPartner((prev) => ({ ...r.data.data, wallet_balance: prev ? prev.wallet_balance : r.data.data.wallet_balance }));
+      if (typeof window !== 'undefined') window.location.hash = `partners?partner_id=${partnerId}`;
+    }
+    fetchPartners();
+  };
+
   const fetchPartners = async () => {
     setLoading(true);
     try {
@@ -489,13 +569,29 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       const trailMatch = hash.match(/trail=([0-9,]+)/);
       const trailIds = trailMatch ? trailMatch[1].split(',').filter(Boolean) : [];
       trailIds.forEach((id) => ids.add(id));
+      // a link to your own account (or the super admin) is never a partner page
+      const ownId = String(user?.partner_id || '');
+      const badIds = [];
       for (const id of ids) {
+        if (ownId && String(id) === ownId) { badIds.push(id); continue; }
         if (!cache[id]) {
           try {
             const r = await OneBssApi.getPartnerById(id);
-            if (r.ok && r.data?.data) cache[id] = r.data.data;
-          } catch (e) {}
+            const d = r.ok ? r.data?.data : null;
+            const dRole = String(d?.account_role || d?.role || '').toLowerCase().replace(/[\s_-]+/g, '');
+            if (d && dRole !== 'superadmin') cache[id] = d;
+            else badIds.push(id);
+          } catch (e) { badIds.push(id); }
         }
+      }
+      if (badIds.length) {
+        toast.error(badIds.some((id) => String(id) === ownId)
+          ? 'That is your own account. Your details are on the Dashboard.'
+          : `Partner #${badIds[0]} was not found, or it is not under your account.`, { toastId: 'partner-hash-bad' });
+        setPartnerTrail([]);
+        setSelectedPartner(null);
+        window.history.replaceState(null, '', '#partners');
+        return;
       }
       setPartnerTrail(trailIds.map((id) => cache[id]).filter(Boolean));
       const getPartnerFromHash = (key) => {
@@ -656,7 +752,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         toast.error(data.message || 'Could not load wallet history.');
       }
       if (res.ok && data.wallet_balance !== undefined) {
-        setWalletPartner((prev) => (prev ? { ...prev, wallet_balance: data.wallet_balance } : prev));
+        setWalletPartner((prev) => (prev ? { ...prev, wallet_balance: data.wallet_balance, wallet_mode: data.wallet_mode, wallets: data.wallets || [] } : prev));
+        setWalletTarget(data.wallet_mode === 'split' && data.wallets?.length ? data.wallets[0].type : '');
       }
       if (Array.isArray(data.transactions)) {
         setWalletTransactions(data.transactions);
@@ -670,6 +767,40 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
   };
 
+  // one wallet <-> separate Internet / IPTV / OTT wallets (the money moves along; see wallet_mode.php)
+  const handleChangeWalletMode = async (mode) => {
+    if (!walletPartner || walletModeBusy) return;
+    setWalletModeBusy(true);
+    const pid = walletPartner.partner_id;
+    const dry = await OneBssApi.setWalletMode(pid, mode, true);
+    if (!dry.ok) {
+      setWalletModeBusy(false);
+      toast.error(dry.data?.message || 'Could not change the wallets');
+      return;
+    }
+    const moves = (dry.data.moved || []).map((m) => `₹${Number(m.amount).toLocaleString('en-IN')} from ${m.from === 'Single' ? 'the wallet' : `${m.from}`} → ${m.to === 'Single' ? 'one wallet' : `${m.to} wallet`}`);
+    const text = mode === 'split'
+      ? `Give ${walletPartner.partner_name} separate Internet, IPTV and OTT wallets?\n\n${moves.length ? `Money moved: ${moves.join('; ')}.\n\n` : ''}After this each recharge is paid from the wallet of its service.`
+      : `Merge ${walletPartner.partner_name}'s Internet, IPTV and OTT wallets into one?\n\n${moves.length ? `Money moved: ${moves.join('; ')}.` : 'No money to move.'}`;
+    // eslint-disable-next-line no-alert
+    const ok = typeof window !== 'undefined' && window.confirm ? window.confirm(text) : true;
+    if (!ok) {
+      setWalletModeBusy(false);
+      return;
+    }
+    const res = await OneBssApi.setWalletMode(pid, mode);
+    setWalletModeBusy(false);
+    if (!res.ok) {
+      toast.error(res.data?.message || 'Could not change the wallets');
+      return;
+    }
+    toast.success(res.data.message || 'Wallets updated');
+    setWalletPartner((prev) => (prev ? { ...prev, wallet_mode: res.data.wallet_mode, wallets: res.data.wallets || [], wallet_balance: res.data.wallet_balance } : prev));
+    setWalletTarget(res.data.wallet_mode === 'split' && res.data.wallets?.length ? res.data.wallets[0].type : '');
+    const h = await OneBssApi.getWallet(pid);
+    if (h.ok && Array.isArray(h.data?.transactions)) setWalletTransactions(h.data.transactions);
+  };
+
   const handleSaveWalletTopup = async () => {
     if (!walletPartner) return;
     const amountNum = Number(topupAmount);
@@ -678,9 +809,15 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       return;
     }
     const isDebit = walletAction === 'debit';
-    const currentBal = Number(walletPartner.wallet_balance) || 0;
+    const isSplit = walletPartner.wallet_mode === 'split';
+    if (isSplit && !walletTarget) {
+      toast.warn('Choose the Internet, IPTV or OTT wallet.');
+      return;
+    }
+    const targetW = isSplit ? (walletPartner.wallets || []).find((w) => w.type === walletTarget) : null;
+    const currentBal = Number(targetW ? targetW.balance : walletPartner.wallet_balance) || 0;
     if (isDebit && currentBal < amountNum) {
-      toast.warn(`Insufficient wallet balance! Current balance is ₹${currentBal.toLocaleString('en-IN')}`);
+      toast.warn(`Insufficient balance${targetW ? ` in the ${targetW.type} wallet` : ''}! Current balance is ₹${currentBal.toLocaleString('en-IN')}`);
       return;
     }
 
@@ -688,8 +825,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       const defaultRemark = isDebit ? `Wallet Debit via ${paymentMode}` : `Wallet Top-up via ${paymentMode}`;
       const remarkText = walletRemark.trim() || defaultRemark;
       const res = isDebit
-        ? await OneBssApi.debitWallet(walletPartner.partner_id, amountNum, remarkText)
-        : await OneBssApi.topupWallet(walletPartner.partner_id, amountNum, remarkText);
+        ? await OneBssApi.debitWallet(walletPartner.partner_id, amountNum, remarkText, isSplit ? walletTarget : '')
+        : await OneBssApi.topupWallet(walletPartner.partner_id, amountNum, remarkText, isSplit ? walletTarget : '');
       const data = res.data || {};
 
       // Money moves only when the server confirms it — never update balances on a failed call.
@@ -697,7 +834,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         toast.error(data.message || (isDebit ? 'Wallet debit failed. No money was moved.' : 'Wallet top-up failed. No money was added.'));
         return;
       }
-      const newBalance = Number(data.balance_after);
+      // the partner's total (all wallets) for the lists; balance_after is the one wallet's
+      const newBalance = data.wallet_balance !== undefined ? Number(data.wallet_balance) : Number(data.balance_after);
+      if (Array.isArray(data.wallets)) {
+        setWalletPartner((prev) => (prev ? { ...prev, wallets: data.wallets, wallet_mode: data.wallet_mode || prev.wallet_mode } : prev));
+      }
 
       setPartners((prev) =>
         prev.map((p) => (p.partner_id === walletPartner.partner_id ? { ...p, wallet_balance: newBalance } : p))
@@ -712,7 +853,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         txn_amount: amountNum,
         txn_type: isDebit ? 'debit' : 'credit',
         balance_before_txn: currentBal,
-        balance_after_txn: newBalance,
+        balance_after_txn: Number(data.balance_after),
+        wallet_type: data.wallet_type,
         txn_timestamp: new Date().toLocaleString('en-IN'),
         remark: remarkText,
       };
@@ -1304,6 +1446,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       iptvsub_plan_id: '',
       price: '',
       margins: {},
+      internet_amount: '', // '' = automatic split
       is_active: true,
       _autoName: false,
       _autoPrice: false,
@@ -1326,6 +1469,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       })(),
       margins: Object.fromEntries(Object.entries(comboItem.margins && typeof comboItem.margins === 'object' ? comboItem.margins : {}).map(([k, v]) => [k, String(v)])),
       is_active: comboItem.is_active !== false && comboItem.is_active !== 0 && comboItem.is_active !== '0',
+      internet_amount: comboItem.internet_amount !== undefined && comboItem.internet_amount !== null ? String(comboItem.internet_amount) : '',
       _autoName: false,
       _autoPrice: false,
     });
@@ -1387,6 +1531,14 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       toast.error('Please enter a valid combo price.');
       return;
     }
+    const inetPart = String(comboForm.internet_amount ?? '').trim();
+    if (inetPart !== '') {
+      const opPrice = comboAdminChain.length ? comboOperatorTotal() : Number(comboForm.price);
+      if (isNaN(Number(inetPart)) || Number(inetPart) < 0 || Number(inetPart) > opPrice) {
+        toast.error(`The Internet part must be between ₹0 and the combo price (₹${opPrice.toFixed(2)}).`);
+        return;
+      }
+    }
 
     setSavingCombo(true);
     try {
@@ -1398,6 +1550,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         iptvsub_plan_id: Number(comboForm.iptvsub_plan_id),
         price: Number(comboForm.price),
         is_active: comboForm.is_active ? 1 : 0,
+        // Internet part of the price (separate wallets: from the Internet wallet; the rest from IPTV). null = automatic
+        internet_amount: inetPart === '' ? null : Math.round(Number(inetPart) * 100) / 100,
       };
       if (comboAdminChain.length) {
         payload.sa_price = Number(comboForm.price);
@@ -1539,6 +1693,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         is_impersonation: true,
         impersonated_by: claims.impersonated_by || null,
         root_impersonated_by: claims.root_impersonated_by || null,
+        // a staff member stays limited by their own role in the other account
+        ...(claims.staff_id && user?.staff ? { staff: user.staff } : {}),
       };
       // Straight into the partner's dashboard: no toast + delayed reload, so this account's
       // screens are never shown in between.
@@ -2157,6 +2313,43 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   );
                 })()}
 
+                {/* Wallet split: how much of the combo price is Internet and how much IPTV */}
+                {(() => {
+                  const selI = inetList.find((i) => String(i.sub_plan_id) === String(comboForm.isub_plan_id));
+                  const selT = iptvList.find((i) => String(i.sub_plan_id) === String(comboForm.iptvsub_plan_id));
+                  const opPrice = comboAdminChain.length ? comboOperatorTotal() : Number(comboForm.price || 0);
+                  if (!selI || !selT || !(opPrice > 0)) return null;
+                  const months = comboMonthsOf(selI.validity);
+                  const partsTotal = Number(selI.price || 0) + Number(selT.price || 0) * months;
+                  const autoInet = partsTotal > 0 ? Math.round((opPrice * Number(selI.price || 0) / partsTotal) * 100) / 100 : Math.round((opPrice / 2) * 100) / 100;
+                  const raw = String(comboForm.internet_amount ?? '').trim();
+                  const inet = raw === '' ? autoInet : Number(raw);
+                  const bad = raw !== '' && (isNaN(inet) || inet < 0 || inet > opPrice);
+                  const iptv = Math.round((opPrice - (isNaN(inet) ? 0 : inet)) * 100) / 100;
+                  return (
+                    <View style={{ padding: 12, borderRadius: 8, backgroundColor: 'rgba(2,132,199,0.05)', borderWidth: 1, borderColor: 'rgba(2,132,199,0.25)', gap: 8 }}>
+                      <Text style={{ fontSize: 12, fontWeight: '700', color: '#0369a1' }}>WALLET SPLIT OF THE COMBO PRICE</Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                        <Text style={{ fontSize: 13, fontWeight: '600', color: COLORS.textMain, minWidth: 110 }}>Internet part ₹</Text>
+                        <TextInput
+                          style={{ width: 120, height: 36, borderRadius: 8, borderWidth: 1, borderColor: bad ? '#fca5a5' : (COLORS.border || '#334155'), paddingHorizontal: 10, textAlign: 'right', fontSize: 14, fontWeight: '700', color: COLORS.textMain, backgroundColor: '#ffffff' }}
+                          value={String(comboForm.internet_amount ?? '')}
+                          onChangeText={(text) => setComboForm((prev) => ({ ...prev, internet_amount: text.replace(/[^0-9.]/g, '') }))}
+                          placeholder={autoInet.toFixed(2)}
+                          keyboardType="numeric"
+                          placeholderTextColor="#94a3b8"
+                        />
+                        <Text style={{ fontSize: 13, color: COLORS.textMain }}>IPTV part <Text style={{ fontWeight: '800' }}>₹{bad ? '—' : iptv.toFixed(2)}</Text></Text>
+                      </View>
+                      <Text style={{ fontSize: 11, color: bad ? '#dc2626' : (COLORS.textMuted || '#64748b') }}>
+                        {bad
+                          ? `The Internet part must be between ₹0 and ₹${opPrice.toFixed(2)}.`
+                          : `${raw === '' ? 'Empty = automatic (in proportion to the plans\' prices). ' : ''}Operators with separate wallets pay the Internet part from the Internet wallet and the IPTV part from the IPTV wallet (saved as combo recharges); single wallet: the whole price from it.`}
+                      </Text>
+                    </View>
+                  );
+                })()}
+
                 {/* Active Toggle */}
                 <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
                   <View>
@@ -2575,12 +2768,14 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
             </View>
 
             <View style={styles.formGroup}>
-              <Text style={styles.formLabel}>REGION / LOCATION</Text>
+              <Text style={styles.formLabel}>ADDRESS</Text>
               <TextInput
-                style={styles.formInput}
+                style={[styles.formInput, { minHeight: 64, textAlignVertical: 'top', paddingTop: 10 }]}
                 value={editForm.partner_region}
                 onChangeText={(val) => setEditForm((prev) => ({ ...prev, partner_region: val }))}
-                placeholder="Operational Region / City (e.g. Hyderabad)"
+                multiline
+                numberOfLines={3}
+                placeholder="Door no, street, area, city, PIN"
                 placeholderTextColor={COLORS.textDim}
               />
             </View>
@@ -2663,10 +2858,52 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
 
             {/* Balance Banner */}
             <View style={styles.walletBalanceBanner}>
-              <Text style={styles.balanceBannerLabel}>CURRENT OPERATOR WALLET BALANCE</Text>
+              <Text style={styles.balanceBannerLabel}>{walletPartner.wallet_mode === 'split' ? 'TOTAL IN ALL WALLETS' : 'CURRENT OPERATOR WALLET BALANCE'}</Text>
               <Text style={styles.balanceBannerVal}>
-                ₹{(walletPartner.wallet_balance !== undefined && walletPartner.wallet_balance !== null ? walletPartner.wallet_balance : 0).toLocaleString('en-IN')}
+                ₹{Number(walletPartner.wallet_balance !== undefined && walletPartner.wallet_balance !== null ? walletPartner.wallet_balance : 0).toLocaleString('en-IN')}
               </Text>
+            </View>
+
+            {/* Separate wallets per service */}
+            <View style={{ marginTop: 12, padding: 14, borderRadius: 12, borderWidth: 1, borderColor: COLORS.borderLight, backgroundColor: '#ffffff', gap: 10 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
+                <View style={{ flexShrink: 1 }}>
+                  <Text style={{ fontSize: 14, fontWeight: '700', color: COLORS.textMain }}>
+                    {walletPartner.wallet_mode === 'split' ? 'Separate wallets: Internet · IPTV · OTT' : 'One wallet for all services'}
+                  </Text>
+                  <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 2 }}>
+                    {walletPartner.wallet_mode === 'split' ? 'Each recharge is paid from the wallet of its service (combo: internet part from Internet, IPTV part from IPTV).' : 'Internet, IPTV and OTT recharges are all paid from this one wallet.'}
+                  </Text>
+                </View>
+                {!readOnly ? (
+                  <TouchableOpacity
+                    style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#cbd5e1', opacity: walletModeBusy ? 0.5 : 1 }}
+                    onPress={() => handleChangeWalletMode(walletPartner.wallet_mode === 'split' ? 'single' : 'split')}
+                    disabled={walletModeBusy}
+                  >
+                    {walletModeBusy ? <ActivityIndicator size="small" color="#334155" /> : <Feather name={walletPartner.wallet_mode === 'split' ? 'minimize-2' : 'maximize-2'} size={14} color="#334155" />}
+                    <Text style={{ fontSize: 12.5, fontWeight: '700', color: '#334155' }}>{walletPartner.wallet_mode === 'split' ? 'Merge into one wallet' : 'Split per service'}</Text>
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              {walletPartner.wallet_mode === 'split' ? (
+                <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                  {(walletPartner.wallets || []).map((w) => {
+                    const on = walletTarget === w.type;
+                    const fg = { Internet: '#2563eb', IPTV: '#7c3aed', OTT: '#0891b2' }[w.type] || '#059669';
+                    return (
+                      <TouchableOpacity
+                        key={w.type}
+                        onPress={() => setWalletTarget(w.type)}
+                        style={{ flexGrow: 1, minWidth: 140, padding: 10, borderRadius: 10, borderWidth: 1.5, borderColor: on && !readOnly ? fg : COLORS.borderLight, backgroundColor: on && !readOnly ? `${fg}10` : '#f8fafc' }}
+                      >
+                        <Text style={{ fontSize: 11, fontWeight: '800', color: fg }}>{w.type.toUpperCase()} WALLET</Text>
+                        <Text style={{ fontSize: 17, fontWeight: '800', color: COLORS.textMain, marginTop: 2 }}>₹{Number(w.balance || 0).toLocaleString('en-IN')}</Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              ) : null}
             </View>
 
             {/* Topup / Debit Form (super admin only — admins see the history) */}
@@ -2675,6 +2912,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
                 <Text style={{ fontSize: 15, fontWeight: '700', color: COLORS.textMain }}>
                   {walletAction === 'credit' ? 'Add Credits to Operator Wallet' : 'Debit Balance from Operator Wallet'}
+                  {walletPartner.wallet_mode === 'split' && walletTarget ? ` · ${walletTarget} wallet` : ''}
                 </Text>
 
                 {/* Credit vs Debit Action Toggle */}
@@ -2763,7 +3001,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 >
                   <Text style={{ fontSize: 16, fontWeight: '700', color: '#fff' }}>₹</Text>
                   <Text style={styles.btnPrimaryText}>
-                    {walletAction === 'credit' ? 'Credit Operator Wallet' : 'Debit Operator Wallet'}
+                    {walletAction === 'credit' ? 'Credit' : 'Debit'} {walletPartner.wallet_mode === 'split' && walletTarget ? `${walletTarget} Wallet` : 'Operator Wallet'}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -2805,7 +3043,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                       </View>
                       <Text style={{ flex: 1.8, fontSize: 12, color: COLORS.textMuted }}>₹{txn.balance_before_txn || '0.00'} → ₹{txn.balance_after_txn || '0.00'}</Text>
                       <Text style={{ flex: 2.0, fontSize: 12, color: COLORS.textMuted }}>{txn.txn_timestamp || '—'}</Text>
-                      <Text style={{ flex: 2.2, fontSize: 12, color: COLORS.textMain }} numberOfLines={1}>{txn.Remark || txn.remark || 'Top-up'}</Text>
+                      <Text style={{ flex: 2.2, fontSize: 12, color: COLORS.textMain }} numberOfLines={1}>
+                        {txn.wallet_type && txn.wallet_type !== 'Single' ? `[${txn.wallet_type}] ` : ''}{txn.Remark || txn.remark || 'Top-up'}
+                      </Text>
                     </View>
                   ))}
                 </View>
@@ -3432,8 +3672,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                     </TouchableOpacity>
                   </View>
                   <Text style={styles.heroSubtitle}>
-                    {[p.company_name, p.partner_region, p.partner_mobile, p.account_username ? `login: ${p.account_username}` : null].filter(Boolean).join('  ·  ')}
+                    {[p.company_name, p.partner_mobile, p.account_username ? `login: ${p.account_username}` : null].filter(Boolean).join('  ·  ')}
                   </Text>
+                  {p.partner_region ? (
+                    <Text style={[styles.heroSubtitle, { marginTop: 2 }]} numberOfLines={2}>Address: {p.partner_region}</Text>
+                  ) : null}
                   {p.created_by_name && String(p.created_by) !== String(pid) ? (
                     <Text style={[styles.heroSubtitle, { marginTop: 2 }]}>Under {p.created_by_name} (#{p.created_by})</Text>
                   ) : null}
@@ -3444,7 +3687,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 <Text style={styles.heroWalletLabel}>WALLET BALANCE</Text>
                 <Text style={styles.heroWalletValue}>₹{Number(p.wallet_balance || 0).toLocaleString('en-IN')}</Text>
                 <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
-                  {!readOnly ? (
+                  {!readOnly && pWallet ? (
                     <>
                       <TouchableOpacity style={[styles.pdMini, { backgroundColor: '#10b981' }]} onPress={() => handleOpenWallet(p, 'credit')}>
                         <Feather name="plus" size={12} color="#fff" /><Text style={styles.pdMiniText}>Add</Text>
@@ -3463,13 +3706,30 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
 
             {!readOnly || canImpersonate ? (
               <View style={styles.pdAccountRow}>
-                {!readOnly ? <ActionBtn icon="edit-2" label="Edit Details" color="#2563eb" onPress={() => handleOpenEdit(p)} /> : null}
-                {!readOnly ? <ActionBtn icon="key" label="Reset Password" color="#d97706" onPress={() => handleOpenPartnerResetPass(p)} /> : null}
+                {!readOnly && pEdit ? <ActionBtn icon="edit-2" label="Edit Details" color="#2563eb" onPress={() => handleOpenEdit(p)} /> : null}
+                {!readOnly && pPass ? <ActionBtn icon="key" label="Reset Password" color="#d97706" onPress={() => handleOpenPartnerResetPass(p)} /> : null}
                 {canImpersonate ? <ActionBtn icon="log-in" label="Login as Partner" color="#db2777" onPress={() => handleImpersonatePartner(p)} busy={impersonatingId === pid} /> : null}
-                {!readOnly && !isOperatorPartner && Number(p.admin_level || 0) < 3 ? (
+                {!readOnly && pAdd && !isOperatorPartner && Number(p.admin_level || 0) < 3 ? (
                   <ActionBtn icon="user-plus" label={`Add ${Number(p.admin_level) === 1 ? 'Distributor' : 'Sub Distributor'} under`} color="#7c3aed" onPress={() => handleOpenCreate('admin', pid)} />
                 ) : null}
-                {!readOnly && !isOperatorPartner ? <ActionBtn icon="user-plus" label="Add Operator under" color="#059669" onPress={() => handleOpenCreate('operator', pid)} /> : null}
+                {!readOnly && pAdd && !isOperatorPartner ? <ActionBtn icon="user-plus" label="Add Operator under" color="#059669" onPress={() => handleOpenCreate('operator', pid)} /> : null}
+                {!readOnly && pMove && !isOperatorPartner ? <ActionBtn icon="award" label="Change Role" color="#7c3aed" onPress={() => setMoveReq({ partner: p, mode: 'role' })} /> : null}
+                {!readOnly && pMove ? (
+                  <ActionBtn icon="git-branch" label={isOperatorPartner ? 'Change Distributor' : 'Move Under'} color="#0f766e" onPress={() => setMoveReq({ partner: p, mode: 'move' })} />
+                ) : null}
+                <PartnerMoveModal
+                  visible={!!moveReq}
+                  partner={moveReq?.partner}
+                  mode={moveReq?.mode}
+                  onClose={() => setMoveReq(null)}
+                  onDone={() => refreshMovedPartner(pid)}
+                />
+                <RadiusBranchesModal
+                  visible={!!radiusBranchPartner}
+                  partner={radiusBranchPartner}
+                  onClose={() => setRadiusBranchPartner(null)}
+                  onSaved={(ids) => setSelectedPartner((prev) => (prev ? { ...prev, internet_branch_id: ids.join(',') } : prev))}
+                />
               </View>
             ) : null}
           </View>
@@ -3503,6 +3763,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
               </View>
 
               {/* PLANS & SETUP */}
+              {pPlans ? (
               <View style={styles.pdSection}>
                 <View style={styles.pdSectionHead}>
                   <Feather name="sliders" size={16} color="#0f172a" />
@@ -3515,12 +3776,14 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 <View style={styles.pdTileGrid}>
                   {[
                     { icon: 'wifi', label: 'Internet Plans', hint: 'Map plans & prices', color: '#0284c7', onPress: () => handleOpenInternetPlans(p) },
+                    { icon: 'git-branch', label: 'RADIUS Branches', hint: radiusBranchCount(p) ? `${radiusBranchCount(p)} branch(es) · choose which ones` : 'Not set', color: '#0369a1', onPress: () => setRadiusBranchPartner(p) },
                     { icon: 'tv', label: 'IPTV Plans', hint: 'Map packs & prices', color: '#7c3aed', onPress: () => handleOpenIptvPlans(p) },
                     { icon: 'layers', label: 'Combo Plans', hint: 'Internet + IPTV bundles', color: '#db2777', onPress: () => handleOpenComboPlans(p) },
                     { icon: 'play-circle', label: 'OTT Plans', hint: p.ott_franchise_id ? `Franchise ${p.ott_franchise_id}` : 'Set the OTT franchise id', color: '#0ea5e9', onPress: () => setOttPlansPartner(p) },
                     { icon: 'tag', label: 'Customer Prices', hint: 'Operator\'s price for its customers', color: '#059669', onPress: () => setCustomerPricesPartner(p) },
                     { icon: 'git-branch', label: 'IPTV Branches', hint: 'Pioneer branch mapping', color: '#0891b2', onPress: () => handleOpenAssignBranches(p) },
                     { icon: 'shield', label: 'KYC Providers', hint: 'DigiLocker / ScoreMe / manual', color: '#9333ea', onPress: () => handleOpenKycProviders(p) },
+                    { icon: 'credit-card', label: 'Payment Gateways', hint: pgGatewaysHint(p), color: '#0284c7', onPress: () => setPgGatewaysPartner(p) },
                   ].map((t) => (
                     <TouchableOpacity key={t.label} style={styles.pdTile} onPress={t.onPress}>
                       <View style={[styles.pdTileIcon, { backgroundColor: `${t.color}18` }]}><Feather name={t.icon} size={16} color={t.color} /></View>
@@ -3531,9 +3794,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                       <Feather name="chevron-right" size={16} color="#94a3b8" />
                     </TouchableOpacity>
                   ))}
+                  <AadhaarForRechargeTile partner={p} onChanged={(v) => setSelectedPartner((prev) => (prev ? { ...prev, aadhaar_required_for_recharge: v } : prev))} />
                 </View>
                 )}
               </View>
+              ) : null}
 
               {/* NETWORK DEVICES (NMS) */}
               <PartnerDevices partner={p} />
@@ -3563,11 +3828,13 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   {loadingAdminChildren ? <ActivityIndicator size="small" color={COLORS.primary} /> : null}
                 </View>
                 <PartnersTable
+                  key={`under_${p.partner_id}`}
                   list={adminChildren}
                   loading={loadingAdminChildren && adminChildren.length === 0}
                   isMobile={isMobile}
                   emptyText={`${p.partner_name} has no partners under it yet.`}
-                  onOpen={(ch) => handleSelectPartner(ch, p)}
+                  fetchChildren={(id) => OneBssApi.getPartnersCreatedBy(id)}
+                  onOpen={(ch, above = []) => handleOpenFromTree(ch, [...partnerTrail, p, ...above])}
                   onWallet={(ch) => handleOpenWallet(ch)}
                   onToggleStatus={readOnly ? null : (ch) => setConfirmStatusPartner(ch)}
                   onImpersonate={canImpersonate ? (ch) => handleImpersonatePartner(ch) : null}
@@ -3581,6 +3848,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         {renderResetPasswordModal()}
         {renderConfirmStatusModal()}
         {renderKycProvidersModal()}
+        <PgGatewaysModal visible={!!pgGatewaysPartner} partner={pgGatewaysPartner} onClose={() => setPgGatewaysPartner(null)} />
         {renderAssignBranchesModal()}
         {renderComboModal()}
       </View>
@@ -3618,7 +3886,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
             { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', flex: 1, justifyContent: 'flex-end' },
             isMobile && { width: '100%', flexGrow: 0, flexShrink: 0, flexBasis: 'auto', justifyContent: 'space-between', marginTop: 4 }
           ]}>
-            {!readOnly ? (
+            {!readOnly && pAdd ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, width: isMobile ? '100%' : 'auto' }}>
               {/* ADD PARTNER BUTTON (super admin only — admins are view-only) */}
               <TouchableOpacity
@@ -3671,7 +3939,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
             list={filteredPartners}
             loading={loading}
             isMobile={isMobile}
-            onOpen={(item) => handleSelectPartner(item)}
+            fetchChildren={(id) => OneBssApi.getPartnersCreatedBy(id)}
+            onOpen={(item, above = []) => handleOpenFromTree(item, above)}
             onWallet={(item) => handleOpenWallet(item)}
             onToggleStatus={readOnly ? null : (item) => setConfirmStatusPartner(item)}
             onImpersonate={canImpersonate ? (item) => handleImpersonatePartner(item) : null}
@@ -3683,6 +3952,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         {renderResetPasswordModal()}
         {renderConfirmStatusModal()}
         {renderKycProvidersModal()}
+        <PgGatewaysModal visible={!!pgGatewaysPartner} partner={pgGatewaysPartner} onClose={() => setPgGatewaysPartner(null)} />
         {renderAssignBranchesModal()}
         {renderComboModal()}
       </ScrollView>

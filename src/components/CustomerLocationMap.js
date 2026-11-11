@@ -17,14 +17,15 @@ import { toast } from 'react-toastify';
 import { CustomerDevicesModal } from './CustomerDevicesModal';
 
 import { APIProvider, Map as GoogleMap, Marker, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
+import { LeafletPicker, osmGeocode } from './LeafletPicker';
 
 // Google Maps (official React library @vis.gl/react-google-maps): street, satellite and
 // satellite-with-labels, licensed for commercial use with your own Google Maps Platform key.
 // Set EXPO_PUBLIC_GOOGLE_MAPS_API_KEY at build time (Expo inlines process.env.EXPO_PUBLIC_* —
 // keep this exact expression). Enable "Maps JavaScript API" and "Geocoding API" for the key and
 // restrict it to your site's domain.
-// Without a key the map falls back to a read-only Google Maps view; pins can still be set with
-// My GPS or by typing the coordinates.
+// Without a key the map is a key-less Leaflet map (Esri satellite / OpenStreetMap, search via
+// OpenStreetMap): tap to place the pin and drag it, same as with Google.
 const GOOGLE_MAPS_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY || '';
 
 const MAP_TYPES = [
@@ -115,7 +116,7 @@ export const CustomerLocationMap = ({
   };
 
   // Google geocoder when the key is set (none without a key — the fallback view searches itself)
-  const geocode = async (query) => (geocoderRef.current ? geocoderRef.current(query) : null);
+  const geocode = async (query) => (geocoderRef.current ? geocoderRef.current(query) : GOOGLE_MAPS_KEY ? null : osmGeocode(query));
 
   // 1. Saved location from the API
   const fetchLocationData = async () => {
@@ -172,12 +173,6 @@ export const CustomerLocationMap = ({
   // 3. Search a place (India only)
   const handleSearchAddress = async () => {
     if (!addressSearch.trim()) return;
-    if (!GOOGLE_MAPS_KEY) {
-      // key-less view: let Google's own map show the place
-      setEmbedQuery(addressSearch.trim());
-      setPinned(false);
-      return;
-    }
     setSearchingPlace(true);
     try {
       const hit = await geocode(addressSearch.trim());
@@ -393,14 +388,15 @@ export const CustomerLocationMap = ({
             </View>
           </APIProvider>
         ) : (
-          <iframe
-            title="Customer location"
-            style={{ width: '100%', height: isMobile ? 320 : 420, border: 0, display: 'block' }}
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-            src={`https://maps.google.com/maps?q=${encodeURIComponent(
-              pinned && latitude !== null ? `${latitude},${longitude}` : embedQuery || `${DEFAULT_CENTER.lat},${DEFAULT_CENTER.lng}`
-            )}&t=${mapType === 'roadmap' ? 'm' : 'k'}&z=${pinned ? 18 : 14}&output=embed`}
+          <LeafletPicker
+            lat={pinned ? latitude : null}
+            lng={pinned ? longitude : null}
+            center={DEFAULT_CENTER}
+            zoom={13}
+            mapType={mapType}
+            focus={focus}
+            height={isMobile ? 320 : 420}
+            onPick={(la, ln) => placePin(la, ln, false)}
           />
         )}
         <View style={styles.mapTipBar}>
@@ -413,8 +409,8 @@ export const CustomerLocationMap = ({
               </>
             ) : (
               <>
-                View only — set the pin with <Text style={{ fontWeight: '700' }}>My GPS</Text> or type LAT / LNG, then{' '}
-                <Text style={{ fontWeight: '700', color: '#16a34a' }}>Save Location</Text>. Add a Google Maps key (EXPO_PUBLIC_GOOGLE_MAPS_API_KEY) to tap on the map.
+                Search the area, use <Text style={{ fontWeight: '700' }}>Satellite</Text> to see houses, tap the exact installation point or drag the pin, then{' '}
+                <Text style={{ fontWeight: '700', color: '#16a34a' }}>Save Location</Text>.
               </>
             )}
           </Text>

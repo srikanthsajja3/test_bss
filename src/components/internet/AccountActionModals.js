@@ -4,7 +4,7 @@ import { Feather } from '@expo/vector-icons';
 import { toast } from 'react-toastify';
 import { COLORS } from '../../constants/theme';
 import { OneBssApi } from '../../services/oneBssApi';
-import { ModalShell, Btn, KV, Note, sharedStyles, fixDocUrl, isImageUrl, openExternal } from './shared';
+import { ModalShell, Btn, KV, Note, Dropdown, SearchSelect, sharedStyles, fixDocUrl, isImageUrl, openExternal } from './shared';
 
 const errMsg = (res, fallback) => res?.data?.message || (res?.status ? `${fallback} (HTTP ${res.status})` : fallback);
 const okRes = (res) => res && res.ok && res.data && res.data.success !== false;
@@ -124,24 +124,74 @@ export const PasswordModal = ({ visible, onClose, internetId, username, inline =
 };
 
 // =====================================================================
-// MAC BINDINGS — list + remove
+// NETWORKING — RADIUS network bindings: list + add + remove
+// (MAC Bind / MAC Login, Static IP / IP Login / IP Bind, NAS Port ID, IPv6 Prefix)
 // =====================================================================
-export const MacBindingsModal = ({ visible, onClose, internetId, username, inline = false }) => {
+export const NETWORKING_TYPES = [
+  { value: 1, label: 'MAC Bind', field: 'mac', hint: 'Locks the account to this router MAC.' },
+  { value: 2, label: 'MAC Login', field: 'mac', hint: 'Lets this MAC log in without a username/password.' },
+  { value: 0, label: 'Static IP', field: 'ip', hint: 'Always hands out this IPv4 address to the account. Pick it from your NAS’s IP pool.' },
+  { value: 3, label: 'IP Login', field: 'ip', hint: 'Lets this IPv4 address log in without a username/password. Pick it from your NAS’s IP pool.' },
+  { value: 4, label: 'IP Bind', field: 'ip', hint: 'Locks the account to this IPv4 address. Pick it from your NAS’s IP pool.' },
+  { value: 5, label: 'NAS Port ID', field: 'nas', hint: 'Locks the account to this NAS port (e.g. eth 0/1/0/12:100).' },
+  { value: 6, label: 'IPv6 Prefix', field: 'ipv6', hint: 'Framed and/or delegated IPv6 prefix for the account.' },
+];
+const netTypeOf = (code) => NETWORKING_TYPES.find((t) => t.value === Number(code));
+
+const MAC_RE = /^[0-9A-Fa-f]{2}([:-]?)[0-9A-Fa-f]{2}(\1[0-9A-Fa-f]{2}){4}$/;
+const IPV4_RE = /^(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)(\.(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)){3}$/;
+const IPV6_PREFIX_RE = /^[0-9A-Fa-f:]*:[0-9A-Fa-f:]*\/(12[0-8]|1[01]\d|[1-9]?\d)$/;
+const formatMac = (v) => {
+  const hex = String(v || '').replace(/[^0-9A-Fa-f]/g, '');
+  return hex.length === 12 ? hex.toUpperCase().match(/.{2}/g).join(':') : String(v || '').trim();
+};
+
+/** The value(s) a binding row holds, as one line for the table. */
+const bindingValue = (b) => {
+  const t = netTypeOf(b.acctype);
+  const field = t ? t.field : null;
+  if (field === 'mac') return b.mac || '—';
+  if (field === 'ip') return b.ip || '—';
+  if (field === 'nas') return b.nas_port_id || '—';
+  if (field === 'ipv6') {
+    const parts = [];
+    if (b.framed_ip_prefix) parts.push(`Framed ${b.framed_ip_prefix}`);
+    if (b.delegated_ip_prefix) parts.push(`Delegated ${b.delegated_ip_prefix}`);
+    return parts.join('  ·  ') || '—';
+  }
+  return [b.mac, b.ip, b.nas_port_id, b.framed_ip_prefix, b.delegated_ip_prefix].filter(Boolean).join(' · ') || '—';
+};
+
+const EMPTY_FORM = { mac: '', ip: '', nas: '', framed: '', delegated: '' };
+
+export const NetworkingModal = ({ visible, onClose, internetId, username, inline = false }) => {
   const [loading, setLoading] = useState(false);
   const [bindings, setBindings] = useState([]);
   const [loadError, setLoadError] = useState('');
   const [confirmId, setConfirmId] = useState(null);
   const [removing, setRemoving] = useState(null);
 
+  const [adding, setAdding] = useState(false); // form open
+  const [type, setType] = useState(1);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [saving, setSaving] = useState(false);
+
+  // IP types: NAS -> pool -> free IP, from the pools given to the customer's operator
+  const [ipOpts, setIpOpts] = useState(null); // response of internet_ip_options.php
+  const [ipLoading, setIpLoading] = useState(false);
+  const [ipError, setIpError] = useState('');
+  const [nasSel, setNasSel] = useState(null);
+  const [poolSel, setPoolSel] = useState(null);
+
   const load = async () => {
     setLoading(true);
     setLoadError('');
     try {
-      const res = await OneBssApi.getInternetMacBindings(internetId);
+      const res = await OneBssApi.getInternetNetworking(internetId);
       if (okRes(res)) setBindings(Array.isArray(res.data.results) ? res.data.results : []);
-      else setLoadError(errMsg(res, 'Unable to load MAC bindings'));
+      else setLoadError(errMsg(res, 'Unable to load networking'));
     } catch (e) {
-      setLoadError('Unable to load MAC bindings');
+      setLoadError('Unable to load networking');
     } finally {
       setLoading(false);
     }
@@ -151,44 +201,286 @@ export const MacBindingsModal = ({ visible, onClose, internetId, username, inlin
     if (visible) {
       setBindings([]);
       setConfirmId(null);
+      setAdding(false);
+      setForm(EMPTY_FORM);
+      setType(1);
+      setIpOpts(null);
+      setIpError('');
+      setNasSel(null);
+      setPoolSel(null);
       load();
     }
   }, [visible, internetId]);
 
+  const setF = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
+  const typeInfo = netTypeOf(type);
+  const isIpType = typeInfo.field === 'ip';
+
+  const loadIpOptions = async (nasId, poolId) => {
+    setIpLoading(true);
+    setIpError('');
+    try {
+      const res = await OneBssApi.getInternetIpOptions(internetId, nasId, poolId);
+      if (okRes(res)) {
+        setIpOpts(res.data);
+        setNasSel(res.data.nas_id || null);   // the server auto-selects when there is only one
+        setPoolSel(res.data.ippool_id || null);
+        if (!res.data.nas?.length) setIpError(res.data.message || 'No IP pool is given to this operator yet.');
+      } else {
+        setIpError(errMsg(res, 'Unable to load IP pools'));
+      }
+    } catch (e) {
+      setIpError('Unable to load IP pools');
+    } finally {
+      setIpLoading(false);
+    }
+  };
+
+  // open the IP picker: start from the NAS level (keeps the current NAS/pool when re-opened)
+  useEffect(() => {
+    if (adding && isIpType) {
+      setForm((f) => ({ ...f, ip: '' }));
+      loadIpOptions(nasSel, poolSel);
+    }
+  }, [adding, isIpType]);
+
+  const pickNas = (v) => {
+    setForm((f) => ({ ...f, ip: '' }));
+    setPoolSel(null);
+    loadIpOptions(Number(v), null);
+  };
+  const pickPool = (v) => {
+    setForm((f) => ({ ...f, ip: '' }));
+    loadIpOptions(nasSel, Number(v));
+  };
+
+  // client-side check — the server validates again
+  const formError = (() => {
+    const f = typeInfo.field;
+    if (f === 'mac') return !form.mac.trim() ? 'empty' : MAC_RE.test(form.mac.trim()) ? '' : 'Enter a valid MAC address (AA:BB:CC:DD:EE:FF)';
+    if (f === 'ip') return !form.ip.trim() || !ipOpts?.ipopid ? 'empty' : IPV4_RE.test(form.ip.trim()) ? '' : 'Choose an IP from the list';
+    if (f === 'nas') return form.nas.trim() ? '' : 'empty';
+    if (f === 'ipv6') {
+      const fr = form.framed.trim();
+      const de = form.delegated.trim();
+      if (!fr && !de) return 'empty';
+      if (fr && !IPV6_PREFIX_RE.test(fr)) return 'Framed prefix must look like 2001:db8:1::/64';
+      if (de && !IPV6_PREFIX_RE.test(de)) return 'Delegated prefix must look like 2001:db8:100::/56';
+      return '';
+    }
+    return 'empty';
+  })();
+
+  // same type + same value already on the account (RADIUS would store it twice)
+  const duplicate = (() => {
+    if (formError) return false;
+    const f = typeInfo.field;
+    const norm = (v) => String(v || '').trim().toLowerCase();
+    return bindings.some((b) => {
+      if (Number(b.acctype) !== type) return false;
+      if (f === 'mac') return formatMac(b.mac) === formatMac(form.mac);
+      if (f === 'ip') return norm(b.ip) === norm(form.ip);
+      if (f === 'nas') return norm(b.nas_port_id) === norm(form.nas);
+      if (f === 'ipv6') return norm(b.framed_ip_prefix) === norm(form.framed) && norm(b.delegated_ip_prefix) === norm(form.delegated);
+      return false;
+    });
+  })();
+
+  const add = async () => {
+    if (formError || duplicate) return;
+    const f = typeInfo.field;
+    const payload = { type };
+    if (f === 'mac') payload.mac = formatMac(form.mac);
+    if (f === 'ip') {
+      payload.ip_address = form.ip.trim();
+      payload.ipopid = ipOpts?.ipopid;
+    }
+    if (f === 'nas') payload.nas_port_id = form.nas.trim();
+    if (f === 'ipv6') {
+      payload.framed_ip_prefix = form.framed.trim();
+      payload.delegated_ip_prefix = form.delegated.trim();
+    }
+    setSaving(true);
+    try {
+      const res = await OneBssApi.addInternetNetworking(internetId, payload);
+      if (okRes(res)) {
+        toast.success(res.data.message || `${typeInfo.label} added`);
+        setForm(EMPTY_FORM);
+        setAdding(false);
+        load(); // RADIUS assigns the binding id — reload to get it
+      } else {
+        toast.error(errMsg(res, 'Failed to add binding'));
+      }
+    } catch (e) {
+      toast.error('Failed to add binding');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const remove = async (id) => {
     setRemoving(id);
     try {
-      const res = await OneBssApi.removeInternetMacBinding(internetId, id);
+      const res = await OneBssApi.removeInternetNetworking(internetId, id);
       if (okRes(res)) {
-        toast.success(res.data.message || 'MAC binding removed');
+        toast.success(res.data.message || 'Binding removed');
         setBindings((prev) => prev.filter((b) => b.id !== id));
       } else {
-        toast.error(errMsg(res, 'Failed to remove MAC binding'));
+        toast.error(errMsg(res, 'Failed to remove binding'));
       }
     } catch (e) {
-      toast.error('Failed to remove MAC binding');
+      toast.error('Failed to remove binding');
     } finally {
       setRemoving(null);
       setConfirmId(null);
     }
   };
 
+  const busy = !!removing || saving;
+  const input = (value, onChange, placeholder, extra = {}) => (
+    <TextInput
+      style={sharedStyles.input}
+      value={value}
+      onChangeText={onChange}
+      placeholder={placeholder}
+      placeholderTextColor="#94a3b8"
+      autoCapitalize="none"
+      autoCorrect={false}
+      editable={!saving}
+      onSubmitEditing={add}
+      {...extra}
+    />
+  );
+
   return (
     <ModalShell
       visible={visible}
-      title={inline ? 'MAC Bindings' : `MAC Bindings — ${username || ''}`}
+      title={inline ? 'Networking' : `Networking — ${username || ''}`}
       icon="globe"
       onClose={onClose}
-      maxWidth={600}
-      busy={!!removing}
+      maxWidth={680}
+      busy={busy}
       inline={inline}
       footer={
         <>
-          <Btn label="Refresh" kind="ghost" icon="refresh-cw" onPress={load} disabled={loading || !!removing} />
-          {inline ? null : <Btn label="Close" onPress={onClose} disabled={!!removing} />}
+          <Btn label="Refresh" kind="ghost" icon="refresh-cw" onPress={load} disabled={loading || busy} />
+          {adding ? null : <Btn label="Add Binding" icon="plus" onPress={() => setAdding(true)} disabled={loading || busy || !!loadError} />}
+          {inline ? null : <Btn label="Close" kind="ghost" onPress={onClose} disabled={busy} />}
         </>
       }
     >
+      {adding ? (
+        <View style={styles.addBox}>
+          <Text style={sharedStyles.label}>BINDING TYPE</Text>
+          <Dropdown
+            value={type}
+            options={NETWORKING_TYPES.map((t) => ({ value: t.value, label: t.label }))}
+            onChange={(v) => { setType(Number(v)); setForm(EMPTY_FORM); }}
+            disabled={saving}
+          />
+          <Text style={styles.hintText}>{typeInfo.hint}</Text>
+
+          {typeInfo.field === 'mac' ? (
+            <>
+              <Text style={[sharedStyles.label, { marginTop: 12 }]}>MAC ADDRESS</Text>
+              {input(form.mac, setF('mac'), 'AA:BB:CC:DD:EE:FF')}
+            </>
+          ) : typeInfo.field === 'ip' ? (
+            <>
+              {ipError && !ipOpts?.nas?.length ? (
+                <View style={{ marginTop: 12 }}><Note tone="warn" text={ipError} /></View>
+              ) : (
+                <>
+                  <Text style={[sharedStyles.label, { marginTop: 12 }]}>1 · NAS</Text>
+                  {ipOpts?.nas?.length > 1 ? (
+                    <Dropdown
+                      value={nasSel || ''}
+                      options={ipOpts.nas.map((n) => ({ value: n.nas_id, label: `${n.nas_name || `NAS #${n.nas_id}`} — ${n.nas_ip} (${n.area})` }))}
+                      onChange={pickNas}
+                      disabled={saving || ipLoading}
+                      placeholder="Choose the NAS"
+                    />
+                  ) : ipOpts?.nas?.length === 1 ? (
+                    <View style={styles.autoBox}>
+                      <Feather name="server" size={13} color="#4f46e5" />
+                      <Text style={styles.autoText}>{ipOpts.nas[0].nas_name || `NAS #${ipOpts.nas[0].nas_id}`} — {ipOpts.nas[0].nas_ip} ({ipOpts.nas[0].area})</Text>
+                      <Text style={styles.autoTag}>only NAS</Text>
+                    </View>
+                  ) : ipLoading ? <ActivityIndicator size="small" color={COLORS.primary} style={{ alignSelf: 'flex-start', marginVertical: 8 }} /> : null}
+
+                  {nasSel ? (
+                    <>
+                      <Text style={[sharedStyles.label, { marginTop: 12 }]}>2 · IP POOL</Text>
+                      {ipOpts?.pools?.length > 1 ? (
+                        <Dropdown
+                          value={poolSel || ''}
+                          options={ipOpts.pools.map((p) => ({ value: p.ippool_id, label: `${p.ip_start} – ${p.ip_end}  (${p.free} free)` }))}
+                          onChange={pickPool}
+                          disabled={saving || ipLoading}
+                          placeholder="Choose the IP pool"
+                        />
+                      ) : ipOpts?.pools?.length === 1 ? (
+                        <View style={styles.autoBox}>
+                          <Feather name="layers" size={13} color="#4f46e5" />
+                          <Text style={styles.autoText}>{ipOpts.pools[0].ip_start} – {ipOpts.pools[0].ip_end} ({ipOpts.pools[0].free} free)</Text>
+                          <Text style={styles.autoTag}>only pool</Text>
+                        </View>
+                      ) : null}
+                    </>
+                  ) : null}
+
+                  {poolSel && ipOpts?.ipopid ? (
+                    <>
+                      <Text style={[sharedStyles.label, { marginTop: 12 }]}>3 · IP ADDRESS ({ipOpts.free_total} free)</Text>
+                      {ipLoading ? (
+                        <ActivityIndicator size="small" color={COLORS.primary} style={{ alignSelf: 'flex-start', marginVertical: 8 }} />
+                      ) : ipOpts.free_total === 0 ? (
+                        <Note tone="warn" text="Every IP of this pool is already given to a customer." />
+                      ) : (
+                        <SearchSelect
+                          value={form.ip}
+                          onChange={(v) => setForm((f) => ({ ...f, ip: String(v) }))}
+                          options={ipOpts.free_ips.map((ip) => ({ value: ip, label: ip }))}
+                          placeholder="Choose a free IP"
+                          searchPlaceholder="Type part of the IP…"
+                          emptyText="No free IP matches"
+                          accent="#4f46e5"
+                          disabled={saving}
+                        />
+                      )}
+                      {ipOpts.truncated ? <Text style={styles.hintText}>Showing the first {ipOpts.free_ips.length} free IPs.</Text> : null}
+                      {ipOpts.current_ips?.length ? <Text style={styles.hintText}>This customer already uses {ipOpts.current_ips.join(', ')} — an IP can be used only once (Static IP, IP Login or IP Bind).</Text> : null}
+                    </>
+                  ) : null}
+                  {ipError && ipOpts?.nas?.length ? <Text style={styles.errText}>{ipError}</Text> : null}
+                </>
+              )}
+            </>
+          ) : typeInfo.field === 'nas' ? (
+            <>
+              <Text style={[sharedStyles.label, { marginTop: 12 }]}>NAS PORT ID</Text>
+              {input(form.nas, setF('nas'), 'e.g. eth 0/1/0/12:100')}
+            </>
+          ) : (
+            <>
+              <Text style={[sharedStyles.label, { marginTop: 12 }]}>FRAMED IPV6 PREFIX</Text>
+              {input(form.framed, setF('framed'), 'e.g. 2001:db8:1::/64')}
+              <Text style={[sharedStyles.label, { marginTop: 12 }]}>DELEGATED IPV6 PREFIX</Text>
+              {input(form.delegated, setF('delegated'), 'e.g. 2001:db8:100::/56')}
+              <Text style={styles.hintText}>Fill one or both.</Text>
+            </>
+          )}
+
+          {formError && formError !== 'empty' ? <Text style={styles.errText}>{formError}</Text> : null}
+          {duplicate ? <Text style={styles.errText}>This {typeInfo.label} binding is already on the account.</Text> : null}
+
+          <View style={{ flexDirection: 'row', gap: 8, marginTop: 14, justifyContent: 'flex-end' }}>
+            <Btn label="Cancel" kind="ghost" onPress={() => { setAdding(false); setForm(EMPTY_FORM); }} disabled={saving} />
+            <Btn label={`Add ${typeInfo.label}`} icon="plus" onPress={add} loading={saving} disabled={!!formError || duplicate} />
+          </View>
+        </View>
+      ) : null}
+
       {loading ? (
         <ActivityIndicator size="small" color={COLORS.primary} style={{ marginVertical: 16 }} />
       ) : loadError ? (
@@ -196,21 +488,23 @@ export const MacBindingsModal = ({ visible, onClose, internetId, username, inlin
       ) : bindings.length === 0 ? (
         <View style={styles.empty}>
           <Feather name="check-circle" size={22} color="#10b981" />
-          <Text style={styles.emptyText}>No MAC bindings on this account.</Text>
+          <Text style={styles.emptyText}>No network bindings on this account.</Text>
         </View>
       ) : (
         <View style={styles.table}>
           <View style={[styles.tr, styles.thRow]}>
-            <Text style={[styles.th, { flex: 2 }]}>MAC</Text>
-            <Text style={[styles.th, { flex: 1.5 }]}>IP</Text>
-            <Text style={[styles.th, { flex: 1 }]}>Type</Text>
+            <Text style={[styles.th, { flex: 1.2 }]}>Type</Text>
+            <Text style={[styles.th, { flex: 2.6 }]}>Value</Text>
             <Text style={[styles.th, { flex: 1.6, textAlign: 'right' }]}> </Text>
           </View>
           {bindings.map((b) => (
             <View key={b.id} style={styles.tr}>
-              <Text style={[styles.td, { flex: 2, fontWeight: '700' }]} selectable>{b.mac || '—'}</Text>
-              <Text style={[styles.td, { flex: 1.5 }]} selectable>{b.ip || '—'}</Text>
-              <Text style={[styles.td, { flex: 1 }]}>{b.type || '—'}</Text>
+              <View style={{ flex: 1.2 }}>
+                <View style={[styles.pill, { backgroundColor: '#eff6ff' }]}>
+                  <Text style={[styles.pillText, { color: '#1d4ed8' }]}>{netTypeOf(b.acctype)?.label || b.type || '—'}</Text>
+                </View>
+              </View>
+              <Text style={[styles.td, { flex: 2.6, fontWeight: '700', fontFamily: Platform.OS === 'web' ? 'monospace' : undefined }]} selectable>{bindingValue(b)}</Text>
               <View style={{ flex: 1.6, alignItems: 'flex-end' }}>
                 {confirmId === b.id ? (
                   <View style={{ flexDirection: 'row', gap: 6 }}>
@@ -222,7 +516,7 @@ export const MacBindingsModal = ({ visible, onClose, internetId, username, inlin
                     </TouchableOpacity>
                   </View>
                 ) : (
-                  <TouchableOpacity style={styles.smallOutline} onPress={() => setConfirmId(b.id)} disabled={!!removing}>
+                  <TouchableOpacity style={styles.smallOutline} onPress={() => setConfirmId(b.id)} disabled={busy}>
                     <Feather name="trash-2" size={12} color="#dc2626" />
                     <Text style={styles.smallOutlineText}>Remove</Text>
                   </TouchableOpacity>
@@ -235,6 +529,9 @@ export const MacBindingsModal = ({ visible, onClose, internetId, username, inlin
     </ModalShell>
   );
 };
+
+// old name, kept so existing imports keep working
+export const MacBindingsModal = NetworkingModal;
 
 // =====================================================================
 // SESSION HISTORY
@@ -724,6 +1021,11 @@ const styles = StyleSheet.create({
   iconBtn: { padding: 6, borderRadius: 6, backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)' },
   divider: { height: 1, backgroundColor: '#f1f5f9', marginVertical: 16 },
   errText: { fontSize: 11, color: '#dc2626', marginTop: 4 },
+  hintText: { fontSize: 11, color: '#64748b', marginTop: 6 },
+  autoBox: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12, height: 42, borderRadius: 8, borderWidth: 1, borderColor: '#e0e7ff', backgroundColor: '#f5f7ff' },
+  autoText: { flex: 1, fontSize: 13, fontWeight: '600', color: COLORS.textMain },
+  autoTag: { fontSize: 10, fontWeight: '800', color: '#4f46e5', textTransform: 'uppercase' },
+  addBox: { padding: 14, borderRadius: 10, borderWidth: 1, borderColor: '#bfdbfe', backgroundColor: '#f8fbff', marginBottom: 14 },
 
   empty: { alignItems: 'center', gap: 8, paddingVertical: 24 },
   emptyText: { fontSize: 13, color: '#64748b' },
