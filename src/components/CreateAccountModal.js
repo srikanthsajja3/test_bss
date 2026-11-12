@@ -4,7 +4,7 @@ import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
-import { Dropdown } from './internet/shared';
+import { Dropdown, SearchSelect } from './internet/shared';
 
 // Hierarchy: Super Admin > Super Distributor > Distributor > Sub Distributor > Operator.
 // The three middle levels are "admin" accounts (admin_level 1-3). A partner can be created under the
@@ -81,6 +81,9 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
   const [iptvBaseUrl, setIptvBaseUrl] = useState(DEFAULT_IPTV_BASE_URL);
   const [iptvKey, setIptvKey] = useState('');
   const [iptvOperatorId, setIptvOperatorId] = useState('');
+  // IPTV panel's company + operators for the typed key (iptv_company_info.php -> getcompanyinfo)
+  const [iptvInfo, setIptvInfo] = useState({ status: 'idle', message: '', company: null, operators: [] }); // idle | loading | ok | error
+  const [iptvManualId, setIptvManualId] = useState(false);
   const [ottFranchiseId, setOttFranchiseId] = useState('');
   // one wallet, or separate Internet / IPTV / OTT wallets (login_credentials.wallet_type)
   const [walletMode, setWalletMode] = useState('single');
@@ -141,12 +144,56 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       setIptvBaseUrl(DEFAULT_IPTV_BASE_URL);
       setIptvKey('');
       setIptvOperatorId('');
+      setIptvInfo({ status: 'idle', message: '', company: null, operators: [] });
+      setIptvManualId(false);
       setIptvBranchId('');
       setPartnerDropdownOpen(false);
       setBranchDropdownOpen(false);
       setRoleDropdownOpen(false);
     }
   }, [visible, initialRole, parentId]);
+
+  // As soon as an IPTV key is entered, load that company's operators for the IPTV OPERATOR ID list
+  const loadIptvOperators = async (key = iptvKey, base = iptvBaseUrl) => {
+    const k = String(key || '').trim();
+    if (k.length < 8) {
+      setIptvInfo({ status: 'idle', message: '', company: null, operators: [] });
+      return;
+    }
+    setIptvInfo((prev) => ({ ...prev, status: 'loading', message: '' }));
+    const res = await OneBssApi.getIptvCompanyInfo(base, k);
+    if (!res.ok) {
+      setIptvInfo({ status: 'error', message: res.data?.message || 'Could not load the IPTV operators', company: null, operators: [] });
+      setIptvOperatorId(''); // an id picked for another key must not be saved with this one
+      return;
+    }
+    const company = res.data.company || null;
+    const operators = Array.isArray(res.data.operators) ? res.data.operators : [];
+    setIptvInfo({ status: 'ok', message: res.data.message || '', company, operators });
+    // keep a valid choice; a company with exactly one operator is picked for you
+    setIptvOperatorId((cur) => {
+      const ids = [company?.id, ...operators.map((o) => o.id)].filter(Boolean).map(String);
+      if (cur && ids.includes(String(cur))) return cur;
+      return operators.length === 1 ? String(operators[0].id) : '';
+    });
+  };
+  useEffect(() => {
+    if (!visible) return undefined;
+    const t = setTimeout(() => loadIptvOperators(iptvKey, iptvBaseUrl), 700);
+    return () => clearTimeout(t);
+  }, [iptvKey, iptvBaseUrl, visible]);
+
+  const iptvOperatorOptions = (() => {
+    const c = iptvInfo.company;
+    const opt = (r, kind) => ({
+      value: String(r.id),
+      label: `${r.company_name || r.username || 'Operator'} · ${r.code || `#${r.id}`}`,
+      sub: [kind, r.username ? `user ${r.username}` : null, r.mobile || null, r.state || null, r.active === false ? 'inactive' : null,
+        r.branches?.length ? `branch ${r.branches.map((b) => b.name || b.id).join(', ')}` : null].filter(Boolean).join(' · '),
+      search: `${r.id} ${r.code} ${r.company_name} ${r.username} ${r.mobile}`,
+    });
+    return [...(c ? [opt(c, 'Company (distributor)')] : []), ...iptvInfo.operators.map((o) => opt(o, 'Operator (LCO)'))];
+  })();
 
   if (!visible) return null;
 
@@ -374,6 +421,10 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
       const free = tokenCheck.status === 'ok' ? true : tokenCheck.status === 'taken' ? false : await checkTokenFree(internetToken);
       if (!free) {
         toast.error('This RADIUS token is already assigned to another operator. Use the operator\'s own token.');
+        return;
+      }
+      if (iptvKey.trim() && !(Number(iptvOperatorId) > 0)) {
+        toast.error('Choose the IPTV operator (IPTV OPERATOR ID) for this IPTV key.');
         return;
       }
     }
@@ -900,15 +951,49 @@ export const CreateAccountModal = ({ visible, onClose, initialRole = 'operator',
             </View>
 
             <View style={[styles.inputGroup, { flex: 1 }]}>
-              <Text style={styles.label}>IPTV OPERATOR ID</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="0"
-                value={iptvOperatorId}
-                onChangeText={setIptvOperatorId}
-                keyboardType="numeric"
-                placeholderTextColor={COLORS.textDim}
-              />
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
+                <Text style={styles.label}>IPTV OPERATOR ID</Text>
+                {iptvInfo.status === 'loading' ? <ActivityIndicator size="small" color="#7c3aed" /> : null}
+                {iptvInfo.status === 'ok' || iptvInfo.status === 'error' ? (
+                  <TouchableOpacity onPress={() => loadIptvOperators()} accessibilityLabel="Reload IPTV operators">
+                    <Feather name="refresh-cw" size={13} color="#7c3aed" />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
+              {iptvInfo.status === 'ok' && !iptvManualId ? (
+                <SearchSelect
+                  value={iptvOperatorId}
+                  options={iptvOperatorOptions}
+                  onChange={(v) => setIptvOperatorId(String(v))}
+                  placeholder="Choose the IPTV operator"
+                  searchPlaceholder="Search name, code, username, mobile…"
+                  emptyText="No operator matches"
+                  accent="#7c3aed"
+                />
+              ) : (
+                <TextInput
+                  style={[styles.input, iptvKey.trim() && iptvInfo.status !== 'ok' && !iptvManualId && { opacity: 0.6 }]}
+                  placeholder={iptvKey.trim() ? (iptvInfo.status === 'loading' ? 'Loading operators…' : 'Operator id') : 'Enter the IPTV key first'}
+                  value={iptvOperatorId}
+                  onChangeText={(v) => setIptvOperatorId(v.replace(/\D/g, ''))}
+                  editable={iptvManualId || iptvInfo.status === 'error'}
+                  keyboardType="numeric"
+                  placeholderTextColor={COLORS.textDim}
+                />
+              )}
+              {iptvInfo.status === 'ok' ? (
+                <Text style={[styles.manualModeHelpText, { marginTop: 4 }]}>
+                  {iptvInfo.company?.company_name ? `${iptvInfo.company.company_name} · ` : ''}{iptvInfo.operators.length} operator(s)
+                  {iptvOperatorId ? ` · ID ${iptvOperatorId} will be saved` : ''}
+                  {'  '}
+                  <Text style={{ color: '#7c3aed', fontWeight: '700' }} onPress={() => setIptvManualId((m) => !m)}>
+                    {iptvManualId ? 'Choose from list' : 'Type the ID instead'}
+                  </Text>
+                </Text>
+              ) : null}
+              {iptvInfo.status === 'error' ? (
+                <Text style={[styles.manualModeHelpText, { marginTop: 4, color: '#b91c1c' }]}>{iptvInfo.message} — check the key, or type the operator ID.</Text>
+              ) : null}
             </View>
 
           </View>

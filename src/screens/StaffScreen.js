@@ -130,11 +130,11 @@ const RoleEditorModal = ({ visible, role, catalog, myPermissions, onClose, onSav
       <View style={{ flexDirection: narrow ? 'column' : 'row', gap: 12, marginBottom: 14 }}>
         <View style={{ flex: 1 }}>
           <Text style={sharedStyles.label}>ROLE NAME</Text>
-          <TextInput style={sharedStyles.input} value={name} onChangeText={setName} placeholder="e.g. Counter, Field Engineer, Accounts" maxLength={100} />
+          <TextInput placeholderTextColor="#94a3b8" style={sharedStyles.input} value={name} onChangeText={setName} placeholder="e.g. Counter, Field Engineer, Accounts" maxLength={100} />
         </View>
         <View style={{ flex: 2 }}>
           <Text style={sharedStyles.label}>DESCRIPTION (OPTIONAL)</Text>
-          <TextInput style={sharedStyles.input} value={desc} onChangeText={setDesc} placeholder="What this role is for" maxLength={255} />
+          <TextInput placeholderTextColor="#94a3b8" style={sharedStyles.input} value={desc} onChangeText={setDesc} placeholder="What this role is for" maxLength={255} />
         </View>
       </View>
       {myPermissions ? <Note tone="info" text="You can only give permissions you have yourself; the others are greyed out." /> : null}
@@ -260,7 +260,7 @@ const StaffModal = ({ visible, staff, roles, onClose, onSaved }) => {
       <View style={{ gap: 12 }}>
         <View>
           <Text style={sharedStyles.label}>NAME</Text>
-          <TextInput style={sharedStyles.input} value={f.staff_name} onChangeText={set('staff_name')} placeholder="Full name" maxLength={100} />
+          <TextInput placeholderTextColor="#94a3b8" style={sharedStyles.input} value={f.staff_name} onChangeText={set('staff_name')} placeholder="Full name" maxLength={100} />
         </View>
         <View>
           <Text style={sharedStyles.label}>MOBILE</Text>
@@ -272,12 +272,17 @@ const StaffModal = ({ visible, staff, roles, onClose, onSaved }) => {
         </View>
         <View>
           <Text style={sharedStyles.label}>LOGIN USERNAME</Text>
-          <TextInput style={sharedStyles.input} value={f.username} onChangeText={(v) => { set('username')(v.replace(/\s/g, '')); setUserMsg(null); }} onBlur={checkUser} placeholder="e.g. ravi.counter" autoCapitalize="none" />
+          <TextInput style={sharedStyles.input} value={f.username} onChangeText={(v) => { set('username')(v.replace(/\s/g, '')); setUserMsg(null); }} onBlur={checkUser} placeholder="e.g. ravi.counter" autoCapitalize="none" autoComplete="off" />
           {userMsg ? <Text style={{ fontSize: 11.5, marginTop: 4, fontWeight: '600', color: userMsg.ok ? '#059669' : '#dc2626' }}>{userMsg.ok ? '✓ ' : '✗ '}{userMsg.text}</Text> : null}
         </View>
         <View>
           <Text style={sharedStyles.label}>{isEdit ? 'NEW PASSWORD (LEAVE EMPTY TO KEEP)' : 'PASSWORD'}</Text>
-          <TextInput style={sharedStyles.input} value={f.password} onChangeText={set('password')} placeholder={isEdit ? '••••••' : 'At least 6 characters'} secureTextEntry autoCapitalize="none" />
+          <PasswordInput
+            value={f.password}
+            onChangeText={set('password')}
+            placeholder={isEdit ? 'Type a new password only to change it' : 'At least 6 characters'}
+          />
+          {isEdit ? <Text style={s.hint}>The current password is never shown. Leave this empty to keep it.</Text> : null}
         </View>
         <View style={{ flexDirection: 'row', gap: 8 }}>
           {['active', 'disabled'].map((st) => (
@@ -298,7 +303,7 @@ const StaffModal = ({ visible, staff, roles, onClose, onSaved }) => {
 export const StaffScreen = ({ user, refreshSignal }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
-  const [tab, setTab] = useState('staff');
+  const [tab, setTab] = useState(() => (can(user, 'staff.users', 'view') ? 'staff' : 'roles'));
   const [staff, setStaff] = useState([]);
   const [roleOpts, setRoleOpts] = useState([]);
   const [roleData, setRoleData] = useState(null); // { catalog, roles, my_permissions }
@@ -309,20 +314,27 @@ export const StaffScreen = ({ user, refreshSignal }) => {
   const [confirm, setConfirm] = useState(null); // { kind, item }
   const [busy, setBusy] = useState(false);
 
-  const mayAdd = can(user, 'staff.manage', 'add');
-  const mayEdit = can(user, 'staff.manage', 'edit');
-  const mayDelete = can(user, 'staff.manage', 'delete');
+  // staff logins and roles are separate permissions
+  const mayAdd = can(user, 'staff.users', 'add');
+  const mayEdit = can(user, 'staff.users', 'edit');
+  const mayDelete = can(user, 'staff.users', 'delete');
+  const mayRoleAdd = can(user, 'staff.roles', 'add');
+  const mayRoleEdit = can(user, 'staff.roles', 'edit');
+  const mayRoleDelete = can(user, 'staff.roles', 'delete');
+  const maySeeRoles = can(user, 'staff.roles', 'view');
+  const maySeeStaff = can(user, 'staff.users', 'view');
 
   const load = useCallback(async () => {
     setLoading(true);
-    const [a, b] = await Promise.all([OneBssApi.getStaff(), OneBssApi.getStaffRoles()]);
+    const noStaff = { ok: true, data: { staff: [], roles: [] } };
+    const [a, b] = await Promise.all([maySeeStaff ? OneBssApi.getStaff() : Promise.resolve(noStaff), OneBssApi.getStaffRoles()]);
     setLoading(false);
     if (!a.ok || !b.ok) { setError((!a.ok ? a : b).data?.message || 'Could not load staff'); return; }
     setError('');
     setStaff(a.data.staff || []);
     setRoleOpts(a.data.roles || []);
     setRoleData(b.data);
-  }, []);
+  }, [maySeeStaff]);
   useEffect(() => { load(); }, [load, refreshSignal]);
 
   const doDelete = async () => {
@@ -355,10 +367,10 @@ export const StaffScreen = ({ user, refreshSignal }) => {
     <ScrollView style={{ flex: 1, backgroundColor: '#f8fafc' }} contentContainerStyle={{ padding: isMobile ? 12 : 24, gap: 14 }}>
       <View style={s.topBar}>
         <View style={{ flexDirection: 'row', gap: 6, flexWrap: 'wrap' }}>
-          {tabBtn('staff', 'Staff', 'users', staff.length)}
-          {tabBtn('roles', 'Roles', 'shield', roleData?.roles?.length || 0)}
+          {maySeeStaff ? tabBtn('staff', 'Staff', 'users', staff.length) : null}
+          {maySeeRoles ? tabBtn('roles', 'Roles', 'shield', roleData?.roles?.length || 0) : null}
         </View>
-        {mayAdd ? (
+        {(tab === 'staff' ? mayAdd : mayRoleAdd) ? (
           <Btn
             label={tab === 'staff' ? 'Add Staff' : 'New Role'}
             icon="plus"
@@ -438,8 +450,8 @@ export const StaffScreen = ({ user, refreshSignal }) => {
                   <View style={s.roleFoot}>
                     <Text style={s.sub}>{r.staff_count} staff · {permCount(r.permissions)} permissions</Text>
                     <View style={{ flexDirection: 'row', gap: 6 }}>
-                      {mayEdit && !r.is_mine ? <Btn label="Permissions" icon="sliders" kind="ghost" onPress={() => setEditRole(r)} /> : null}
-                      {mayDelete && !r.is_mine ? <TouchableOpacity style={s.iconBtn} onPress={() => setConfirm({ kind: 'role', item: r })}><Feather name="trash-2" size={14} color="#dc2626" /></TouchableOpacity> : null}
+                      {mayRoleEdit && !r.is_mine ? <Btn label="Permissions" icon="sliders" kind="ghost" onPress={() => setEditRole(r)} /> : null}
+                      {mayRoleDelete && !r.is_mine ? <TouchableOpacity style={s.iconBtn} onPress={() => setConfirm({ kind: 'role', item: r })}><Feather name="trash-2" size={14} color="#dc2626" /></TouchableOpacity> : null}
                     </View>
                   </View>
                 </View>
@@ -488,7 +500,47 @@ export const StaffScreen = ({ user, refreshSignal }) => {
   );
 };
 
+/**
+ * Password box with a show / hide (eye) button. The placeholder disappears as soon as the box is
+ * focused, and the browser is told not to fill in a saved password (this is someone else's login).
+ */
+const PasswordInput = ({ value, onChangeText, placeholder }) => {
+  const [show, setShow] = useState(false);
+  const [focused, setFocused] = useState(false);
+  return (
+    <View style={[s.pwWrap, focused && s.pwWrapFocus]}>
+      <TextInput
+        style={s.pwInput}
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={focused ? '' : placeholder}
+        placeholderTextColor="#94a3b8"
+        secureTextEntry={!show}
+        autoCapitalize="none"
+        autoCorrect={false}
+        autoComplete="new-password"
+        textContentType="newPassword"
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+      />
+      <TouchableOpacity
+        onPress={() => setShow((v) => !v)}
+        style={s.pwEye}
+        accessibilityLabel={show ? 'Hide password' : 'Show password'}
+        title={show ? 'Hide password' : 'Show password'}
+      >
+        <Feather name={show ? 'eye-off' : 'eye'} size={16} color="#64748b" />
+      </TouchableOpacity>
+    </View>
+  );
+};
+
 const s = StyleSheet.create({
+  pwWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)', borderRadius: 8, backgroundColor: '#ffffff', height: 40, paddingLeft: 12 },
+  pwWrapFocus: { borderColor: '#10b981' },
+  pwInput: { flex: 1, minWidth: 0, height: '100%', fontSize: 13, color: '#0f172a', outlineStyle: 'none' },
+  pwEye: { width: 40, height: '100%', alignItems: 'center', justifyContent: 'center' },
+  hint: { fontSize: 11, color: '#64748b', marginTop: 4 },
   topBar: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, flexWrap: 'wrap' },
   tab: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e2e8f0' },
   tabOn: { backgroundColor: '#ecfdf5', borderColor: '#a7f3d0' },

@@ -427,6 +427,10 @@ export const OneBssApi = {
   fetchInternetPartners: async (internetToken, internetBaseUrl) =>
     post('/internet_partners_fetch.php', { internet_token: internetToken, internet_base_url: internetBaseUrl }),
 
+  // IPTV (Pioneer) company + its operators for an IPTV key — fills the Add Operator form's IPTV OPERATOR ID list
+  getIptvCompanyInfo: async (iptvBaseUrl, iptvKey) =>
+    post('/iptv_company_info.php', { iptv_base_url: iptvBaseUrl || '', iptv_key: iptvKey }),
+
   fetchInternetBranches: async (internetToken, internetBaseUrl, partnerId) =>
     post('/internet_branches_fetch.php', {
       internet_token: internetToken,
@@ -714,12 +718,14 @@ export const OneBssApi = {
   // 409 in progress, 429 rate limit, 502 gateway failure + refund) come back as-is.
   // clientRef: one id per attempt (newClientRef()). The server never charges the same ref
   // twice, and getRechargeStatus() can find out what happened if the response is lost.
-  rechargeInternetAccount: async (internetId, packageId, subPlanId, clientRef) =>
+  // opts.bulk: part of a Bulk renew (a staff role needs "Bulk renew" for it)
+  rechargeInternetAccount: async (internetId, packageId, subPlanId, clientRef, opts = {}) =>
     post('/internet_recharge.php', {
       internet_id: toNum(internetId),
       package_id: toNum(packageId),
       sub_plan_id: toNum(subPlanId),
       ...(clientRef ? { client_ref: clientRef } : {}),
+      ...(opts.bulk ? { bulk: true } : {}),
     }),
 
   // subPlanIds: exactly one DPO + any Broadcaster / A-la-carte sub_plan_ids.
@@ -1021,7 +1027,42 @@ export const OneBssApi = {
     const s = qs.toString();
     return get(`/pg/razorpay/razorpay_payments.php${s ? `?${s}` : ''}`);
   },
+  // Provider wallet sync (super admin): separate Internet / IPTV wallet money copied to the RADIUS /
+  // IPTV provider wallets. params: { status: open|failed|pending|success|resolved|all, partner_id, q, page, limit }
+  getProviderWalletSync: async (params = {}) => {
+    const qs = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') qs.set(k, String(v));
+    });
+    const s = qs.toString();
+    return get(`/wallet_provider_sync.php${s ? `?${s}` : ''}`);
+  },
+  retryProviderWalletSync: async (id) => post('/wallet_provider_sync.php', { action: 'retry', id: toNum(id) }),
+  resolveProviderWalletSync: async (id, note) => post('/wallet_provider_sync.php', { action: 'resolve', id: toNum(id), note }),
+
   razorpayRecheck: async (txnid) => post('/pg/razorpay/razorpay_payments.php', { action: 'recheck', txnid }),
+
+  // ------------------------------------------------------------------
+  // HDFC SmartGateway wallet top-up (pg/hdfc/).
+  // ------------------------------------------------------------------
+  hdfcInitiate: async (amount, remark = '', walletType = '') => {
+    const amt = Number(amount);
+    if (!(amt > 0)) return clientError('Enter an amount greater than 0.');
+    return post('/pg/hdfc_initiate.php', { amount: amt, remark: String(remark || '').trim(), ...(walletType ? { wallet_type: walletType } : {}) });
+  },
+  /** One payment; check=true asks HDFC now if it isn't final yet (and credits once if paid). */
+  hdfcPayment: async (txnid, check = true) =>
+    get(`/pg/hdfc_payments.php?txnid=${q(txnid)}${check ? '&check=1' : ''}`),
+  hdfcPayments: async (params = {}) => {
+    const qs = new URLSearchParams();
+    if (params.status) qs.set('status', params.status);
+    if (params.q) qs.set('q', params.q);
+    if (params.page) qs.set('page', params.page);
+    if (params.limit) qs.set('limit', params.limit);
+    const s = qs.toString();
+    return get(`/pg/hdfc_payments.php${s ? `?${s}` : ''}`);
+  },
+  hdfcRecheck: async (txnid) => post('/pg/hdfc_payments.php', { action: 'recheck', txnid }),
   getInventoryVendorsAndModels: async () => get('/inventory/get_vendors_models.php'),
 
   // Master stock (super admin): catalog products -> vendors -> models, the office staff who receive

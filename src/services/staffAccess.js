@@ -23,17 +23,17 @@ const TAB_NEEDS = {
   subscribers: [['internet.customers', 'view'], ['iptv.customers', 'view'], ['ott.customers', 'view']], // the sidebar group
   iptv_customers: [['iptv.customers', 'view']],
   ott_customers: [['ott.customers', 'view']],
-  partners: [['partners.list', 'view'], ['partners.wallet', 'allow'], ['partners.plans', 'allow']],
+  partners: [['partners.list', 'view'], ['partners.wallet_credit', 'allow'], ['partners.wallet_debit', 'allow'], ['partners.wallet_type', 'allow'], ['partners.plans', 'allow'], ['partners.branches', 'allow'], ['partners.kyc', 'allow'], ['partners.gateways', 'allow']],
   customer_prices: [['prices.customer', 'view']],
-  inventory: [['inventory.devices', 'view']],
+  inventory: [['inventory.devices', 'view'], ['inventory.inward', 'view'], ['inventory.catalog', 'view']],
   wallet: [['wallet.view', 'allow']],
-  networking: [['networking.nas', 'view']],
+  networking: [['networking.nas', 'view'], ['networking.ip_pools', 'view']],
   nas: [['networking.nas', 'view']],
-  ip_pools: [['networking.nas', 'view']],
+  ip_pools: [['networking.ip_pools', 'view']],
   dhcp_devices: [['networking.dhcp', 'view']],
   iptv_renewals: [['iptv.renewals', 'view']],
-  payu_payments: [['payments.online', 'view']],
-  staff: [['staff.manage', 'view']],
+  payu_payments: [['payments.online', 'view'], ['partners.provider_sync', 'view']],
+  staff: [['staff.users', 'view'], ['staff.roles', 'view']],
 };
 
 export const tabAllowed = (user, tab) => {

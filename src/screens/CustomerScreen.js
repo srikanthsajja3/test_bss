@@ -2142,9 +2142,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         syncState={syncState[String(activeCustomerId)]}
         onRefresh={() => syncAllAccountsOf(activeCustomerId)}
         // a staff role without a permission gets no handler = no button (staffAccess.js)
-        onInternetRecharge={can(user, 'internet.recharge') ? openInternetRecharge : null}
+        onInternetRecharge={canAny(user, [['internet.recharge'], ['internet.advance_renewal']]) ? openInternetRecharge : null}
         onIptvRecharge={can(user, 'iptv.recharge') ? openIptvRecharge : null}
-        onRecheck={canAny(user, [['internet.recharge'], ['iptv.recharge'], ['ott.recharge'], ['combo.recharge']]) ? (acc) => runRecheck(acc, acc.internet_id ? 'internet' : acc.subscriber_id ? 'ott' : 'iptv') : null}
+        onRecheck={canAny(user, [['internet.recharge'], ['internet.advance_renewal'], ['internet.bulk_renew'], ['iptv.recharge'], ['ott.recharge'], ['combo.recharge']]) ? (acc) => runRecheck(acc, acc.internet_id ? 'internet' : acc.subscriber_id ? 'ott' : 'iptv') : null}
         onOttRecharge={can(user, 'ott.recharge') ? openOttRecharge : null}
         onOttDeactivate={can(user, 'ott.deactivate') ? deactivateOtt : null}
         onAddOtt={can(user, 'ott.customers', 'add') ? (c) => setAddOttFor(c) : null}
@@ -2206,8 +2206,10 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       ...(canSeeDocuments ? [{ id: 'documents', label: 'Documents', short: 'Docs', icon: 'file-text' }] : []),
     ].filter((t) => ( // staff: only the tabs its role allows
       t.id === 'password' ? can(user, 'internet.password', 'view')
-        : t.id === 'mac' ? can(user, 'internet.networking', 'view')
-          : t.id === 'sessions' || t.id === 'auth' ? can(user, 'internet.sessions')
+        : t.id === 'mac' ? canAny(user, [['internet.mac_binding', 'view'], ['internet.ip_binding', 'view']])
+          : t.id === 'sessions' ? can(user, 'internet.session_history')
+          : t.id === 'auth' ? can(user, 'internet.auth_logs')
+          : t.id === 'online' ? can(user, 'internet.live_session')
             : t.id === 'onu' ? canAny(user, [['networking.olt', 'view'], ['internet.customers', 'view']])
               : true
     ));
@@ -2323,7 +2325,12 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                     On combo "{currentInternetAccount.combo_lock.combo_name}" till {formatApiDate(currentInternetAccount.combo_lock.until, false)}. Use Combo recharge.
                   </Text>
                 </View>
-              ) : !(currentInternetAccount?.open_recharge ? canAny(user, [['internet.recharge'], ['combo.recharge']]) : can(user, 'internet.recharge')) ? null : (
+              ) : !(
+                // staff: an active account needs "Advance renewal", an expired / new one "Recharge"
+                currentInternetAccount?.open_recharge
+                  ? canAny(user, [['internet.recharge'], ['internet.advance_renewal'], ['combo.recharge']])
+                  : can(user, currentInternetAccount && defaultRechargeType({ expiration: currentInternetAccount.expiration }) === 'advance' ? 'internet.advance_renewal' : 'internet.recharge')
+              ) ? null : (
                 <TouchableOpacity
                   style={[{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f97316', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }, !currentInternetAccount && { opacity: 0.5 }]}
                   onPress={() => currentInternetAccount && openInternetRecharge(currentInternetAccount, defaultRechargeType({ expiration: currentInternetAccount.expiration }) === 'advance')}
@@ -2853,7 +2860,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             onDone={() => loadCustomerDataFromApi()}
           />
 
-          {viewMode !== 'iptv' && canAny(user, [['internet.bulk'], ['internet.recharge']]) ? (
+          {viewMode !== 'iptv' && canAny(user, [['internet.bulk_renew'], ['internet.migrate']]) ? (
             <TouchableOpacity
               style={[styles.addCustomerHeaderBtn, { backgroundColor: '#1d4ed8' }, !bulkRows.length && { opacity: 0.6 }]}
               onPress={() => (bulkRows.length ? setBulkMenu(true) : toast.info('Tick the customers first (the box at the start of each row).'))}
@@ -2871,7 +2878,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           <BulkOperationsMenu
             visible={bulkMenu}
             count={bulkRows.length}
-            canMigrate={isSuperAdmin(user)}
+            canMigrate={isSuperAdmin(user) && can(user, 'internet.migrate')}
+            canRenew={can(user, 'internet.bulk_renew')}
             onClose={() => setBulkMenu(false)}
             onPick={(k) => { setBulkMenu(false); setBulkOp(k); }}
           />

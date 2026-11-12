@@ -66,7 +66,8 @@ import { CreateAccountModal } from '../components/CreateAccountModal';
 import { PartnerMoveModal } from '../components/partners/PartnerMoveModal';
 import { RadiusBranchesModal, radiusBranchCount } from '../components/partners/RadiusBranchesModal';
 import { PgGatewaysModal, pgGatewaysHint } from '../components/partners/PgGatewaysModal';
-import { can } from '../services/staffAccess';
+import { ProviderWalletSyncPanel } from '../components/ProviderWalletSyncPanel';
+import { can, canAny } from '../services/staffAccess';
 import { SearchSelect } from '../components/internet/shared';
 import { toast } from 'react-toastify';
 
@@ -147,6 +148,7 @@ const flattenComboOptions = (options) => {
 export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRoleFilter, refreshSignal = 0 }) => {
   const [detailReloadKey, setDetailReloadKey] = useState(0);
   const isSuperAdminUser = String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'superadmin';
+  const [walletSyncSignal, setWalletSyncSignal] = useState(0);
   const isAdminUser = String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'admin';
   // Admins (super distributor / distributor / sub distributor) are VIEW-ONLY: no add, edit,
   // wallet change, plan change or recharge. The backend refuses it too (auth_middleware.php).
@@ -156,8 +158,16 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   // staff login: what its role allows on this page (a partner login: everything)
   const pAdd = can(user, 'partners.list', 'add');
   const pEdit = can(user, 'partners.list', 'edit');
-  const pWallet = can(user, 'partners.wallet');
-  const pPlans = can(user, 'partners.plans');
+  const pWalletCredit = can(user, 'partners.wallet_credit');
+  const pWalletDebit = can(user, 'partners.wallet_debit');
+  const pWallet = pWalletCredit || pWalletDebit;
+  const pWalletType = can(user, 'partners.wallet_type');
+  const pPlans = canAny(user, [['partners.plans'], ['partners.branches'], ['partners.kyc'], ['partners.gateways']]);
+  const pPlanMap = can(user, 'partners.plans');
+  const pBranches = can(user, 'partners.branches');
+  const pKyc = can(user, 'partners.kyc');
+  const pGateways = can(user, 'partners.gateways');
+  const pChangeRole = can(user, 'partners.change_role');
   const pPass = can(user, 'partners.password');
   const pMove = can(user, 'partners.move');
   // Admin page: the partners that admin created (same table as the main page)
@@ -732,7 +742,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   const handleOpenWallet = async (partner, initialAction = 'credit') => {
     if (!partner) return;
     setWalletPartner(partner);
-    setWalletAction(initialAction);
+    // staff with only one of credit / debit start on the one they have
+    setWalletAction(initialAction === 'credit' && !pWalletCredit && pWalletDebit ? 'debit' : initialAction === 'debit' && !pWalletDebit ? 'credit' : initialAction);
     if (!selectedPartner || String(selectedPartner.partner_id) === String(partner.partner_id || partner.id)) {
       setSelectedPartner(partner);
     }
@@ -860,11 +871,16 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       };
       setWalletTransactions((prev) => [newTxn, ...(Array.isArray(prev) ? prev : [])]);
 
-      if (isDebit) {
-        toast.success(`₹${amountNum.toLocaleString('en-IN')} debited from Partner #${walletPartner.partner_id} wallet!`);
+      const ps = data.provider_sync; // separate Internet / IPTV wallet: copied to the provider's wallet
+      if (ps && ps.status !== 'success') {
+        toast.warn(`₹${amountNum.toLocaleString('en-IN')} ${isDebit ? 'debited from' : 'credited to'} the OneBSS wallet.`);
+        toast.error(ps.message || 'The provider wallet was not updated — retry it below.', { autoClose: 12000 });
+      } else if (isDebit) {
+        toast.success(`₹${amountNum.toLocaleString('en-IN')} debited from Partner #${walletPartner.partner_id} wallet!${ps ? ' Provider wallet updated.' : ''}`);
       } else {
         toast.success(data.message || `₹${amountNum.toLocaleString('en-IN')} credited to Partner #${walletPartner.partner_id} wallet!`);
       }
+      if (ps) setWalletSyncSignal((n) => n + 1);
 
       try {
         const walletRes = await OneBssApi.getWallet(walletPartner.partner_id);
@@ -2875,7 +2891,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                     {walletPartner.wallet_mode === 'split' ? 'Each recharge is paid from the wallet of its service (combo: internet part from Internet, IPTV part from IPTV).' : 'Internet, IPTV and OTT recharges are all paid from this one wallet.'}
                   </Text>
                 </View>
-                {!readOnly ? (
+                {!readOnly && pWalletType ? (
                   <TouchableOpacity
                     style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#cbd5e1', opacity: walletModeBusy ? 0.5 : 1 }}
                     onPress={() => handleChangeWalletMode(walletPartner.wallet_mode === 'split' ? 'single' : 'split')}
@@ -2906,8 +2922,13 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
               ) : null}
             </View>
 
+            {/* separate wallets: transfers to the RADIUS / IPTV provider wallets that still need a retry */}
+            {isSuperAdminUser ? (
+              <ProviderWalletSyncPanel partnerId={walletPartner.partner_id} refreshSignal={walletSyncSignal} />
+            ) : null}
+
             {/* Topup / Debit Form (super admin only — admins see the history) */}
-            {!readOnly ? (
+            {!readOnly && pWallet ? (
             <View style={styles.topupFormContainer}>
               <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
                 <Text style={{ fontSize: 15, fontWeight: '700', color: COLORS.textMain }}>
@@ -2921,7 +2942,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                     style={[
                       { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
                       walletAction === 'credit' && { backgroundColor: '#10b981' },
+                      !pWalletCredit && { opacity: 0.35 },
                     ]}
+                    disabled={!pWalletCredit}
                     onPress={() => setWalletAction('credit')}
                   >
                     <Text style={{ fontSize: 12, fontWeight: '700', color: walletAction === 'credit' ? '#ffffff' : COLORS.textMuted }}>
@@ -2933,7 +2956,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                     style={[
                       { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
                       walletAction === 'debit' && { backgroundColor: '#ef4444' },
+                      !pWalletDebit && { opacity: 0.35 },
                     ]}
+                    disabled={!pWalletDebit}
                     onPress={() => setWalletAction('debit')}
                   >
                     <Text style={{ fontSize: 12, fontWeight: '700', color: walletAction === 'debit' ? '#ffffff' : COLORS.textMuted }}>
@@ -3689,12 +3714,16 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
                   {!readOnly && pWallet ? (
                     <>
-                      <TouchableOpacity style={[styles.pdMini, { backgroundColor: '#10b981' }]} onPress={() => handleOpenWallet(p, 'credit')}>
-                        <Feather name="plus" size={12} color="#fff" /><Text style={styles.pdMiniText}>Add</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity style={[styles.pdMini, { backgroundColor: '#ef4444' }]} onPress={() => handleOpenWallet(p, 'debit')}>
-                        <Feather name="minus" size={12} color="#fff" /><Text style={styles.pdMiniText}>Deduct</Text>
-                      </TouchableOpacity>
+                      {pWalletCredit ? (
+                        <TouchableOpacity style={[styles.pdMini, { backgroundColor: '#10b981' }]} onPress={() => handleOpenWallet(p, 'credit')}>
+                          <Feather name="plus" size={12} color="#fff" /><Text style={styles.pdMiniText}>Add</Text>
+                        </TouchableOpacity>
+                      ) : null}
+                      {pWalletDebit ? (
+                        <TouchableOpacity style={[styles.pdMini, { backgroundColor: '#ef4444' }]} onPress={() => handleOpenWallet(p, 'debit')}>
+                          <Feather name="minus" size={12} color="#fff" /><Text style={styles.pdMiniText}>Deduct</Text>
+                        </TouchableOpacity>
+                      ) : null}
                     </>
                   ) : null}
                   <TouchableOpacity style={[styles.pdMini, { backgroundColor: '#475569' }]} onPress={() => handleOpenWallet(p, 'credit')}>
@@ -3713,7 +3742,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                   <ActionBtn icon="user-plus" label={`Add ${Number(p.admin_level) === 1 ? 'Distributor' : 'Sub Distributor'} under`} color="#7c3aed" onPress={() => handleOpenCreate('admin', pid)} />
                 ) : null}
                 {!readOnly && pAdd && !isOperatorPartner ? <ActionBtn icon="user-plus" label="Add Operator under" color="#059669" onPress={() => handleOpenCreate('operator', pid)} /> : null}
-                {!readOnly && pMove && !isOperatorPartner ? <ActionBtn icon="award" label="Change Role" color="#7c3aed" onPress={() => setMoveReq({ partner: p, mode: 'role' })} /> : null}
+                {!readOnly && pChangeRole && !isOperatorPartner ? <ActionBtn icon="award" label="Change Role" color="#7c3aed" onPress={() => setMoveReq({ partner: p, mode: 'role' })} /> : null}
                 {!readOnly && pMove ? (
                   <ActionBtn icon="git-branch" label={isOperatorPartner ? 'Change Distributor' : 'Move Under'} color="#0f766e" onPress={() => setMoveReq({ partner: p, mode: 'move' })} />
                 ) : null}
@@ -3775,16 +3804,17 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 ) : (
                 <View style={styles.pdTileGrid}>
                   {[
-                    { icon: 'wifi', label: 'Internet Plans', hint: 'Map plans & prices', color: '#0284c7', onPress: () => handleOpenInternetPlans(p) },
-                    { icon: 'git-branch', label: 'RADIUS Branches', hint: radiusBranchCount(p) ? `${radiusBranchCount(p)} branch(es) · choose which ones` : 'Not set', color: '#0369a1', onPress: () => setRadiusBranchPartner(p) },
-                    { icon: 'tv', label: 'IPTV Plans', hint: 'Map packs & prices', color: '#7c3aed', onPress: () => handleOpenIptvPlans(p) },
-                    { icon: 'layers', label: 'Combo Plans', hint: 'Internet + IPTV bundles', color: '#db2777', onPress: () => handleOpenComboPlans(p) },
-                    { icon: 'play-circle', label: 'OTT Plans', hint: p.ott_franchise_id ? `Franchise ${p.ott_franchise_id}` : 'Set the OTT franchise id', color: '#0ea5e9', onPress: () => setOttPlansPartner(p) },
-                    { icon: 'tag', label: 'Customer Prices', hint: 'Operator\'s price for its customers', color: '#059669', onPress: () => setCustomerPricesPartner(p) },
-                    { icon: 'git-branch', label: 'IPTV Branches', hint: 'Pioneer branch mapping', color: '#0891b2', onPress: () => handleOpenAssignBranches(p) },
-                    { icon: 'shield', label: 'KYC Providers', hint: 'DigiLocker / ScoreMe / manual', color: '#9333ea', onPress: () => handleOpenKycProviders(p) },
-                    { icon: 'credit-card', label: 'Payment Gateways', hint: pgGatewaysHint(p), color: '#0284c7', onPress: () => setPgGatewaysPartner(p) },
-                  ].map((t) => (
+                    // staff: each tile has its own permission
+                    { show: pPlanMap, icon: 'wifi', label: 'Internet Plans', hint: 'Map plans & prices', color: '#0284c7', onPress: () => handleOpenInternetPlans(p) },
+                    { show: pBranches, icon: 'git-branch', label: 'RADIUS Branches', hint: radiusBranchCount(p) ? `${radiusBranchCount(p)} branch(es) · choose which ones` : 'Not set', color: '#0369a1', onPress: () => setRadiusBranchPartner(p) },
+                    { show: pPlanMap, icon: 'tv', label: 'IPTV Plans', hint: 'Map packs & prices', color: '#7c3aed', onPress: () => handleOpenIptvPlans(p) },
+                    { show: can(user, 'combo.plans', 'view'), icon: 'layers', label: 'Combo Plans', hint: 'Internet + IPTV bundles', color: '#db2777', onPress: () => handleOpenComboPlans(p) },
+                    { show: pPlanMap, icon: 'play-circle', label: 'OTT Plans', hint: p.ott_franchise_id ? `Franchise ${p.ott_franchise_id}` : 'Set the OTT franchise id', color: '#0ea5e9', onPress: () => setOttPlansPartner(p) },
+                    { show: pPlanMap, icon: 'tag', label: 'Customer Prices', hint: 'Operator\'s price for its customers', color: '#059669', onPress: () => setCustomerPricesPartner(p) },
+                    { show: pBranches, icon: 'git-branch', label: 'IPTV Branches', hint: 'Pioneer branch mapping', color: '#0891b2', onPress: () => handleOpenAssignBranches(p) },
+                    { show: pKyc, icon: 'shield', label: 'KYC Providers', hint: 'DigiLocker / ScoreMe / manual', color: '#9333ea', onPress: () => handleOpenKycProviders(p) },
+                    { show: pGateways, icon: 'credit-card', label: 'Payment Gateways', hint: pgGatewaysHint(p), color: '#0284c7', onPress: () => setPgGatewaysPartner(p) },
+                  ].filter((t) => t.show).map((t) => (
                     <TouchableOpacity key={t.label} style={styles.pdTile} onPress={t.onPress}>
                       <View style={[styles.pdTileIcon, { backgroundColor: `${t.color}18` }]}><Feather name={t.icon} size={16} color={t.color} /></View>
                       <View style={{ flex: 1, minWidth: 0 }}>
@@ -3794,7 +3824,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                       <Feather name="chevron-right" size={16} color="#94a3b8" />
                     </TouchableOpacity>
                   ))}
-                  <AadhaarForRechargeTile partner={p} onChanged={(v) => setSelectedPartner((prev) => (prev ? { ...prev, aadhaar_required_for_recharge: v } : prev))} />
+                  {pKyc ? <AadhaarForRechargeTile partner={p} onChanged={(v) => setSelectedPartner((prev) => (prev ? { ...prev, aadhaar_required_for_recharge: v } : prev))} /> : null}
                 </View>
                 )}
               </View>

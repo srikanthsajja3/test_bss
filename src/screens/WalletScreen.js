@@ -5,6 +5,7 @@ import { toast } from 'react-toastify';
 import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 import { redirectToPayU, rememberPendingPayU, forgetPendingPayU, waitForPayUResult, payuErrorText } from '../services/payuService';
+import { redirectToHdfc, rememberPendingHdfc, forgetPendingHdfc, waitForHdfcResult, hdfcErrorText } from '../services/hdfcService';
 import {
   openRazorpayCheckout,
   rememberPendingRazorpay,
@@ -37,7 +38,7 @@ const WALLET_TONE = {
 const GW_META = {
   razorpay: { label: 'Razorpay', sub: 'UPI, Cards, Netbanking', icon: 'shield', color: BLUE, bg: '#f0f9ff' },
   payu: { label: 'PayU', sub: 'Hosted Checkout', icon: 'credit-card', color: GREEN, bg: '#ecfdf5' },
-  hdfc: { label: 'HDFC', sub: 'Coming soon', icon: 'briefcase', color: '#1e3a8a', bg: '#eef2ff' },
+  hdfc: { label: 'HDFC SmartGateway', sub: 'Cards, UPI, Netbanking', icon: 'shield', color: '#1d4ed8', bg: '#eff6ff' },
 };
 
 const money = (v) => `₹${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -58,6 +59,7 @@ const describe = (t) => {
   const remark = String(t.Remark || '').trim();
   if (/^Razorpay top-up/i.test(remark)) return { title: 'Added via Razorpay', detail: remark.replace(/^Razorpay top-up\s*/i, '') };
   if (/^PayU top-up/i.test(remark)) return { title: 'Added via PayU', detail: remark.replace(/^PayU top-up\s*/i, '') };
+  if (/^HDFC top-up/i.test(remark)) return { title: 'Added via HDFC', detail: remark.replace(/^HDFC top-up\s*/i, '') };
   if (t.recharge_id) return { title: remark || 'Recharge', detail: `Recharge #${t.recharge_id}` };
   if (t.txn_type === 'credit') return { title: remark || 'Money added', detail: t.created_by_username ? `By ${t.created_by_username}` : '' };
   return { title: remark || 'Deducted', detail: t.created_by_username ? `By ${t.created_by_username}` : '' };
@@ -129,6 +131,8 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, resumeGa
       res = await OneBssApi.getWalletHistory(partnerId, { page, limit: PAGE_SIZE, type, q: query, walletType: walletFilter });
     } else if (onlineGateway === 'razorpay') {
       res = await OneBssApi.razorpayPayments({ page, limit: PAGE_SIZE, q: query });
+    } else if (onlineGateway === 'hdfc') {
+      res = await OneBssApi.hdfcPayments({ page, limit: PAGE_SIZE, q: query });
     } else {
       res = await OneBssApi.payuPayments({ page, limit: PAGE_SIZE, q: query });
     }
@@ -165,10 +169,18 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, resumeGa
   // ---- result of a payment we came back from ----
   const check = useCallback(async (txnid, explicitGw = null, payData = null) => {
     setResult({ phase: 'checking', txnid });
-    const isRzp = explicitGw === 'razorpay' || (!explicitGw && (resumeGateway === 'razorpay' || String(txnid).includes('R')));
-    const r = isRzp ? await waitForRazorpayResult(txnid, { payData }) : await waitForPayUResult(txnid);
-    if (isRzp) forgetPendingRazorpay();
-    else forgetPendingPayU();
+    const gw = explicitGw || resumeGateway || (String(txnid).startsWith('OBH') ? 'hdfc' : String(txnid).includes('R') ? 'razorpay' : 'payu');
+    let r;
+    if (gw === 'hdfc') {
+      r = await waitForHdfcResult(txnid);
+      forgetPendingHdfc();
+    } else if (gw === 'razorpay') {
+      r = await waitForRazorpayResult(txnid, { payData });
+      forgetPendingRazorpay();
+    } else {
+      r = await waitForPayUResult(txnid);
+      forgetPendingPayU();
+    }
     const status = r.payment?.status || 'unknown';
     if (status === 'success') {
       setResult(null);
@@ -177,7 +189,7 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, resumeGa
       if (onPaid) onPaid(r);
       return;
     }
-    setResult({ status, payment: r.payment, message: r.message, txnid });
+    setResult({ status, payment: r.payment, message: r.message, txnid, gateway: gw });
     loadHistory();
   }, [resumeGateway, onPaid, loadHistory]);
 
@@ -222,6 +234,19 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, resumeGa
     setResult(null);
     setPaying(true);
     const amtToPay = Math.round(amt * 100) / 100;
+
+    if (gateway === 'hdfc') {
+      const res = await OneBssApi.hdfcInitiate(amtToPay, remark, walletType);
+      if (!res.ok || !res.data?.payment_url) {
+        setPaying(false);
+        setFormError(hdfcErrorText(res, 'Could not start HDFC SmartGateway payment. Please try again.'));
+        return;
+      }
+      rememberPendingHdfc(res.data.txnid, res.data.amount);
+      lastTxn.current = res.data.txnid;
+      redirectToHdfc(res.data.payment_url);
+      return;
+    }
 
     if (gateway === 'razorpay') {
       const res = await OneBssApi.razorpayInitiate(amtToPay, remark, walletType);
@@ -275,12 +300,14 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, resumeGa
   // ---- result banner ----
   const banner = (() => {
     if (!result) return null;
-    const isRzp = result.txnid && (String(result.txnid).includes('R') || resumeGateway === 'razorpay');
-    const gwName = isRzp ? 'Razorpay' : 'PayU';
+    const isHdfc = result.gateway === 'hdfc' || resumeGateway === 'hdfc' || (result.txnid && String(result.txnid).startsWith('OBH'));
+    const isRzp = result.gateway === 'razorpay' || resumeGateway === 'razorpay' || (result.txnid && String(result.txnid).includes('R'));
+    const gwName = isHdfc ? 'HDFC SmartGateway' : isRzp ? 'Razorpay' : 'PayU';
+    const bannerColor = isHdfc ? '#1d4ed8' : isRzp ? BLUE : GREEN;
     if (result.phase === 'checking') {
       return (
         <View style={[s.banner, { backgroundColor: '#f8fafc', borderColor: '#e2e8f0' }]}>
-          <ActivityIndicator size="small" color={isRzp ? BLUE : GREEN} />
+          <ActivityIndicator size="small" color={bannerColor} />
           <Text style={[s.bannerTitle, { flex: 1 }]}>Checking your payment with {gwName}…</Text>
         </View>
       );
@@ -574,9 +601,10 @@ export const WalletScreen = ({ user, refreshSignal, resumeTxnid = null, resumeGa
                 {[
                   { id: 'razorpay', label: 'Razorpay' },
                   { id: 'payu', label: 'PayU' },
+                  { id: 'hdfc', label: 'HDFC' },
                 ].map((g) => (
                   <TouchableOpacity key={g.id} style={[s.segBtn, onlineGateway === g.id && s.segOn]} onPress={() => { setOnlineGateway(g.id); setPage(1); }}>
-                    <Text style={[s.segText, onlineGateway === g.id && { color: g.id === 'razorpay' ? BLUE : GREEN }]}>{g.label}</Text>
+                    <Text style={[s.segText, onlineGateway === g.id && { color: g.id === 'razorpay' ? BLUE : g.id === 'hdfc' ? '#1d4ed8' : GREEN }]}>{g.label}</Text>
                   </TouchableOpacity>
                 ))}
               </View>

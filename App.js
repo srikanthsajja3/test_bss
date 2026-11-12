@@ -147,7 +147,7 @@ function MainApp() {
   const [partnerCreateRole, setPartnerCreateRole] = useState(null);
   const [partnerInitialRole, setPartnerInitialRole] = useState('');
 
-  // Back from Razorpay or PayU checkout (sends the browser to #razorpay=<txnid> or #payu=<txnid>), or
+  // Back from HDFC, Razorpay or PayU checkout (sends the browser to #hdfc=<txnid>, #razorpay=<txnid> or #payu=<txnid>), or
   // the Wallet page reloaded right after leaving (browser Back): the Wallet page checks that
   // payment — success goes to the dashboard, anything else is shown on the Wallet page.
   const [onlineResume, setOnlineResume] = useState(() => {
@@ -157,17 +157,20 @@ function MainApp() {
       if (mRzp) return { txnid: mRzp[1], gateway: 'razorpay' };
       const mPayu = window.location.hash.match(/^#payu=([A-Za-z0-9]{6,40})/);
       if (mPayu) return { txnid: mPayu[1], gateway: 'payu' };
+      const mHdfc = window.location.hash.match(/^#hdfc=([A-Za-z0-9_-]{6,50})/);
+      if (mHdfc) return { txnid: mHdfc[1], gateway: 'hdfc' };
       if (/^#wallet/.test(window.location.hash)) {
-        const rawRzp = localStorage.getItem('onebss_pending_razorpay_txn');
-        const pendingRzp = rawRzp ? JSON.parse(rawRzp) : null;
-        if (pendingRzp?.txnid && Date.now() - Number(pendingRzp.at || 0) < 30 * 60 * 1000) {
-          return { txnid: pendingRzp.txnid, gateway: 'razorpay' };
-        }
-        const rawPayu = localStorage.getItem('onebss_pending_payu_txn');
-        const pendingPayu = rawPayu ? JSON.parse(rawPayu) : null;
-        if (pendingPayu?.txnid && Date.now() - Number(pendingPayu.at || 0) < 30 * 60 * 1000) {
-          return { txnid: pendingPayu.txnid, gateway: 'payu' };
-        }
+        // the most recent unfinished payment of the last 30 minutes, whichever gateway
+        let best = null;
+        [['razorpay', 'onebss_pending_razorpay_txn'], ['payu', 'onebss_pending_payu_txn'], ['hdfc', 'onebss_pending_hdfc_txn']].forEach(([gateway, key]) => {
+          try {
+            const raw = localStorage.getItem(key);
+            const p = raw ? JSON.parse(raw) : null;
+            const at = Number(p?.at || 0);
+            if (p?.txnid && Date.now() - at < 30 * 60 * 1000 && (!best || at > best.at)) best = { txnid: p.txnid, gateway, at };
+          } catch (e) {}
+        });
+        if (best) return { txnid: best.txnid, gateway: best.gateway };
       }
     } catch (e) {}
     return null;
@@ -549,7 +552,7 @@ function MainApp() {
       case 'iptv_renewals':
         return { title: 'IPTV Auto-Renewals' };
       case 'payu_payments':
-        return { title: 'Online Payments', subtitle: 'Operator wallet top-ups (Razorpay, PayU) and gateway settings' };
+        return { title: 'Online Payments', subtitle: 'Operator wallet top-ups (Razorpay, PayU, HDFC) and gateway settings' };
       case 'nas':
         return { title: 'NAS' };
       case 'ip_pools':

@@ -33,10 +33,10 @@ const chunk = (arr, n) => {
 // ---------------------------------------------------------------------------------------------
 // Menu
 // ---------------------------------------------------------------------------------------------
-export const BulkOperationsMenu = ({ visible, count, canMigrate, onClose, onPick }) => {
+export const BulkOperationsMenu = ({ visible, count, canMigrate, canRenew = true, onClose, onPick }) => {
   const { width } = useWindowDimensions();
   const ops = [
-    { key: 'recharge', label: 'Renew', icon: 'refresh-cw', sub: 'On the current plan' },
+    ...(canRenew ? [{ key: 'recharge', label: 'Renew', icon: 'refresh-cw', sub: 'On the current plan' }] : []),
     ...(canMigrate ? [{ key: 'migrate', label: 'Update Partner & Branch', icon: 'shuffle', sub: 'Move to another operator' }] : []),
   ];
   const cols = width < 560 ? 1 : 2;
@@ -297,7 +297,7 @@ export const BulkRechargeModal = ({ visible, rows = [], onClose, onDone }) => {
       setResults([...out]);
       let res;
       try {
-        res = await OneBssApi.rechargeInternetAccount(x.internet_id, x.package_id, x.sub_plan_id, newClientRef());
+        res = await OneBssApi.rechargeInternetAccount(x.internet_id, x.package_id, x.sub_plan_id, newClientRef(), { bulk: true });
       } catch (e) {
         res = { ok: false, status: 0, data: {} };
       }

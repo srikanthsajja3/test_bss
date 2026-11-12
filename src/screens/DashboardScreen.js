@@ -20,6 +20,14 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
   const [loading, setLoading] = useState(true);
   const [dateSummary, setDateSummary] = useState(null); // customers_by_date.php?summary=1
   const [dateSummaryError, setDateSummaryError] = useState('');
+  // super admin: transfers to the RADIUS / IPTV provider wallets that failed and need a retry
+  const [providerSyncOpen, setProviderSyncOpen] = useState(0);
+  useEffect(() => {
+    if (!isSuperAdmin) return;
+    OneBssApi.getProviderWalletSync({ status: 'open', limit: 5 }).then((r) => {
+      if (r.ok) setProviderSyncOpen(Number(r.data?.counts?.open || 0));
+    });
+  }, [isSuperAdmin, refreshSignal]);
   const [dashboardSearch, setDashboardSearch] = useState('');
   const [showAddCustomer, setShowAddCustomer] = useState(false); // operator: Add Customer from the dashboard
   const [partnerCounts, setPartnerCounts] = useState({ total: 0, admins: 0, operators: 0 });
@@ -246,6 +254,23 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
         { paddingHorizontal: isMobile ? 12 : 24, paddingVertical: isMobile ? 14 : 24, width: '100%' },
       ]}
     >
+      {isSuperAdmin && providerSyncOpen > 0 ? (
+        <TouchableOpacity
+          style={[styles.bgSyncBar, { backgroundColor: '#fef2f2', borderColor: '#fecaca' }]}
+          onPress={() => {
+            try {
+              if (Platform.OS === 'web' && typeof window !== 'undefined') window.location.hash = 'payu_payments?view=sync';
+            } catch (e) {}
+          }}
+        >
+          <Feather name="alert-triangle" size={14} color="#b91c1c" />
+          <Text style={[styles.bgSyncText, { color: '#991b1b' }]} numberOfLines={2}>
+            {providerSyncOpen} wallet transfer{providerSyncOpen === 1 ? '' : 's'} to the RADIUS / IPTV provider wallets failed — the OneBSS wallet changed but the provider's did not. Tap to retry.
+          </Text>
+          <Feather name="chevron-right" size={14} color="#b91c1c" />
+        </TouchableOpacity>
+      ) : null}
+
       {/* Background provider sync status (operators) */}
       {isOperator && bgSync.state !== 'idle' ? (
         <View style={[styles.bgSyncBar, bgSync.state === 'failed' && styles.bgSyncBarWarn]}>

@@ -74,6 +74,8 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
   // master stock (catalog, inward, add / edit devices) and assigning: super admin only; a super admin
   // staff member also needs the permission in their role (the server checks the same)
   const canManageInventory = isSuper && !isOperator && can(user, 'inventory.devices', 'add');
+  const canInward = isSuper && !isOperator && can(user, 'inventory.inward', 'view');
+  const canCatalog = isSuper && !isOperator && can(user, 'inventory.catalog', 'view');
   const canAssign = isSuper && !isOperator && can(user, 'inventory.assign');
   const canEditDevice = isSuper && !isOperator && can(user, 'inventory.devices', 'edit');
   const canDeleteDevice = isSuper && !isOperator && can(user, 'inventory.devices', 'delete');
@@ -655,7 +657,7 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
             </Text>
           </View>
 
-          {!isOperator && canManageInventory && (
+          {!isOperator && (canManageInventory || canInward || canCatalog) && (
             <View style={[styles.headerActions, isMobile && styles.headerActionsMobile]}>
               <TouchableOpacity
                 style={[styles.navTabBtn, inventoryTab === 'devices' && styles.navTabBtnActive]}
@@ -667,6 +669,7 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
                 </Text>
               </TouchableOpacity>
 
+              {canEditDevice ? (
               <TouchableOpacity
                 style={[styles.navTabBtn, inventoryTab === 'configured' && styles.navTabBtnActive]}
                 onPress={() => setInventoryTab('configured')}
@@ -676,7 +679,9 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
                   Configured Boxes
                 </Text>
               </TouchableOpacity>
+              ) : null}
 
+              {canInward ? (
               <TouchableOpacity
                 style={[styles.navTabBtn, inventoryTab === 'inward' && styles.navTabBtnActive]}
                 onPress={() => setInventoryTab('inward')}
@@ -686,7 +691,9 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
                   Inward Stock
                 </Text>
               </TouchableOpacity>
+              ) : null}
 
+              {canCatalog ? (
               <TouchableOpacity
                 style={[styles.navTabBtn, inventoryTab === 'catalog' && styles.navTabBtnActive]}
                 onPress={() => setInventoryTab('catalog')}
@@ -696,7 +703,9 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
                   Vendors & Models
                 </Text>
               </TouchableOpacity>
+              ) : null}
 
+              {canManageInventory ? (
               <TouchableOpacity
                 style={[styles.navTabBtn, inventoryTab === 'scanner' && styles.navTabBtnActive]}
                 onPress={() => setInventoryTab('scanner')}
@@ -706,7 +715,9 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
                   Bulk Scan
                 </Text>
               </TouchableOpacity>
+              ) : null}
 
+              {canManageInventory ? (
               <TouchableOpacity
                 style={[styles.navTabBtn, inventoryTab === 'add' && styles.navTabBtnActive]}
                 onPress={() => setInventoryTab('add')}
@@ -716,6 +727,7 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
                   Add Device
                 </Text>
               </TouchableOpacity>
+              ) : null}
             </View>
           )}
         </View>
