@@ -14,10 +14,13 @@
 // const DEFAULT_BASE_URL = 'https://demo.onebss.in/b_bss'; // 'https://crm.polfibernet.in/api';
 const getDefaultBaseUrl = () => {
   if (typeof window !== 'undefined' && window.location?.origin) {
+    if (window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')) {
+      return 'https://demo.onebss.in/b_bss';
+    }
     return `${window.location.origin}/api`;
   }
 
-  return '';
+  return 'https://demo.onebss.in/b_bss';
 };
 
 const DEFAULT_BASE_URL = getDefaultBaseUrl();
