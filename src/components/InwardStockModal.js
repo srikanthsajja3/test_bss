@@ -138,11 +138,19 @@ export const InwardStockModal = ({
 
   // Reliable focus keeper for barcode gun scanning (prevent focus loss on scan/enter)
   const refocusGunInput = useCallback(() => {
-    setTimeout(() => {
+    const applyFocus = () => {
       try {
+        if (Platform.OS === 'web' && typeof document !== 'undefined') {
+          const el = document.getElementById('inward-barcode-gun-input');
+          if (el) {
+            el.focus();
+            if (typeof el.select === 'function') el.select();
+            return;
+          }
+        }
         if (gunSerialRef.current) {
           gunSerialRef.current.focus?.();
-          const node = gunSerialRef.current?.node || gunSerialRef.current;
+          const node = gunSerialRef.current?.node || gunSerialRef.current?._node || gunSerialRef.current;
           if (node && typeof node.focus === 'function') {
             node.focus();
             if (typeof node.select === 'function') {
@@ -151,7 +159,15 @@ export const InwardStockModal = ({
           }
         }
       } catch (e) {}
-    }, 60);
+    };
+
+    applyFocus();
+    if (typeof requestAnimationFrame !== 'undefined') {
+      requestAnimationFrame(applyFocus);
+    }
+    setTimeout(applyFocus, 20);
+    setTimeout(applyFocus, 70);
+    setTimeout(applyFocus, 160);
   }, []);
 
   // Ensure gun input is focused on step 2, when holdingSerial changes, or queue changes
@@ -448,7 +464,7 @@ export const InwardStockModal = ({
 
     // STEP 2: When holding a serial and waiting for MAC
     if (holdingSerial) {
-      // Check if scanned input has MAC address properties
+      // Check if scanned input has valid MAC address properties (12 hex digits)
       if (isValidMacAddress(rawVal)) {
         const formattedMac = formatMacAddress(rawVal);
         const success = addDeviceToQueue(holdingSerial, formattedMac);
@@ -460,14 +476,24 @@ export const InwardStockModal = ({
         return;
       }
 
-      // If it's NOT a valid MAC address, the operator re-scanned the Serial number to replace it!
-      // (e.g. they realized the previous serial was wrong or mis-scanned)
-      const oldSerial = holdingSerial;
-      setHoldingSerial(rawVal.toUpperCase());
+      // Check if the user accidentally scanned the same serial number again
+      if (rawVal.toUpperCase() === holdingSerial.toUpperCase()) {
+        playScannerSound('error');
+        toast.warn(`"${rawVal.toUpperCase()}" is the Serial Number you just scanned. Now scan the 12-digit MAC address.`);
+        setGunSerialInput('');
+        refocusGunInput();
+        return;
+      }
+
+      // STRICT VALIDATION: MAC address MUST be 12 hexadecimal characters
+      const cleaned = cleanRawMac(rawVal);
+      const hexCount = cleaned.replace(/[^0-9A-Fa-f]/g, '').length;
+      playScannerSound('error');
+      toast.error(
+        `Invalid MAC address! MAC address must be exactly 12 hexadecimal characters (0-9, A-F). You entered "${rawVal}" (${hexCount} hex digit${hexCount === 1 ? '' : 's'}). Please scan a valid MAC.`
+      );
       setGunSerialInput('');
       refocusGunInput();
-      playScannerSound('success');
-      toast.info(`Serial replaced: Changed from "${oldSerial}" to "${rawVal.toUpperCase()}". Now scan MAC address.`);
       return;
     }
 
@@ -1279,23 +1305,35 @@ export const InwardStockModal = ({
                   <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                     <TextInput
                       ref={gunSerialRef}
+                      nativeID="inward-barcode-gun-input"
+                      id="inward-barcode-gun-input"
                       style={[styles.gunInput, holdingSerial && { borderColor: '#0284c7', backgroundColor: '#f0f9ff' }]}
                       placeholder={
                         holdingSerial
-                          ? `Scan MAC address for Serial: ${holdingSerial}...`
+                          ? `Scan 12-digit MAC address for Serial: ${holdingSerial}...`
                           : 'Point barcode gun and scan device Serial Number...'
                       }
                       placeholderTextColor="#94a3b8"
                       value={gunSerialInput}
                       onChangeText={setGunSerialInput}
                       onSubmitEditing={handleGunInputSubmit}
+                      onKeyPress={(e) => {
+                        if (e.nativeEvent?.key === 'Escape') {
+                          if (holdingSerial) {
+                            setHoldingSerial('');
+                            setGunSerialInput('');
+                            refocusGunInput();
+                            toast.info('Cancelled serial scan.');
+                          }
+                        }
+                      }}
                       blurOnSubmit={false}
                       selectTextOnFocus={true}
                       autoFocus={true}
                       autoCapitalize="characters"
                       onFocus={() => {
                         try {
-                          const node = gunSerialRef.current?.node || gunSerialRef.current;
+                          const node = gunSerialRef.current?.node || gunSerialRef.current?._node || gunSerialRef.current;
                           if (node && typeof node.select === 'function') {
                             node.select();
                           }

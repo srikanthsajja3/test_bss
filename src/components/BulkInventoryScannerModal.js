@@ -315,11 +315,16 @@ export const BulkInventoryScannerModal = ({
         toast.info(`Serial captured: ${code.toUpperCase()}. Now scan MAC address for this device.`);
       } else {
         if (!isMacPattern(code)) {
-          // Scanned Serial again instead of MAC -> replace the holding serial!
-          const old = pairedSerialHolding;
-          setPairedSerialHolding(code.toUpperCase());
-          if (soundEnabled) playScannerBeep('success');
-          toast.info(`Serial replaced: Changed from "${old}" to "${code.toUpperCase()}". Now scan MAC address.`);
+          if (code.toUpperCase() === pairedSerialHolding.toUpperCase()) {
+            if (soundEnabled) playScannerBeep('error');
+            toast.warn(`"${code.toUpperCase()}" is the Serial Number you just scanned. Please scan the 12-digit MAC address.`);
+            return;
+          }
+          const clean = code.replace(/[^0-9A-Fa-f]/g, '');
+          if (soundEnabled) playScannerBeep('error');
+          toast.error(
+            `Invalid MAC address! MAC address must be exactly 12 hexadecimal characters (0-9, A-F). You entered "${code}" (${clean.length} hex digits).`
+          );
           return;
         }
         const formattedMac = formatMacAddress(code);
@@ -345,10 +350,31 @@ export const BulkInventoryScannerModal = ({
     if (!scannedInput.trim()) return;
     handleCodeDetected(scannedInput);
     setScannedInput('');
-    // Ensure input keeps focus
-    if (inputRef.current) {
-      inputRef.current.focus?.();
-    }
+    // Ensure input keeps focus reliably across renders
+    const refocus = () => {
+      try {
+        if (Platform.OS === 'web' && typeof document !== 'undefined') {
+          const el = document.getElementById('bulk-scanner-gun-input');
+          if (el) {
+            el.focus();
+            if (typeof el.select === 'function') el.select();
+            return;
+          }
+        }
+        if (inputRef.current) {
+          inputRef.current.focus?.();
+          const node = inputRef.current?.node || inputRef.current?._node || inputRef.current;
+          if (node && typeof node.focus === 'function') {
+            node.focus();
+            if (typeof node.select === 'function') node.select();
+          }
+        }
+      } catch (e) {}
+    };
+    refocus();
+    setTimeout(refocus, 25);
+    setTimeout(refocus, 80);
+    setTimeout(refocus, 180);
   };
 
   // Bulk paste parser
@@ -764,6 +790,8 @@ export const BulkInventoryScannerModal = ({
                     <Feather name="maximize" size={18} color="#0284c7" style={{ marginRight: 8 }} />
                     <TextInput
                       ref={inputRef}
+                      nativeID="bulk-scanner-gun-input"
+                      id="bulk-scanner-gun-input"
                       style={styles.gunInput}
                       placeholder={
                         scanTarget === 'paired'
