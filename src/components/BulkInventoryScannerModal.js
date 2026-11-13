@@ -305,10 +305,23 @@ export const BulkInventoryScannerModal = ({
     if (scanTarget === 'paired') {
       // Paired mode: 1st scan = Serial, 2nd scan = MAC
       if (!pairedSerialHolding) {
+        if (isMacPattern(code)) {
+          if (soundEnabled) playScannerBeep('error');
+          toast.warn(`"${code}" is a MAC address. Please scan device Serial Number first.`);
+          return;
+        }
         setPairedSerialHolding(code.toUpperCase());
         if (soundEnabled) playScannerBeep('success');
         toast.info(`Serial captured: ${code.toUpperCase()}. Now scan MAC address for this device.`);
       } else {
+        if (!isMacPattern(code)) {
+          // Scanned Serial again instead of MAC -> replace the holding serial!
+          const old = pairedSerialHolding;
+          setPairedSerialHolding(code.toUpperCase());
+          if (soundEnabled) playScannerBeep('success');
+          toast.info(`Serial replaced: Changed from "${old}" to "${code.toUpperCase()}". Now scan MAC address.`);
+          return;
+        }
         const formattedMac = formatMacAddress(code);
         addDeviceToQueue(pairedSerialHolding, formattedMac);
         setPairedSerialHolding('');
@@ -767,6 +780,8 @@ export const BulkInventoryScannerModal = ({
                       value={scannedInput}
                       onChangeText={setScannedInput}
                       onSubmitEditing={handleGunInputSubmit}
+                      blurOnSubmit={false}
+                      selectTextOnFocus={true}
                       returnKeyType="done"
                       autoFocus
                       autoCapitalize="characters"

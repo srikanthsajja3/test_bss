@@ -53,14 +53,34 @@ const playScannerSound = (type = 'success') => {
   } catch (e) {}
 };
 
-// MAC formatter helper
+// Clean MAC string of common barcode prefixes
+const cleanRawMac = (input) => {
+  if (!input) return '';
+  let s = String(input).trim();
+  return s.replace(/^(MAC|HW|LAN\s*MAC|PON\s*MAC)[:=\s-]*/i, '');
+};
+
+// Strict check: ONLY allow if it has valid MAC properties (exactly 12 hex digits)
+const isValidMacAddress = (input) => {
+  if (!input) return false;
+  const s = cleanRawMac(input);
+  const hexOnly = s.replace(/[^0-9A-Fa-f]/g, '');
+  if (hexOnly.length !== 12) return false;
+  // If delimiters are used, check that all characters are hex or standard delimiters
+  const nonHexOrDelim = s.replace(/[0-9A-Fa-f:\-.\s]/g, '');
+  if (nonHexOrDelim.length > 0) return false;
+  return true;
+};
+
+// Format strictly to XX:XX:XX:XX:XX:XX
 const formatMacAddress = (input) => {
   if (!input) return '';
-  const clean = input.replace(/[^a-fA-F0-9]/g, '').toUpperCase();
-  if (clean.length === 12) {
-    return clean.match(/.{1,2}/g).join(':');
+  const s = cleanRawMac(input);
+  const hexOnly = s.replace(/[^0-9A-Fa-f]/g, '').toUpperCase();
+  if (hexOnly.length === 12) {
+    return hexOnly.match(/.{1,2}/g).join(':');
   }
-  return input.trim();
+  return '';
 };
 
 export const InwardStockModal = ({
@@ -115,6 +135,31 @@ export const InwardStockModal = ({
 
   const gunSerialRef = useRef(null);
   const gunMacRef = useRef(null);
+
+  // Reliable focus keeper for barcode gun scanning (prevent focus loss on scan/enter)
+  const refocusGunInput = useCallback(() => {
+    setTimeout(() => {
+      try {
+        if (gunSerialRef.current) {
+          gunSerialRef.current.focus?.();
+          const node = gunSerialRef.current?.node || gunSerialRef.current;
+          if (node && typeof node.focus === 'function') {
+            node.focus();
+            if (typeof node.select === 'function') {
+              node.select();
+            }
+          }
+        }
+      } catch (e) {}
+    }, 60);
+  }, []);
+
+  // Ensure gun input is focused on step 2, when holdingSerial changes, or queue changes
+  useEffect(() => {
+    if (createStep === 2 && scanMode === 'gun') {
+      refocusGunInput();
+    }
+  }, [createStep, scanMode, holdingSerial, queue.length, refocusGunInput]);
 
   // Inline Quick Add Modals
   const [quickAddType, setQuickAddType] = useState(null); // 'product' | 'vendor' | 'model' | 'staff'
@@ -293,10 +338,19 @@ export const InwardStockModal = ({
     setActiveTab('create');
   };
 
-  // Add a single device to queue with strict limit & duplicate check
+  // Add a single device to queue with strict limit & duplicate/update check
   const addDeviceToQueue = (serialNo, macAddr) => {
-    const s = String(serialNo || '').trim();
-    const m = formatMacAddress(macAddr);
+    const s = String(serialNo || '').trim().toUpperCase();
+    let m = '';
+
+    if (macAddr) {
+      if (!isValidMacAddress(macAddr)) {
+        playScannerSound('error');
+        toast.error(`Invalid MAC address: "${macAddr}". Must be 12 hexadecimal characters.`);
+        return false;
+      }
+      m = formatMacAddress(macAddr);
+    }
 
     if (!s) {
       playScannerSound('error');
@@ -305,6 +359,21 @@ export const InwardStockModal = ({
     }
 
     if (!activeBatch) return false;
+
+    // Check if device is ALREADY in active queue: if so, replace/update its MAC!
+    const existingIndex = queue.findIndex((d) => d.serial_no.toLowerCase() === s.toLowerCase());
+    if (existingIndex >= 0) {
+      const updatedQueue = [...queue];
+      const oldMac = updatedQueue[existingIndex].mac_address;
+      updatedQueue[existingIndex] = {
+        ...updatedQueue[existingIndex],
+        mac_address: m || oldMac,
+      };
+      setQueue(updatedQueue);
+      playScannerSound('success');
+      toast.success(`Updated device "${s}": MAC changed from "${oldMac || 'none'}" to "${m || 'none'}"`);
+      return true;
+    }
 
     // Strict Consignment Quantity Check
     const targetQty = activeBatch.quantity || 0;
@@ -315,14 +384,7 @@ export const InwardStockModal = ({
       return false;
     }
 
-    // Check duplicate in active queue
-    const isDupSerial = queue.some((d) => d.serial_no.toLowerCase() === s.toLowerCase());
-    if (isDupSerial) {
-      playScannerSound('duplicate');
-      toast.error(`Duplicate Serial: "${s}" already scanned in this session!`);
-      return false;
-    }
-
+    // Check duplicate MAC in active queue
     if (m) {
       const isDupMac = queue.some((d) => d.mac_address && d.mac_address.toLowerCase() === m.toLowerCase());
       if (isDupMac) {
@@ -332,7 +394,7 @@ export const InwardStockModal = ({
       }
     }
 
-    // Add to queue
+    // Add new device to queue
     const newDevice = {
       id: Date.now() + Math.random(),
       serial_no: s,
@@ -348,38 +410,88 @@ export const InwardStockModal = ({
   // Remove device from queue
   const removeDeviceFromQueue = (devId) => {
     setQueue((prev) => prev.filter((d) => d.id !== devId));
+    refocusGunInput();
   };
 
   // Handler for Barcode Gun / Rapid input
   const handleGunInputSubmit = () => {
-    const val = gunSerialInput.trim();
-    if (!val) return;
-
-    // If we are holding a serial and waiting for MAC:
-    if (holdingSerial) {
-      const success = addDeviceToQueue(holdingSerial, val);
-      if (success) {
-        setHoldingSerial('');
-        setGunSerialInput('');
-      }
+    const rawVal = gunSerialInput.trim();
+    if (!rawVal) {
+      refocusGunInput();
       return;
     }
 
     // Check if scanned value contains both serial and MAC (e.g. space, comma or tab separated)
-    const tokens = val.split(/[\s,;|]+/).filter(Boolean);
+    const tokens = rawVal.split(/[\s,;|]+/).filter(Boolean);
     if (tokens.length >= 2) {
-      const [sPart, mPart] = tokens;
+      let sPart = tokens[0];
+      let mPart = tokens[1];
+      if (isValidMacAddress(tokens[0]) && !isValidMacAddress(tokens[1])) {
+        mPart = tokens[0];
+        sPart = tokens[1];
+      }
+      if (mPart && !isValidMacAddress(mPart)) {
+        playScannerSound('error');
+        toast.error(`Invalid MAC address: "${mPart}". Must be 12 hexadecimal characters.`);
+        setGunSerialInput('');
+        refocusGunInput();
+        return;
+      }
       const success = addDeviceToQueue(sPart, mPart);
       if (success) {
+        setHoldingSerial('');
         setGunSerialInput('');
       }
+      refocusGunInput();
       return;
     }
 
-    // Otherwise treat as Serial, and prompt for MAC
-    setHoldingSerial(val);
+    // STEP 2: When holding a serial and waiting for MAC
+    if (holdingSerial) {
+      // Check if scanned input has MAC address properties
+      if (isValidMacAddress(rawVal)) {
+        const formattedMac = formatMacAddress(rawVal);
+        const success = addDeviceToQueue(holdingSerial, formattedMac);
+        if (success) {
+          setHoldingSerial('');
+          setGunSerialInput('');
+        }
+        refocusGunInput();
+        return;
+      }
+
+      // If it's NOT a valid MAC address, the operator re-scanned the Serial number to replace it!
+      // (e.g. they realized the previous serial was wrong or mis-scanned)
+      const oldSerial = holdingSerial;
+      setHoldingSerial(rawVal.toUpperCase());
+      setGunSerialInput('');
+      refocusGunInput();
+      playScannerSound('success');
+      toast.info(`Serial replaced: Changed from "${oldSerial}" to "${rawVal.toUpperCase()}". Now scan MAC address.`);
+      return;
+    }
+
+    // STEP 1: No serial held yet. Scan is for Serial Number.
+    // If the operator accidentally scanned a MAC barcode first:
+    if (isValidMacAddress(rawVal)) {
+      playScannerSound('error');
+      toast.warn(`"${rawVal}" is a MAC address. Please scan device Serial Number first.`);
+      setGunSerialInput('');
+      refocusGunInput();
+      return;
+    }
+
+    // Check if device with this Serial is already in queue
+    const alreadyInQueue = queue.some((d) => d.serial_no.toLowerCase() === rawVal.toLowerCase());
+    setHoldingSerial(rawVal.toUpperCase());
     setGunSerialInput('');
-    toast.info(`Serial "${val}" recorded. Now scan MAC barcode...`);
+    refocusGunInput();
+    playScannerSound('success');
+    if (alreadyInQueue) {
+      toast.info(`Device "${rawVal.toUpperCase()}" is already in queue. Scan new MAC to replace old MAC, or re-scan Serial.`);
+    } else {
+      toast.info(`Serial "${rawVal.toUpperCase()}" recorded. Now scan MAC address...`);
+    }
   };
 
   // Handler for Bulk Paste input
@@ -1140,14 +1252,26 @@ export const InwardStockModal = ({
 
                   {holdingSerial ? (
                     <View style={styles.holdingBanner}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                        <Feather name="check" size={14} color="#0284c7" />
-                        <Text style={styles.holdingBannerText}>
-                          Serial: <Text style={{ fontWeight: '800' }}>{holdingSerial}</Text>
-                        </Text>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1 }}>
+                        <Feather name="check-circle" size={15} color="#0284c7" />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.holdingBannerText}>
+                            Serial: <Text style={{ fontWeight: '800', color: '#0f172a' }}>{holdingSerial}</Text>
+                          </Text>
+                          <Text style={{ fontSize: 11, color: '#0369a1', marginTop: 1 }}>
+                            Awaiting MAC. Scan MAC to complete, or re-scan Serial to replace.
+                          </Text>
+                        </View>
                       </View>
-                      <TouchableOpacity onPress={() => setHoldingSerial('')}>
-                        <Text style={styles.holdingCancelText}>Cancel</Text>
+                      <TouchableOpacity
+                        style={{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, backgroundColor: '#fee2e2' }}
+                        onPress={() => {
+                          setHoldingSerial('');
+                          setGunSerialInput('');
+                          refocusGunInput();
+                        }}
+                      >
+                        <Text style={[styles.holdingCancelText, { color: '#dc2626' }]}>Cancel / Change Serial</Text>
                       </TouchableOpacity>
                     </View>
                   ) : null}
@@ -1158,19 +1282,29 @@ export const InwardStockModal = ({
                       style={[styles.gunInput, holdingSerial && { borderColor: '#0284c7', backgroundColor: '#f0f9ff' }]}
                       placeholder={
                         holdingSerial
-                          ? 'Scan or enter MAC address for this device...'
+                          ? `Scan MAC address for Serial: ${holdingSerial}...`
                           : 'Point barcode gun and scan device Serial Number...'
                       }
                       placeholderTextColor="#94a3b8"
                       value={gunSerialInput}
                       onChangeText={setGunSerialInput}
                       onSubmitEditing={handleGunInputSubmit}
+                      blurOnSubmit={false}
+                      selectTextOnFocus={true}
                       autoFocus={true}
                       autoCapitalize="characters"
+                      onFocus={() => {
+                        try {
+                          const node = gunSerialRef.current?.node || gunSerialRef.current;
+                          if (node && typeof node.select === 'function') {
+                            node.select();
+                          }
+                        } catch (e) {}
+                      }}
                     />
                     <TouchableOpacity style={styles.gunAddBtn} onPress={handleGunInputSubmit}>
-                      <Feather name="plus" size={16} color="#ffffff" />
-                      <Text style={styles.gunAddBtnText}>Add</Text>
+                      <Feather name={holdingSerial ? 'check' : 'plus'} size={16} color="#ffffff" />
+                      <Text style={styles.gunAddBtnText}>{holdingSerial ? 'Save MAC' : 'Next (MAC)'}</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -1253,8 +1387,8 @@ export const InwardStockModal = ({
                     <Text style={[styles.queueTh, { width: 36 }]}>#</Text>
                     <Text style={[styles.queueTh, { flex: 1.2 }]}>SERIAL NUMBER</Text>
                     <Text style={[styles.queueTh, { flex: 1.2 }]}>MAC ADDRESS</Text>
-                    <Text style={[styles.queueTh, { width: 85 }]}>STATUS</Text>
-                    <Text style={[styles.queueTh, { width: 40, textAlign: 'center' }]}>DEL</Text>
+                    <Text style={[styles.queueTh, { width: 95 }]}>STATUS</Text>
+                    <Text style={[styles.queueTh, { width: 65, textAlign: 'center' }]}>ACTIONS</Text>
                   </View>
 
                   {queue.map((dev, idx) => (
@@ -1266,17 +1400,30 @@ export const InwardStockModal = ({
                       <Text style={[styles.queueTd, { flex: 1.2, color: '#475569' }]}>
                         {dev.mac_address || '—'}
                       </Text>
-                      <View style={{ width: 85 }}>
-                        <View style={styles.inStockBadge}>
-                          <Text style={styles.inStockBadgeText}>IN STOCK</Text>
+                      <View style={{ width: 95 }}>
+                        <View style={[styles.inStockBadge, { backgroundColor: '#f1f5f9', borderColor: '#cbd5e1' }]}>
+                          <Text style={[styles.inStockBadgeText, { color: '#475569' }]}>NOT CONFIGURED</Text>
                         </View>
                       </View>
-                      <TouchableOpacity
-                        style={{ width: 40, alignItems: 'center' }}
-                        onPress={() => removeDeviceFromQueue(dev.id)}
-                      >
-                        <Feather name="trash-2" size={14} color="#ef4444" />
-                      </TouchableOpacity>
+                      <View style={{ width: 65, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+                        <TouchableOpacity
+                          onPress={() => {
+                            setHoldingSerial(dev.serial_no);
+                            setGunSerialInput(dev.mac_address || '');
+                            refocusGunInput();
+                            toast.info(`Editing device ${dev.serial_no}. Re-scan MAC or Serial to update.`);
+                          }}
+                          title="Re-scan / Edit"
+                        >
+                          <Feather name="edit-2" size={13} color="#0284c7" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => removeDeviceFromQueue(dev.id)}
+                          title="Remove from queue"
+                        >
+                          <Feather name="trash-2" size={13} color="#ef4444" />
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   ))}
                 </View>
