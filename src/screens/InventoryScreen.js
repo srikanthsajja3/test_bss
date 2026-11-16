@@ -16,11 +16,8 @@ import { COLORS } from '../constants/theme';
 import { OneBssApi } from '../services/oneBssApi';
 import { isSuperAdmin } from '../components/internet/shared';
 import { can } from '../services/staffAccess';
-import { BulkInventoryScannerModal } from '../components/BulkInventoryScannerModal';
 import { InwardStockModal } from '../components/InwardStockModal';
 import { HardwareCatalogView } from '../components/HardwareCatalogView';
-import { AddDeviceView } from '../components/AddDeviceView';
-import { ConfiguredBoxesView } from '../components/ConfiguredBoxesView';
 import { SafeSelect } from '../components/SafeSelect';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -673,37 +670,12 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
         </View>
 
         {/* ======================================================== */}
-        {/* Full-Page View: CONFIGURED BOXES                         */}
-        {/* ======================================================== */}
-        {!isOperator && inventoryTab === 'configured' && (
-          <ConfiguredBoxesView
-            user={user}
-            vendors={vendors}
-            allModels={allModels}
-            assignablePartners={assignablePartners}
-            onReload={() => {
-              loadStatsAndVendors();
-              loadOnus();
-            }}
-            onBack={() => setInventoryTab('devices')}
-            onOpenAssignModal={(ids) => {
-              setSelectedOnuIds(ids);
-              setShowAssignModal(true);
-            }}
-          />
-        )}
-
-        {/* ======================================================== */}
         {/* Full-Page View 1: INWARD STOCK                           */}
         {/* ======================================================== */}
         {!isOperator && inventoryTab === 'inward' && (
           <InwardStockModal
             isFullPage={true}
             onClose={() => setInventoryTab('devices')}
-            onOpenScannerForBatch={(batch) => {
-              setSelectedInwardBatchForScanner(batch);
-              setInventoryTab('scanner');
-            }}
             onFilterByBatch={(batchId) => {
               setSelectedBatchFilter(batchId);
               setInventoryTab('devices');
@@ -712,27 +684,7 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
         )}
 
         {/* ======================================================== */}
-        {/* Full-Page View 2: BULK SCANNER (GUN / CAMERA / PASTE)    */}
-        {/* ======================================================== */}
-        {!isOperator && inventoryTab === 'scanner' && (
-          <BulkInventoryScannerModal
-            isFullPage={true}
-            onClose={() => {
-              setInventoryTab('devices');
-              setSelectedInwardBatchForScanner(null);
-            }}
-            vendors={vendors}
-            allModels={allModels}
-            inwardBatch={selectedInwardBatchForScanner}
-            onSuccess={() => {
-              loadStatsAndVendors();
-              loadOnus();
-            }}
-          />
-        )}
-
-        {/* ======================================================== */}
-        {/* Full-Page View 3: VENDORS & MODELS HARDWARE CATALOG      */}
+        {/* Full-Page View 2: VENDORS & MODELS HARDWARE CATALOG      */}
         {/* ======================================================== */}
         {!isOperator && inventoryTab === 'catalog' && (
           <HardwareCatalogView
@@ -740,22 +692,6 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
             allModels={allModels}
             onReload={loadStatsAndVendors}
             onBack={() => setInventoryTab('devices')}
-          />
-        )}
-
-        {/* ======================================================== */}
-        {/* Full-Page View 4: ADD PHYSICAL DEVICE                     */}
-        {/* ======================================================== */}
-        {!isOperator && inventoryTab === 'add' && (
-          <AddDeviceView
-            vendors={vendors}
-            allModels={allModels}
-            onReload={() => {
-              loadStatsAndVendors();
-              loadOnus();
-            }}
-            onBack={() => setInventoryTab('devices')}
-            onSwitchToBulkScan={() => setInventoryTab('scanner')}
           />
         )}
 

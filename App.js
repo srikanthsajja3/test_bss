@@ -78,10 +78,10 @@ class ErrorBoundary extends React.Component {
 
 const VALID_TABS = [
   'dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers',
-  'customer_prices', 'inventory', 'inventory_devices', 'inventory_configured',
-  'inventory_inward', 'inventory_catalog', 'inventory_scanner', 'inventory_add',
-  'dhcp_devices', 'iptv_renewals', 'payu_payments', 'wallet', 'nas', 'ip_pools',
-  'auth_logs', 'complaints', 'leads', 'backups', 'staff', 'activity',
+  'customer_prices', 'inventory', 'inventory_devices', 'inventory_inward',
+  'inventory_catalog', 'dhcp_devices', 'iptv_renewals', 'payu_payments',
+  'wallet', 'nas', 'ip_pools', 'auth_logs', 'complaints', 'leads',
+  'backups', 'staff', 'activity',
 ];
 
 export default function App() {
@@ -489,20 +489,14 @@ function MainApp() {
       case 'inventory':
       case 'inventory_inward':
       case 'inventory_devices':
-      case 'inventory_configured':
-      case 'inventory_catalog':
-      case 'inventory_scanner':
-      case 'inventory_add': {
+      case 'inventory_catalog': {
         const isOperator = String(user?.role || '').toLowerCase() === 'operator';
         const defaultLanding = isOperator ? 'devices' : 'inward';
         const subTabMap = {
           inventory: defaultLanding,
           inventory_inward: 'inward',
           inventory_devices: 'devices',
-          inventory_configured: 'configured',
           inventory_catalog: 'catalog',
-          inventory_scanner: 'scanner',
-          inventory_add: 'add',
         };
         const currentSubTab = subTabMap[activeTab] || defaultLanding;
         return (

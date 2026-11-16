@@ -8,15 +8,12 @@ import { isStaffUser, tabAllowed, customersTabFor } from '../services/staffAcces
 // Networking group (super admin): NAS and IP Pools pages
 const NETWORKING_TABS = ['nas', 'ip_pools', 'auth_logs'];
 
-// Inventory group: Devices Stock, Configured Boxes, Inward Stock, Vendors & Models, Bulk Scanner, Add Device
+// Inventory group: Inward Stock, Devices Stock, Vendors & Models
 const INVENTORY_TABS = [
   'inventory',
-  'inventory_devices',
-  'inventory_configured',
   'inventory_inward',
+  'inventory_devices',
   'inventory_catalog',
-  'inventory_scanner',
-  'inventory_add',
 ];
 
 export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, onToggleCollapse, onMouseEnter, onMouseLeave }) => {
@@ -263,109 +260,30 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
                     </TouchableOpacity>
                   ) : null}
 
-                  {!isOperator && (
-                    <>
-                      {/* Tree branch 3: Configured Boxes */}
-                      {tabAllowed(user, 'inventory_configured') ? (
-                        <TouchableOpacity
-                          style={[
-                            styles.treeSubItem,
-                            activeTab === 'inventory_configured' && styles.treeSubItemActiveInventory,
-                          ]}
-                          onPress={() => onSelectTab('inventory_configured')}
-                        >
-                          <MaterialCommunityIcons
-                            name="checkbox-marked-circle-outline"
-                            size={14}
-                            color={activeTab === 'inventory_configured' ? '#0284c7' : COLORS.textMuted}
-                          />
-                          <Text
-                            style={[
-                              styles.treeSubText,
-                              activeTab === 'inventory_configured' && styles.treeSubTextActiveInventory,
-                            ]}
-                          >
-                            Configured Boxes
-                          </Text>
-                        </TouchableOpacity>
-                      ) : null}
-
-                      {/* Tree branch 4: Vendors & Models */}
-                      {tabAllowed(user, 'inventory_catalog') ? (
-                        <TouchableOpacity
-                          style={[
-                            styles.treeSubItem,
-                            activeTab === 'inventory_catalog' && styles.treeSubItemActiveInventory,
-                          ]}
-                          onPress={() => onSelectTab('inventory_catalog')}
-                        >
-                          <Feather
-                            name="layers"
-                            size={13}
-                            color={activeTab === 'inventory_catalog' ? '#0284c7' : COLORS.textMuted}
-                          />
-                          <Text
-                            style={[
-                              styles.treeSubText,
-                              activeTab === 'inventory_catalog' && styles.treeSubTextActiveInventory,
-                            ]}
-                          >
-                            Vendors & Models
-                          </Text>
-                        </TouchableOpacity>
-                      ) : null}
-
-                      {/* Tree branch 5: Bulk Scan */}
-                      {tabAllowed(user, 'inventory_scanner') ? (
-                        <TouchableOpacity
-                          style={[
-                            styles.treeSubItem,
-                            activeTab === 'inventory_scanner' && styles.treeSubItemActiveInventory,
-                          ]}
-                          onPress={() => onSelectTab('inventory_scanner')}
-                        >
-                          <Feather
-                            name="maximize"
-                            size={13}
-                            color={activeTab === 'inventory_scanner' ? '#0284c7' : COLORS.textMuted}
-                          />
-                          <Text
-                            style={[
-                              styles.treeSubText,
-                              activeTab === 'inventory_scanner' && styles.treeSubTextActiveInventory,
-                            ]}
-                          >
-                            Bulk Scanner
-                          </Text>
-                        </TouchableOpacity>
-                      ) : null}
-
-                      {/* Tree branch 6: Add Device */}
-                      {tabAllowed(user, 'inventory_add') ? (
-                        <TouchableOpacity
-                          style={[
-                            styles.treeSubItem,
-                            activeTab === 'inventory_add' && styles.treeSubItemActiveInventory,
-                          ]}
-                          onPress={() => onSelectTab('inventory_add')}
-                        >
-                          <Feather
-                            name="plus-circle"
-                            size={13}
-                            color={activeTab === 'inventory_add' ? '#0284c7' : COLORS.textMuted}
-                          />
-                          <Text
-                            style={[
-                              styles.treeSubText,
-                              activeTab === 'inventory_add' && styles.treeSubTextActiveInventory,
-                            ]}
-                          >
-                            Add Device
-                          </Text>
-                        </TouchableOpacity>
-                      ) : null}
-                    </>
-                  )}
+                  {/* Tree branch 3: Vendors & Models */}
+                  {!isOperator && tabAllowed(user, 'inventory_catalog') ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.treeSubItem,
+                        activeTab === 'inventory_catalog' && styles.treeSubItemActiveInventory,
+                      ]}
+                      onPress={() => onSelectTab('inventory_catalog')}
+                    >
+                      <Feather
+                        name="layers"
+                        size={13}
+                        color={activeTab === 'inventory_catalog' ? '#0284c7' : COLORS.textMuted}
+                      />
+                      <Text
+                        style={[
+                          styles.treeSubText,
+                          activeTab === 'inventory_catalog' && styles.treeSubTextActiveInventory,
+                        ]}
+                      >
+                        Vendors & Models
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               )}
             </React.Fragment>
