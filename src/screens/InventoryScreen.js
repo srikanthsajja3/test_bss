@@ -824,7 +824,6 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
               { id: 'not_configured', label: 'Not Configured', count: (stats.not_configured ?? 0) + (stats.in_stock ?? 0) },
               { id: 'configured', label: 'Configured Boxes', count: stats.configured || onus.filter((o) => o.status === 'configured').length },
               { id: 'assigned', label: 'Assigned', count: stats.assigned },
-              { id: 'reserved', label: 'Reserved', count: stats.reserved },
               { id: 'faulty', label: 'Faulty', count: stats.faulty },
               { id: 'in_repair', label: 'In Repair', count: stats.in_repair },
               { id: 'retired', label: 'Retired', count: stats.retired },
