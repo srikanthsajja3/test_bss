@@ -94,7 +94,8 @@ export const InwardStockModal = ({
   const isMobile = width < 768;
 
   // Active view: 'list' (History) | 'create' (New Inward 2-Step Flow)
-  const [activeTab, setActiveTab] = useState('list');
+  // Full-page / Modal tab state: 'create' (default) | 'list'
+  const [activeTab, setActiveTab] = useState('create');
   // 2-Step flow within 'create': Step 1 (Consignment Details) -> Step 2 (Scan & Match Devices)
   const [createStep, setCreateStep] = useState(1);
 
@@ -790,8 +791,20 @@ export const InwardStockModal = ({
         )}
       </View>
 
-      {/* Navigation Tabs */}
+      {/* Navigation Buttons: New & History */}
       <View style={styles.tabBar}>
+        <TouchableOpacity
+          style={[styles.tabBtn, activeTab === 'create' && styles.tabBtnActive]}
+          onPress={() => {
+            setActiveTab('create');
+          }}
+        >
+          <Feather name="plus-circle" size={14} color={activeTab === 'create' ? '#0284c7' : '#64748b'} />
+          <Text style={[styles.tabText, activeTab === 'create' && styles.tabTextActive]}>
+            New
+          </Text>
+        </TouchableOpacity>
+
         <TouchableOpacity
           style={[styles.tabBtn, activeTab === 'list' && styles.tabBtnActive]}
           onPress={() => {
@@ -799,18 +812,9 @@ export const InwardStockModal = ({
             setCreateStep(1);
           }}
         >
-          <Feather name="list" size={14} color={activeTab === 'list' ? '#0284c7' : '#64748b'} />
+          <Feather name="clock" size={14} color={activeTab === 'list' ? '#0284c7' : '#64748b'} />
           <Text style={[styles.tabText, activeTab === 'list' && styles.tabTextActive]}>
-            Consignment History ({shipments.length})
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tabBtn, activeTab === 'create' && styles.tabBtnActive]}
-          onPress={() => setActiveTab('create')}
-        >
-          <Feather name="plus-circle" size={14} color={activeTab === 'create' ? '#0284c7' : '#64748b'} />
-          <Text style={[styles.tabText, activeTab === 'create' && styles.tabTextActive]}>
-            + New Inward Consignment
+            History{shipments.length > 0 ? ` (${shipments.length})` : ''}
           </Text>
         </TouchableOpacity>
       </View>
