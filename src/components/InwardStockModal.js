@@ -775,8 +775,7 @@ export const InwardStockModal = ({
             <MaterialCommunityIcons name="truck-delivery" size={20} color="#0284c7" />
           </View>
           <View>
-            <Text style={styles.modalTitle}>Inward Stock Management</Text>
-            <Text style={styles.modalSubtitle}>Consignment shipments, LR tracking & integrated device scanning</Text>
+            <Text style={styles.modalTitle}>Inward Stock</Text>
           </View>
         </View>
         {isFullPage ? (
@@ -869,11 +868,12 @@ export const InwardStockModal = ({
 
                   return (
                     <View key={ship.id} style={styles.shipmentCard}>
+                      {/* Top Bar: Consignment #, Date, Status */}
                       <View style={styles.cardHeader}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-                          <View style={styles.batchPill}>
-                            <Text style={styles.batchPillText}>CONSIGNMENT #{ship.id}</Text>
-                          </View>
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                          <Text style={{ fontSize: 14, fontWeight: '800', color: '#0f172a' }}>
+                            Consignment #{ship.id}
+                          </Text>
                           <Text style={styles.dateText}>
                             {ship.received_date ? new Date(ship.received_date).toLocaleDateString('en-GB') : '—'}
                           </Text>
@@ -895,40 +895,47 @@ export const InwardStockModal = ({
                               isComplete ? { color: '#047857' } : { color: '#b45309' },
                             ]}
                           >
-                            {isComplete ? '100% MATCHED (COMPLETED)' : `${scanned} / ${total} SCANNED (${progressPct}%)`}
+                            {isComplete ? 'Completed' : `${scanned} / ${total} Scanned`}
                           </Text>
                         </View>
                       </View>
 
+                      {/* Main Details: Device info and Logistics side-by-side without excess labels */}
                       <View style={styles.cardContent}>
-                        <View style={styles.infoCol}>
-                          <Text style={styles.infoLabel}>DEVICE SPEC</Text>
+                        <View style={{ flex: 1.2, minWidth: 200 }}>
                           <Text style={styles.deviceTitle}>
-                            {ship.vendor_name || 'Vendor'} · {ship.model_name || 'Model'}
+                            {ship.vendor_name || 'Vendor'} {ship.model_name || 'Model'}
                           </Text>
                           <View style={styles.tagRow}>
                             <View style={styles.ponTag}>
                               <Text style={styles.ponTagText}>{ship.pon_type || 'GPON'}</Text>
                             </View>
-                            <Text style={styles.productTag}>{ship.product_name || 'Hardware'}</Text>
+                            {ship.product_name ? (
+                              <Text style={styles.productTag}>{ship.product_name}</Text>
+                            ) : null}
                           </View>
                         </View>
 
-                        <View style={styles.infoCol}>
-                          <Text style={styles.infoLabel}>LOGISTICS & COURIER</Text>
-                          <Text style={styles.infoValue}>
-                            <Text style={{ fontWeight: '700' }}>LR / Tracking:</Text> {ship.lr_number || '—'}
-                          </Text>
-                          <Text style={styles.infoValue}>
-                            <Text style={{ fontWeight: '700' }}>Courier:</Text> {ship.delivery_partner || '—'}
-                            {ship.delivery_partner_phno ? ` (${ship.delivery_partner_phno})` : ''}
-                          </Text>
-                          <Text style={styles.infoValue}>
-                            <Text style={{ fontWeight: '700' }}>From:</Text> {ship.received_from || '—'}
-                          </Text>
-                          <Text style={styles.infoValue}>
-                            <Text style={{ fontWeight: '700' }}>Received By:</Text> {ship.staff_name || 'Staff'}
-                          </Text>
+                        <View style={{ flex: 1.4, minWidth: 220, gap: 4 }}>
+                          {ship.lr_number ? (
+                            <Text style={styles.infoValue}>
+                              <Text style={{ fontWeight: '700', color: '#1e293b' }}>LR: </Text>
+                              {ship.lr_number}
+                              {ship.delivery_partner ? ` · ${ship.delivery_partner}` : ''}
+                            </Text>
+                          ) : null}
+                          {ship.received_from ? (
+                            <Text style={styles.infoValue}>
+                              <Text style={{ fontWeight: '700', color: '#1e293b' }}>From: </Text>
+                              {ship.received_from}
+                            </Text>
+                          ) : null}
+                          {ship.staff_name ? (
+                            <Text style={styles.infoValue}>
+                              <Text style={{ fontWeight: '700', color: '#1e293b' }}>Received by: </Text>
+                              {ship.staff_name}
+                            </Text>
+                          ) : null}
                         </View>
                       </View>
 
@@ -938,7 +945,7 @@ export const InwardStockModal = ({
                           style={[
                             styles.progressFill,
                             { width: `${progressPct}%` },
-                            isComplete && { backgroundColor: '#047857' },
+                            isComplete && { backgroundColor: '#10b981' },
                           ]}
                         />
                       </View>
@@ -952,8 +959,8 @@ export const InwardStockModal = ({
                             if (onFilterByBatch) onFilterByBatch(ship.id);
                           }}
                         >
-                          <Feather name="layers" size={13} color="#0284c7" />
-                          <Text style={styles.viewUnitsBtnText}>View {scanned} Registered Devices</Text>
+                          <Feather name="list" size={13} color="#0284c7" />
+                          <Text style={styles.viewUnitsBtnText}>View Registered ({scanned})</Text>
                         </TouchableOpacity>
 
                         {!isComplete ? (
@@ -963,13 +970,13 @@ export const InwardStockModal = ({
                           >
                             <Feather name="maximize" size={13} color="#ffffff" />
                             <Text style={styles.scanActionBtnText}>
-                              Scan Devices ({total - scanned} Remaining)
+                              Scan Devices ({total - scanned} Left)
                             </Text>
                           </TouchableOpacity>
                         ) : (
                           <View style={styles.completedBadgePill}>
                             <Feather name="check" size={13} color="#047857" />
-                            <Text style={styles.completedBadgeText}>Consignment Matched & Stored</Text>
+                            <Text style={styles.completedBadgeText}>All Devices Scanned</Text>
                           </View>
                         )}
                       </View>
