@@ -8,6 +8,17 @@ import { isStaffUser, tabAllowed, customersTabFor } from '../services/staffAcces
 // Networking group (super admin): NAS and IP Pools pages
 const NETWORKING_TABS = ['nas', 'ip_pools', 'auth_logs'];
 
+// Inventory group: Devices Stock, Configured Boxes, Inward Stock, Vendors & Models, Bulk Scanner, Add Device
+const INVENTORY_TABS = [
+  'inventory',
+  'inventory_devices',
+  'inventory_configured',
+  'inventory_inward',
+  'inventory_catalog',
+  'inventory_scanner',
+  'inventory_add',
+];
+
 export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, onToggleCollapse, onMouseEnter, onMouseLeave }) => {
   const isOperator = user?.role === 'operator';
   const isSuper = isSuperAdmin(user);
@@ -81,7 +92,9 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
             ? (activeTab === 'customers' || activeTab === 'iptv_customers' || activeTab === 'ott_customers')
             : item.id === 'networking'
               ? NETWORKING_TABS.includes(activeTab)
-              : activeTab === item.id;
+              : item.id === 'inventory'
+                ? INVENTORY_TABS.includes(activeTab)
+                : activeTab === item.id;
           return (
             <React.Fragment key={item.id}>
               <TouchableOpacity
@@ -90,7 +103,15 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
                   isCollapsed && styles.menuItemCollapsed,
                   isActive && styles.menuItemActive,
                 ]}
-                onPress={() => onSelectTab(item.id === 'networking' ? networkingHome : item.id === 'customers' ? customersTabFor(user) : item.id)}
+                onPress={() => onSelectTab(
+                  item.id === 'networking'
+                    ? networkingHome
+                    : item.id === 'customers'
+                      ? customersTabFor(user)
+                      : item.id === 'inventory'
+                        ? (INVENTORY_TABS.includes(activeTab) ? activeTab : 'inventory_devices')
+                        : item.id
+                )}
                 title={item.label}
               >
                 <Feather
@@ -187,6 +208,164 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
                     </Text>
                   </TouchableOpacity>
                   ) : null}
+                </View>
+              )}
+
+              {item.id === 'inventory' && !isCollapsed && (
+                <View style={styles.treeContainer}>
+                  {/* Tree branch 1: Devices Stock */}
+                  {tabAllowed(user, 'inventory_devices') ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.treeSubItem,
+                        (activeTab === 'inventory' || activeTab === 'inventory_devices') && styles.treeSubItemActiveInventory,
+                      ]}
+                      onPress={() => onSelectTab('inventory_devices')}
+                    >
+                      <Feather
+                        name="box"
+                        size={13}
+                        color={(activeTab === 'inventory' || activeTab === 'inventory_devices') ? '#0284c7' : COLORS.textMuted}
+                      />
+                      <Text
+                        style={[
+                          styles.treeSubText,
+                          (activeTab === 'inventory' || activeTab === 'inventory_devices') && styles.treeSubTextActiveInventory,
+                        ]}
+                      >
+                        {isOperator ? 'My Devices' : 'Devices Stock'}
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+
+                  {!isOperator && (
+                    <>
+                      {/* Tree branch 2: Configured Boxes */}
+                      {tabAllowed(user, 'inventory_configured') ? (
+                        <TouchableOpacity
+                          style={[
+                            styles.treeSubItem,
+                            activeTab === 'inventory_configured' && styles.treeSubItemActiveInventory,
+                          ]}
+                          onPress={() => onSelectTab('inventory_configured')}
+                        >
+                          <MaterialCommunityIcons
+                            name="checkbox-marked-circle-outline"
+                            size={14}
+                            color={activeTab === 'inventory_configured' ? '#0284c7' : COLORS.textMuted}
+                          />
+                          <Text
+                            style={[
+                              styles.treeSubText,
+                              activeTab === 'inventory_configured' && styles.treeSubTextActiveInventory,
+                            ]}
+                          >
+                            Configured Boxes
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+
+                      {/* Tree branch 3: Inward Stock */}
+                      {tabAllowed(user, 'inventory_inward') ? (
+                        <TouchableOpacity
+                          style={[
+                            styles.treeSubItem,
+                            activeTab === 'inventory_inward' && styles.treeSubItemActiveInventory,
+                          ]}
+                          onPress={() => onSelectTab('inventory_inward')}
+                        >
+                          <MaterialCommunityIcons
+                            name="truck-delivery"
+                            size={14}
+                            color={activeTab === 'inventory_inward' ? '#0284c7' : COLORS.textMuted}
+                          />
+                          <Text
+                            style={[
+                              styles.treeSubText,
+                              activeTab === 'inventory_inward' && styles.treeSubTextActiveInventory,
+                            ]}
+                          >
+                            Inward Stock
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+
+                      {/* Tree branch 4: Vendors & Models */}
+                      {tabAllowed(user, 'inventory_catalog') ? (
+                        <TouchableOpacity
+                          style={[
+                            styles.treeSubItem,
+                            activeTab === 'inventory_catalog' && styles.treeSubItemActiveInventory,
+                          ]}
+                          onPress={() => onSelectTab('inventory_catalog')}
+                        >
+                          <Feather
+                            name="layers"
+                            size={13}
+                            color={activeTab === 'inventory_catalog' ? '#0284c7' : COLORS.textMuted}
+                          />
+                          <Text
+                            style={[
+                              styles.treeSubText,
+                              activeTab === 'inventory_catalog' && styles.treeSubTextActiveInventory,
+                            ]}
+                          >
+                            Vendors & Models
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+
+                      {/* Tree branch 5: Bulk Scan */}
+                      {tabAllowed(user, 'inventory_scanner') ? (
+                        <TouchableOpacity
+                          style={[
+                            styles.treeSubItem,
+                            activeTab === 'inventory_scanner' && styles.treeSubItemActiveInventory,
+                          ]}
+                          onPress={() => onSelectTab('inventory_scanner')}
+                        >
+                          <Feather
+                            name="maximize"
+                            size={13}
+                            color={activeTab === 'inventory_scanner' ? '#0284c7' : COLORS.textMuted}
+                          />
+                          <Text
+                            style={[
+                              styles.treeSubText,
+                              activeTab === 'inventory_scanner' && styles.treeSubTextActiveInventory,
+                            ]}
+                          >
+                            Bulk Scanner
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+
+                      {/* Tree branch 6: Add Device */}
+                      {tabAllowed(user, 'inventory_add') ? (
+                        <TouchableOpacity
+                          style={[
+                            styles.treeSubItem,
+                            activeTab === 'inventory_add' && styles.treeSubItemActiveInventory,
+                          ]}
+                          onPress={() => onSelectTab('inventory_add')}
+                        >
+                          <Feather
+                            name="plus-circle"
+                            size={13}
+                            color={activeTab === 'inventory_add' ? '#0284c7' : COLORS.textMuted}
+                          />
+                          <Text
+                            style={[
+                              styles.treeSubText,
+                              activeTab === 'inventory_add' && styles.treeSubTextActiveInventory,
+                            ]}
+                          >
+                            Add Device
+                          </Text>
+                        </TouchableOpacity>
+                      ) : null}
+                    </>
+                  )}
                 </View>
               )}
             </React.Fragment>
@@ -345,6 +524,13 @@ const styles = StyleSheet.create({
   },
   treeSubTextActiveNetworking: {
     color: '#4f46e5',
+    fontWeight: '700',
+  },
+  treeSubItemActiveInventory: {
+    backgroundColor: 'rgba(2, 132, 199, 0.12)',
+  },
+  treeSubTextActiveInventory: {
+    color: '#0284c7',
     fontWeight: '700',
   },
   treeSubText: {

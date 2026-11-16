@@ -65,7 +65,7 @@ const TABLE_COLS = {
   actions:  { width: 105, alignItems: 'flex-end', justifyContent: 'center' },
 };
 
-export const InventoryScreen = ({ user, refreshSignal }) => {
+export const InventoryScreen = ({ user, refreshSignal, initialTab = 'devices', onTabChange }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
   const isSuper = isSuperAdmin(user);
@@ -122,7 +122,20 @@ export const InventoryScreen = ({ user, refreshSignal }) => {
   const [viewMode, setViewMode] = useState('table'); // 'table' (default) or 'cards' on mobile
 
   // Active Full-Page Tab: 'devices' | 'inward' | 'catalog' | 'scanner' | 'add'
-  const [inventoryTab, setInventoryTab] = useState('devices');
+  const [inventoryTab, setInventoryTabState] = useState(initialTab || 'devices');
+
+  const setInventoryTab = useCallback((t) => {
+    setInventoryTabState(t);
+    if (typeof onTabChange === 'function') {
+      onTabChange(t);
+    }
+  }, [onTabChange]);
+
+  useEffect(() => {
+    if (initialTab && initialTab !== inventoryTab) {
+      setInventoryTabState(initialTab);
+    }
+  }, [initialTab]);
   const [selectedInwardBatchForScanner, setSelectedInwardBatchForScanner] = useState(null);
   const [selectedBatchFilter, setSelectedBatchFilter] = useState(null);
 

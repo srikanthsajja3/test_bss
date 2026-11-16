@@ -26,6 +26,12 @@ const TAB_NEEDS = {
   partners: [['partners.list', 'view'], ['partners.wallet_credit', 'allow'], ['partners.wallet_debit', 'allow'], ['partners.wallet_type', 'allow'], ['partners.plans', 'allow'], ['partners.branches', 'allow'], ['partners.kyc', 'allow'], ['partners.gateways', 'allow']],
   customer_prices: [['prices.customer', 'view']],
   inventory: [['inventory.devices', 'view'], ['inventory.inward', 'view'], ['inventory.catalog', 'view']],
+  inventory_devices: [['inventory.devices', 'view']],
+  inventory_configured: [['inventory.devices', 'edit'], ['inventory.devices', 'view']],
+  inventory_inward: [['inventory.inward', 'view']],
+  inventory_catalog: [['inventory.catalog', 'view']],
+  inventory_scanner: [['inventory.devices', 'add'], ['inventory.devices', 'view']],
+  inventory_add: [['inventory.devices', 'add'], ['inventory.devices', 'view']],
   wallet: [['wallet.view', 'allow']],
   networking: [['networking.nas', 'view'], ['networking.ip_pools', 'view'], ['networking.auth_logs', 'allow']],
   auth_logs: [['networking.auth_logs', 'allow']],
@@ -47,7 +53,7 @@ export const tabAllowed = (user, tab) => {
   return need ? canAny(user, need) : false;
 };
 
-const TAB_ORDER = ['dashboard', 'customers', 'iptv_customers', 'ott_customers', 'partners', 'wallet', 'customer_prices', 'inventory', 'complaints', 'leads', 'nas', 'auth_logs', 'dhcp_devices', 'iptv_renewals', 'payu_payments', 'backups', 'staff', 'activity'];
+const TAB_ORDER = ['dashboard', 'customers', 'iptv_customers', 'ott_customers', 'partners', 'wallet', 'customer_prices', 'inventory', 'inventory_devices', 'inventory_configured', 'inventory_inward', 'inventory_catalog', 'inventory_scanner', 'inventory_add', 'complaints', 'leads', 'nas', 'auth_logs', 'dhcp_devices', 'iptv_renewals', 'payu_payments', 'backups', 'staff', 'activity'];
 
 /** Where a staff member lands (null = nothing allowed). */
 export const firstAllowedTab = (user) => TAB_ORDER.find((t) => tabAllowed(user, t)) || null;
