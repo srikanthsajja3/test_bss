@@ -817,7 +817,7 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
         {/* ======================================================== */}
         {/* 3. Filter Chips Line (Horizontal Swipeable)              */}
         {/* ======================================================== */}
-        <View style={styles.chipRowWrapper}>
+        <View style={[styles.chipRowWrapper, isMobile && { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }]}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
             {[
               { id: 'all', label: 'All ONUs', count: stats.total },
@@ -850,106 +850,26 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
               );
             })}
           </ScrollView>
-        </View>
-
-        {/* ======================================================== */}
-        {/* 4. Search & Controls Bar                                 */}
-        {/* ======================================================== */}
-        <View style={[styles.controlBar, isMobile && styles.controlBarMobile]}>
-          {/* Live Search */}
-          <View style={[styles.searchInputContainer, isMobile && { width: '100%' }]}>
-            <Feather name="search" size={15} color="#94a3b8" />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search Serial Number, MAC Address..."
-              placeholderTextColor="#94a3b8"
-              value={searchQuery}
-              onChangeText={(txt) => { setSearchQuery(txt); setPage(1); }}
-            />
-            {searchQuery ? (
-              <TouchableOpacity onPress={() => { setSearchQuery(''); setPage(1); }}>
-                <Feather name="x" size={15} color="#94a3b8" />
+          {isMobile && (
+            <View style={[styles.viewModeToggleRow, { marginLeft: 8 }]}>
+              <TouchableOpacity
+                style={[styles.viewModeBtn, viewMode === 'table' && styles.viewModeBtnActive]}
+                onPress={() => setViewMode('table')}
+              >
+                <Feather name="grid" size={12} color={viewMode === 'table' ? '#ffffff' : '#475569'} />
               </TouchableOpacity>
-            ) : null}
-          </View>
-
-          {/* Dropdown Filters (Operator/Location, Vendor & PON Type) */}
-          <View style={[styles.dropdownFiltersRow, isMobile && { width: '100%', gap: 8 }]}>
-            {/* Operator / Location Filter (Superadmin and Admin) */}
-            {!isOperator && (
-              <View style={[styles.selectWrap, isMobile && { flex: 1 }]}>
-                <Text style={styles.selectLabel}>Operator:</Text>
-                <select
-                  style={styles.nativeSelect}
-                  value={selectedPartnerFilter}
-                  onChange={(e) => { setSelectedPartnerFilter(e.target.value); setPage(1); }}
-                >
-                  <option value="all">All Locations</option>
-                  <option value="0">Master Stock (Unassigned)</option>
-                  {assignablePartners.map((p) => (
-                    <option key={p.partner_id} value={p.partner_id}>
-                      {p.partner_name} ({p.role})
-                    </option>
-                  ))}
-                </select>
-              </View>
-            )}
-
-            {/* Vendor Filter */}
-            <View style={[styles.selectWrap, isMobile && { flex: 1 }]}>
-              <Text style={styles.selectLabel}>Vendor:</Text>
-              <select
-                style={styles.nativeSelect}
-                value={selectedVendor}
-                onChange={(e) => { setSelectedVendor(e.target.value); setPage(1); }}
+              <TouchableOpacity
+                style={[styles.viewModeBtn, viewMode === 'cards' && styles.viewModeBtnActive]}
+                onPress={() => setViewMode('cards')}
               >
-                <option value="all">All</option>
-                {vendors.map((v) => (
-                  <option key={v.id} value={v.id}>{v.name}</option>
-                ))}
-              </select>
+                <Feather name="list" size={12} color={viewMode === 'cards' ? '#ffffff' : '#475569'} />
+              </TouchableOpacity>
             </View>
-
-            {/* PON Type Filter */}
-            <View style={[styles.selectWrap, isMobile && { flex: 1 }]}>
-              <Text style={styles.selectLabel}>Type:</Text>
-              <select
-                style={styles.nativeSelect}
-                value={selectedType}
-                onChange={(e) => { setSelectedType(e.target.value); setPage(1); }}
-              >
-                <option value="all">All</option>
-                <option value="GPON">GPON</option>
-                <option value="XPON">XPON</option>
-                <option value="EPON">EPON</option>
-              </select>
-            </View>
-
-            {/* Mobile View Toggle */}
-            {isMobile && (
-              <View style={styles.viewModeToggleRow}>
-                <TouchableOpacity
-                  style={[styles.viewModeBtn, viewMode === 'table' && styles.viewModeBtnActive]}
-                  onPress={() => setViewMode('table')}
-                >
-                  <Feather name="grid" size={12} color={viewMode === 'table' ? '#ffffff' : '#475569'} />
-                  <Text style={[styles.viewModeBtnText, viewMode === 'table' && styles.viewModeBtnTextActive]}>Table</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[styles.viewModeBtn, viewMode === 'cards' && styles.viewModeBtnActive]}
-                  onPress={() => setViewMode('cards')}
-                >
-                  <Feather name="list" size={12} color={viewMode === 'cards' ? '#ffffff' : '#475569'} />
-                  <Text style={[styles.viewModeBtnText, viewMode === 'cards' && styles.viewModeBtnTextActive]}>Cards</Text>
-                </TouchableOpacity>
-              </View>
-            )}
-          </View>
+          )}
         </View>
 
         {/* ======================================================== */}
-        {/* 5. ONU Data Presentation: Table (Mobile & Desktop)       */}
+        {/* 4. ONU Data Presentation: Table (Mobile & Desktop)       */}
         {/* ======================================================== */}
         <View style={styles.tableCard}>
           {loading ? (
@@ -962,7 +882,7 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
               <Feather name="inbox" size={36} color="#94a3b8" />
               <Text style={styles.emptyTitle}>No ONUs Found</Text>
               <Text style={styles.emptySub}>
-                {searchQuery || selectedStatus !== 'all' || selectedVendor !== 'all'
+                {hasActiveColSearch || selectedStatus !== 'all'
                   ? 'No devices match your filters.'
                   : isSuper
                   ? 'No devices found in master inventory.'
@@ -999,7 +919,7 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
                 </View>
               )}
 
-              {onus.map((item) => {
+              {filteredOnus.map((item) => {
                 const st = getStatusStyle(item.status);
                 const pon = PON_COLORS[item.pon_type] || { fg: '#334155', bg: '#f1f5f9' };
                 const isSelected = selectedOnuIds.includes(item.id);
