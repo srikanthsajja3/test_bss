@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Modal,
   useWindowDimensions,
+  Platform,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { toast } from 'react-toastify';
@@ -58,7 +59,7 @@ const TABLE_COLS = {
   batch:    { width: 105, paddingRight: 8 },
   status:   { width: 125, paddingRight: 8 },
   assigned: { flex: 1.4, minWidth: 140, paddingRight: 8 },
-  purchase: { width: 95, paddingRight: 8 },
+  purchase: { width: 130, paddingRight: 8 },
   actions:  { width: 105, alignItems: 'flex-end', justifyContent: 'center' },
 };
 
@@ -390,7 +391,19 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
     }
     if (colSearch.purchase.trim()) {
       const q = colSearch.purchase.toLowerCase().trim();
-      rows = rows.filter((o) => String(o.purchase_date || '').toLowerCase().includes(q));
+      rows = rows.filter((o) => {
+        const raw = String(o.purchase_date || '').toLowerCase();
+        if (!raw) return false;
+        if (raw.includes(q)) return true;
+        try {
+          const d = new Date(raw);
+          if (!isNaN(d.getTime())) {
+            const iso = d.toISOString().slice(0, 10);
+            if (iso.includes(q)) return true;
+          }
+        } catch (_) {}
+        return false;
+      });
     }
     return rows;
   }, [onus, colSearch]);
@@ -1387,17 +1400,45 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
 
                     {/* Purchase Date Filter */}
                     <View style={TABLE_COLS.purchase}>
-                      <View style={[styles.excelColSearchBox, colSearch.purchase && styles.excelColSearchBoxActive]}>
-                        <TextInput
-                          style={styles.excelColSearchInput}
-                          placeholder="Date..."
-                          placeholderTextColor="#94a3b8"
-                          value={colSearch.purchase}
-                          onChangeText={(val) => setColSearch((c) => ({ ...c, purchase: val }))}
-                        />
+                      <View style={[styles.excelColSearchBox, colSearch.purchase && styles.excelColSearchBoxActive, { paddingHorizontal: 4 }]}>
+                        {Platform.OS === 'web' ? (
+                          <input
+                            type="date"
+                            value={colSearch.purchase}
+                            onChange={(e) => setColSearch((c) => ({ ...c, purchase: e.target.value }))}
+                            onClick={(e) => {
+                              try {
+                                if (e.target && typeof e.target.showPicker === 'function') {
+                                  e.target.showPicker();
+                                }
+                              } catch (_) {}
+                            }}
+                            style={{
+                              flex: 1,
+                              width: '100%',
+                              height: '100%',
+                              border: 'none',
+                              outline: 'none',
+                              fontSize: 11,
+                              color: colSearch.purchase ? '#0284c7' : '#64748b',
+                              backgroundColor: 'transparent',
+                              fontFamily: 'inherit',
+                              cursor: 'pointer',
+                              padding: 0,
+                            }}
+                          />
+                        ) : (
+                          <TextInput
+                            style={styles.excelColSearchInput}
+                            placeholder="Date..."
+                            placeholderTextColor="#94a3b8"
+                            value={colSearch.purchase}
+                            onChangeText={(val) => setColSearch((c) => ({ ...c, purchase: val }))}
+                          />
+                        )}
                         {colSearch.purchase ? (
-                          <TouchableOpacity onPress={() => setColSearch((c) => ({ ...c, purchase: '' }))}>
-                            <Feather name="x" size={10} color="#64748b" />
+                          <TouchableOpacity onPress={() => setColSearch((c) => ({ ...c, purchase: '' }))} style={{ padding: 2 }}>
+                            <Feather name="x" size={11} color="#64748b" />
                           </TouchableOpacity>
                         ) : null}
                       </View>
