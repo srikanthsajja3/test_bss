@@ -14,13 +14,10 @@
 // const DEFAULT_BASE_URL = 'https://demo.onebss.in/b_bss'; // 'https://crm.polfibernet.in/api';
 const getDefaultBaseUrl = () => {
   if (typeof window !== 'undefined' && window.location?.origin) {
-    if (window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')) {
-      return 'https://demo.onebss.in/b_bss';
-    }
     return `${window.location.origin}/api`;
   }
 
-  return 'https://demo.onebss.in/b_bss';
+  return '';
 };
 
 const DEFAULT_BASE_URL = getDefaultBaseUrl();
@@ -272,8 +269,16 @@ const request = async (endpoint, options = {}) => {
       data = { success: false, message: 'Empty response from server.' };
     }
 
+    // Log out only when OneBSS itself says the login is no longer valid. A 401 passed on from
+    // another system (NMS, RADIUS, IPTV…) means that system refused OneBSS's key, not the user.
+    const ownSessionError = data.session_expired === true || data.staff_disabled === true
+      || /^(Missing Authorization|Invalid or expired token)/i.test(String(data.message || ''));
     if (res.status === 401 && !isLoginEndpoint) {
-      notifyUnauthorized(data.message || 'Session expired. Please log in again.');
+      if (ownSessionError) {
+        notifyUnauthorized(data.message || 'Session expired. Please log in again.');
+      } else {
+        data.message = `Server error: ${data.message || 'an external service refused the request'}`;
+      }
     }
 
     const ok = res.ok && data.success !== false && data.status !== 'error';
@@ -536,6 +541,23 @@ export const OneBssApi = {
     return post('/scoreme_verify_otp.php', body);
   },
 
+  // ---- QuickeKYC Aadhaar OTP. who: { operatorId, userId } (new / existing customer) or { internetId } (one account) ----
+  quickekycSendOtp: async (aadhaarNumber, who = {}) => {
+    if (!/^\d{12}$/.test(String(aadhaarNumber || ''))) return clientError('Enter the 12-digit Aadhaar number.');
+    return post('/quickekyc_send_otp.php', { aadhaar_number: String(aadhaarNumber), ...(who.internetId ? { internet_id: toNum(who.internetId) } : { operator_id: toNum(who.operatorId) }) });
+  },
+  /** otpRef: the otp_ref quickekycSendOtp answered. */
+  quickekycVerifyOtp: async (aadhaarNumber, otp, otpRef, who = {}) => {
+    if (!otp) return clientError('OTP is required.');
+    const body = { aadhaar_number: String(aadhaarNumber), otp: String(otp), otp_ref: otpRef };
+    if (who.internetId) body.internet_id = toNum(who.internetId);
+    else {
+      body.operator_id = toNum(who.operatorId);
+      if (who.userId) body.user_id = toNum(who.userId);
+    }
+    return post('/quickekyc_verify_otp.php', body);
+  },
+
   // ---- Aadhaar verification of ONE existing internet account (operator comes from the account) ----
   accountAadhaarSendOtp: async (internetId, aadhaarNumber) => {
     if (!/^\d{12}$/.test(String(aadhaarNumber || ''))) return clientError('Enter the 12-digit Aadhaar number.');
@@ -784,6 +806,23 @@ export const OneBssApi = {
     if (err) return clientError(err);
     return post(`/iptv_bulk_customer_sync.php?partner_id=${q(partnerId)}`);
   },
+  // progress / last result of the whole-operator sync (it runs on the server after replying)
+  // -> { running, progress: { done, total }, last: { summary, failures, finished_at, error? } }
+  iptvBulkSyncStatus: async (partnerId) => get(`/iptv_bulk_customer_sync.php?partner_id=${q(partnerId)}`),
+  // checks every 10 s until the background sync ends (max ~3 h); onProgress({ done, total })
+  waitIptvBulkSync: async (partnerId, onProgress) => {
+    for (let i = 0; i < 1080; i += 1) {
+      await new Promise((r) => setTimeout(r, 10000));
+      const res = await get(`/iptv_bulk_customer_sync.php?partner_id=${q(partnerId)}`);
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) return res;
+        continue; // a network blip: keep waiting
+      }
+      if (res.data.progress && onProgress) onProgress(res.data.progress);
+      if (!res.data.running) return res;
+    }
+    return { ok: false, status: 0, data: { success: false, message: 'Still running on the server — check again later.' } };
+  },
 
   // IPTV sync for just these mobiles of an operator (max 50 per call) — used after a CSV import
   syncIptvMobiles: async (partnerId, mobiles) => post(`/iptv_bulk_customer_sync.php?partner_id=${q(partnerId)}`, { mobiles }),
@@ -878,6 +917,55 @@ export const OneBssApi = {
   deleteIpPool: async (ippoolId) => del('/networking/ip_pools.php', { ippool_id: toNum(ippoolId) }),
   addPoolOperator: async (ippoolId, partnerId) => post('/networking/pool_operators.php', { ippool_id: toNum(ippoolId), partner_id: toNum(partnerId) }),
   removePoolOperator: async (ipopid) => del('/networking/pool_operators.php', { ipopid: toNum(ipopid) }),
+  // ------------------------------------------------------------------
+  // Complaints (tickets) & leads — kept in RADIUS (support/complaints.php, support/leads.php).
+  // opId: the operator whose view (admin / super admin); '' = own view.
+  // ------------------------------------------------------------------
+  complaintsContext: async (opId = '') => get(`/support/complaints.php?context=1${opId ? `&operator_id=${q(opId)}` : ''}`),
+  complaintsMeta: async (opId, meta, extra = {}) => {
+    const qs = new URLSearchParams({ meta });
+    if (opId) qs.set('operator_id', String(opId));
+    Object.entries(extra).forEach(([k, v]) => { if (v !== undefined && v !== null && String(v) !== '') qs.set(k, String(v)); });
+    return get(`/support/complaints.php?${qs.toString()}`);
+  },
+  complaintsList: async (opId, { status, page = 0, pageSize = 25 } = {}) => {
+    const qs = new URLSearchParams({ page: String(page), page_size: String(pageSize) });
+    if (opId) qs.set('operator_id', String(opId));
+    if (status) qs.set('status', String(status));
+    return get(`/support/complaints.php?${qs.toString()}`);
+  },
+  complaintTicket: async (opId, id) => get(`/support/complaints.php?id=${q(id)}${opId ? `&operator_id=${q(opId)}` : ''}`),
+  customerComplaints: async (internetId) => get(`/support/complaints.php?internet_id=${q(internetId)}`),
+  /** action: create | assign | resolve | close | reopen */
+  complaintAction: async (opId, action, payload = {}) =>
+    post('/support/complaints.php', { ...payload, action, ...(opId ? { operator_id: toNum(opId) } : {}) }),
+  leadsContext: async (opId = '') => get(`/support/leads.php?context=1${opId ? `&operator_id=${q(opId)}` : ''}`),
+  leadSources: async (opId) => get(`/support/leads.php?meta=sources${opId ? `&operator_id=${q(opId)}` : ''}`),
+  leadCustomers: async (opId, search = '') => get(`/support/leads.php?meta=customers&q=${q(search)}${opId ? `&operator_id=${q(opId)}` : ''}`),
+  leadsList: async (opId) => get(`/support/leads.php${opId ? `?operator_id=${q(opId)}` : ''}`),
+  addLead: async (opId, lead) => post('/support/leads.php', { ...lead, ...(opId ? { operator_id: toNum(opId) } : {}) }),
+
+  // Backups & Google Drive (super admin) — gdrive/gdrive_admin.php
+  backupsStatus: async () => get('/gdrive/gdrive_admin.php'),
+  /** action: connect | disconnect | retry_failed | backup_now */
+  backupsAction: async (action) => post('/gdrive/gdrive_admin.php', { action }),
+
+  // NAS ↔ operators (many-to-many)
+  getNasOperators: async (nasId) => get(`/networking/nas_operators.php?nas_id=${q(nasId)}`),
+  setNasOperators: async (nasId, partnerIds = []) => put('/networking/nas_operators.php', { nas_id: toNum(nasId), partner_ids: partnerIds.map(toNum) }),
+  /**
+   * RADIUS auth attempts through one NAS. params: { operator_id, nas_id, customerid, mac,
+   * framedipaddress, reason, page (number | 'last'), page_size }. Without nas_id: the NAS (and
+   * operators) the caller may pick.
+   */
+  getNasAuthLogs: async (params = {}) => {
+    const qs = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && String(v).trim() !== '') qs.set(k, String(v).trim());
+    });
+    const s = qs.toString();
+    return get(`/networking/nas_auth_logs.php${s ? `?${s}` : ''}`);
+  },
 
   // old names, kept so existing callers keep working
   getInternetMacBindings: async (internetId) => OneBssApi.getInternetNetworking(internetId),

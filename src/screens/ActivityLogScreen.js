@@ -49,7 +49,7 @@ const actionIcon = (a) => {
   if (/recharge|renew/.test(x)) return 'refresh-cw';
   if (/wallet|payu|razorpay|pg_/.test(x)) return 'credit-card';
   if (/password/.test(x)) return 'key';
-  if (/verif|aadhaar|kyc|digilocker|scoreme/.test(x)) return 'shield';
+  if (/verif|aadhaar|kyc|digilocker|scoreme|quickekyc/.test(x)) return 'shield';
   if (/staff/.test(x)) return 'user-check';
   if (/partner|move|hierarchy/.test(x)) return 'briefcase';
   if (/delete|remove/.test(x)) return 'trash-2';

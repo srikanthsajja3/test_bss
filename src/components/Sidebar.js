@@ -6,7 +6,7 @@ import { isSuperAdmin } from './internet/shared';
 import { isStaffUser, tabAllowed, customersTabFor } from '../services/staffAccess';
 
 // Networking group (super admin): NAS and IP Pools pages
-const NETWORKING_TABS = ['nas', 'ip_pools'];
+const NETWORKING_TABS = ['nas', 'ip_pools', 'auth_logs'];
 
 export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, onToggleCollapse, onMouseEnter, onMouseLeave }) => {
   const isOperator = user?.role === 'operator';
@@ -18,6 +18,9 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
         { id: 'customer_prices', label: 'Customer Prices', icon: 'tag' },
         { id: 'inventory', label: 'Inventory', icon: 'box' },
         { id: 'wallet', label: 'Wallet', icon: 'credit-card' },
+        { id: 'complaints', label: 'Complaints', icon: 'alert-circle' },
+        { id: 'leads', label: 'Leads', icon: 'user-plus' },
+        { id: 'auth_logs', label: 'Auth Logs', icon: 'log-in' },
         { id: 'staff', label: 'Staff & Roles', icon: 'user-check' },
         { id: 'activity', label: 'Activity Log', icon: 'clock' },
       ]
@@ -26,15 +29,26 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
         { id: 'customers', label: 'Subscribers', icon: 'users' },
         { id: 'partners', label: 'Partners', icon: 'briefcase' },
         ...(isSuper ? [{ id: 'networking', label: 'Networking', icon: 'share-2' }] : []),
+        { id: 'complaints', label: 'Complaints', icon: 'alert-circle' },
+        { id: 'leads', label: 'Leads', icon: 'user-plus' },
         { id: 'inventory', label: 'Inventory', icon: 'box' },
         ...(isSuper ? [{ id: 'dhcp_devices', label: 'DHCP-devices', icon: 'server' }] : []),
         ...(isSuper ? [{ id: 'iptv_renewals', label: 'IPTV Auto-Renewals', icon: 'repeat' }] : []),
         ...(isSuper ? [{ id: 'payu_payments', label: 'Online Payments', icon: 'credit-card' }] : []),
+        ...(!isSuper ? [{ id: 'auth_logs', label: 'Auth Logs', icon: 'log-in' }] : []),
         { id: 'staff', label: 'Staff & Roles', icon: 'user-check' },
         { id: 'activity', label: 'Activity Log', icon: 'clock' },
+        ...(isSuper ? [{ id: 'backups', label: 'Backups', icon: 'database' }] : []),
       ];
   // a staff login sees only the pages its role allows
-  const menuItems = allItems.filter((it) => tabAllowed(user, it.id === 'networking' ? 'nas' : it.id === 'customers' ? 'subscribers' : it.id));
+  const menuItems = allItems.filter((it) => tabAllowed(user, it.id === 'customers' ? 'subscribers' : it.id));
+  // Networking opens the first of its pages this login may see
+  const networkingSubs = [
+    { id: 'nas', label: 'NAS', icon: 'server' },
+    { id: 'ip_pools', label: 'IP Pools', icon: 'layers' },
+    { id: 'auth_logs', label: 'Auth Logs', icon: 'log-in' },
+  ].filter((sub) => tabAllowed(user, sub.id));
+  const networkingHome = networkingSubs[0]?.id || 'nas';
   const staff = isStaffUser(user) ? user.staff : null;
 
   return (
@@ -60,7 +74,8 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
       </View>
 
       {/* Navigation Links (scroll on their own; logo and user badge stay put) */}
-      <ScrollView style={styles.menuScroll} contentContainerStyle={styles.menuList} showsVerticalScrollIndicator={false}>
+      {/* scrollbar always visible: users without a mouse wheel drag it */}
+      <ScrollView style={styles.menuScroll} contentContainerStyle={styles.menuList} showsVerticalScrollIndicator dataSet={{ sidebarMenu: '1' }}>
         {menuItems.map((item) => {
           const isActive = item.id === 'customers'
             ? (activeTab === 'customers' || activeTab === 'iptv_customers' || activeTab === 'ott_customers')
@@ -75,7 +90,7 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
                   isCollapsed && styles.menuItemCollapsed,
                   isActive && styles.menuItemActive,
                 ]}
-                onPress={() => onSelectTab(item.id === 'networking' ? 'nas' : item.id === 'customers' ? customersTabFor(user) : item.id)}
+                onPress={() => onSelectTab(item.id === 'networking' ? networkingHome : item.id === 'customers' ? customersTabFor(user) : item.id)}
                 title={item.label}
               >
                 <Feather
@@ -92,10 +107,7 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
 
               {item.id === 'networking' && !isCollapsed && (
                 <View style={styles.treeContainer}>
-                  {[
-                    { id: 'nas', label: 'NAS', icon: 'server' },
-                    { id: 'ip_pools', label: 'IP Pools', icon: 'layers' },
-                  ].map((sub) => {
+                  {networkingSubs.map((sub) => {
                     const on = activeTab === sub.id;
                     return (
                       <TouchableOpacity
@@ -212,6 +224,20 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
     </View>
   );
 };
+
+// slim, always-visible scrollbar for the menu (web)
+if (Platform.OS === 'web' && typeof document !== 'undefined' && !document.getElementById('onebss-sidebar-scroll')) {
+  const css = document.createElement('style');
+  css.id = 'onebss-sidebar-scroll';
+  css.textContent = `
+    [data-sidebar-menu="1"] { overflow-y: scroll !important; scrollbar-width: thin; scrollbar-color: #cbd5e1 transparent; }
+    [data-sidebar-menu="1"]::-webkit-scrollbar { width: 8px; display: block; }
+    [data-sidebar-menu="1"]::-webkit-scrollbar-track { background: transparent; }
+    [data-sidebar-menu="1"]::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+    [data-sidebar-menu="1"]::-webkit-scrollbar-thumb:hover { background: #94a3b8; background-clip: padding-box; }
+  `;
+  document.head.appendChild(css);
+}
 
 const styles = StyleSheet.create({
   sidebarContainer: {

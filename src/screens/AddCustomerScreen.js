@@ -60,9 +60,10 @@ const SCOREME_RESEND_SECONDS = 120;           // ScoreMe resend window (EAS517)
 const METHOD_META = {
   digilocker: { label: 'DigiLocker', icon: 'shield' },
   scoreme: { label: 'Aadhaar OTP', icon: 'smartphone' },
+  quickekyc: { label: 'Aadhaar OTP (QuickeKYC)', icon: 'zap' },
   manual: { label: 'Manual Entry', icon: 'edit-3' },
 };
-const METHOD_ORDER = ['digilocker', 'scoreme', 'manual'];
+const METHOD_ORDER = ['digilocker', 'scoreme', 'quickekyc', 'manual'];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -649,7 +650,7 @@ const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new'
   const [providersLoading, setProvidersLoading] = useState(true);
   const [providersError, setProvidersError] = useState('');
   const [availableProviders, setAvailableProviders] = useState([]);
-  const [chosenProvider, setChosenProvider] = useState(null); // 'digilocker' | 'scoreme' | 'manual'
+  const [chosenProvider, setChosenProvider] = useState(null); // 'digilocker' | 'scoreme' | 'quickekyc' | 'manual'
 
   const loadProviders = useCallback(async () => {
     if (!operatorId) {
@@ -880,6 +881,10 @@ const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new'
   const [verifyingOtp, setVerifyingOtp] = useState(false);
   const [resendAt, setResendAt] = useState(null);
   const [, setTick] = useState(0);
+  // QuickeKYC (same OTP screen as ScoreMe)
+  const isQek = chosenProvider === 'quickekyc';
+  const [otpRef, setOtpRef] = useState('');
+  const [qekEnv, setQekEnv] = useState('');
 
   useEffect(() => {
     if (!resendAt) return undefined;
@@ -1156,11 +1161,17 @@ const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new'
     setSendingOtp(true);
     try {
       applyToken();
-      const res = await OneBssApi.scoremeSendOtp(aadhaarNumber, operatorId);
+      const res = isQek
+        ? await OneBssApi.quickekycSendOtp(aadhaarNumber, { operatorId })
+        : await OneBssApi.scoremeSendOtp(aadhaarNumber, operatorId);
       if (!mountedRef.current) return;
       if (!isOk(res)) {
         toast.error(errMsg(res, 'Unable to send OTP'));
         return;
+      }
+      if (isQek) {
+        setOtpRef(res.data.otp_ref || '');
+        setQekEnv(res.data.env || '');
       }
       toast.success(res.data.message || 'OTP sent to the registered mobile number');
       setOtpSent(true);
@@ -1182,9 +1193,17 @@ const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new'
     setVerifyingOtp(true);
     try {
       applyToken();
-      const res = await OneBssApi.scoremeVerifyOtp(aadhaarNumber, otp.trim(), operatorId);
+      const res = isQek
+        ? await OneBssApi.quickekycVerifyOtp(aadhaarNumber, otp.trim(), otpRef, { operatorId })
+        : await OneBssApi.scoremeVerifyOtp(aadhaarNumber, otp.trim(), operatorId);
       if (!mountedRef.current) return;
       if (!isOk(res)) {
+        if (res.data?.expired) {
+          setOtpSent(false);
+          setOtp('');
+          setOtpRef('');
+          setResendAt(null);
+        }
         toast.error(errMsg(res, 'OTP verification failed'));
         return;
       }
@@ -1202,6 +1221,7 @@ const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new'
     setChosenProvider(null);
     setOtpSent(false);
     setOtp('');
+    setOtpRef('');
     setAadhaarNumber('');
     setResendAt(null);
   };
@@ -1731,9 +1751,10 @@ const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new'
         )
       ) : null}
 
-      {/* ScoreMe */}
-      {chosenProvider === 'scoreme' ? (
+      {/* Aadhaar OTP — ScoreMe or QuickeKYC */}
+      {chosenProvider === 'scoreme' || chosenProvider === 'quickekyc' ? (
         <View style={styles.formGrid}>
+          {isQek && qekEnv === 'sandbox' ? field(<Text style={[styles.hint, { color: '#b45309', fontWeight: '700' }]}>QuickeKYC is in SANDBOX (test) mode — no real Aadhaar check is done.</Text>, true) : null}
           {field(
             <>
               <Label>AADHAAR NUMBER</Label>
@@ -1749,14 +1770,16 @@ const AddCustomerScreenInner = ({ user, operatorId: operatorIdProp, mode = 'new'
           )}
           {!otpSent ? (
             field(
-              <TouchableOpacity
-                style={[styles.primaryBtn, styles.selfStart, (!canVerify || sendingOtp || !/^\d{12}$/.test(aadhaarNumber)) && styles.btnDisabled]}
-                disabled={!canVerify || sendingOtp || !/^\d{12}$/.test(aadhaarNumber)}
-                onPress={handleScoremeSendOtp}
-              >
-                {sendingOtp ? <ActivityIndicator size="small" color="#fff" /> : null}
-                <Text style={styles.primaryBtnText}>{sendingOtp ? 'Sending OTP...' : 'Send OTP'}</Text>
-              </TouchableOpacity>,
+              <View style={styles.actionsRow}>
+                <TouchableOpacity
+                  style={[styles.primaryBtn, styles.selfStart, (!canVerify || sendingOtp || !/^\d{12}$/.test(aadhaarNumber)) && styles.btnDisabled]}
+                  disabled={!canVerify || sendingOtp || !/^\d{12}$/.test(aadhaarNumber)}
+                  onPress={handleScoremeSendOtp}
+                >
+                  {sendingOtp ? <ActivityIndicator size="small" color="#fff" /> : null}
+                  <Text style={styles.primaryBtnText}>{sendingOtp ? 'Sending OTP...' : 'Send OTP'}</Text>
+                </TouchableOpacity>
+              </View>,
               true
             )
           ) : (

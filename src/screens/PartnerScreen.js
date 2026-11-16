@@ -1727,17 +1727,37 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     const pId = partner.partner_id || partner.id;
     setSyncingIptvId(pId);
     try {
+      const name = partner.partner_name || `Partner #${pId}`;
       const res = await OneBssApi.syncIptvBulkCustomers(pId);
       const data = res.data || {};
-      if (data.success !== false) {
-        toast.success(data.message || `IPTV users synced successfully for ${partner.partner_name || 'Partner'} (#${pId})!`);
+      if (data.already_running) {
+        toast.info(`An IPTV sync for ${name} is already running — you'll see the result here when it ends.`);
+      } else if (data.success === false) {
+        toast.error(data.message || `IPTV user sync failed for ${name}.`);
+        return;
+      } else if (!data.background) {
+        toast.success(data.message || `IPTV users synced for ${name}.`);
+        return;
       } else {
-        toast.error(data.message || `IPTV user sync failed for Partner #${pId}.`);
+        toast.info(data.message || `IPTV sync started for ${name}.`);
+      }
+      // runs on the server; report the result when it ends (the button stays free meanwhile)
+      setSyncingIptvId(null);
+      const done = await OneBssApi.waitIptvBulkSync(pId);
+      const last = done.data?.last;
+      if (!done.ok || !last) {
+        toast.warn(done.data?.message || `Could not get the IPTV sync result for ${name}.`);
+      } else if (last.error) {
+        toast.error(`IPTV sync for ${name}: ${last.error}`);
+      } else {
+        const sm = last.summary || {};
+        const msg = `IPTV sync finished for ${name}: ${sm.synced_ok || 0} synced, ${sm.failed || 0} failed, ${sm.stbs_added || 0} new STB(s).`;
+        if (sm.failed) toast.warn(msg); else toast.success(msg);
       }
     } catch (e) {
       toast.error('Sync failed: Network error');
     } finally {
-      setSyncingIptvId(null);
+      setSyncingIptvId((cur) => (cur === pId ? null : cur));
     }
   };
 
@@ -1911,6 +1931,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     const providers = [
       { id: 'digilocker', title: 'DigiLocker Online Aadhaar', desc: 'Instant OTP/consent-based Aadhaar verification via DigiLocker gateway', icon: 'shield' },
       { id: 'scoreme', title: 'ScoreMe Aadhaar OTP', desc: 'Direct Aadhaar OTP validation with demographic auto-fill', icon: 'smartphone' },
+      { id: 'quickekyc', title: 'QuickeKYC Aadhaar OTP', desc: 'Aadhaar OTP through QuickeKYC, with an optional number / linked-mobile check first', icon: 'zap' },
       { id: 'manual', title: 'Manual / Offline KYC', desc: 'Allow physical document inspection and manual approval by operator', icon: 'file-text' },
     ];
     return (
@@ -3812,7 +3833,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                     { show: pPlanMap, icon: 'play-circle', label: 'OTT Plans', hint: p.ott_franchise_id ? `Franchise ${p.ott_franchise_id}` : 'Set the OTT franchise id', color: '#0ea5e9', onPress: () => setOttPlansPartner(p) },
                     { show: pPlanMap, icon: 'tag', label: 'Customer Prices', hint: 'Operator\'s price for its customers', color: '#059669', onPress: () => setCustomerPricesPartner(p) },
                     { show: pBranches, icon: 'git-branch', label: 'IPTV Branches', hint: 'Pioneer branch mapping', color: '#0891b2', onPress: () => handleOpenAssignBranches(p) },
-                    { show: pKyc, icon: 'shield', label: 'KYC Providers', hint: 'DigiLocker / ScoreMe / manual', color: '#9333ea', onPress: () => handleOpenKycProviders(p) },
+                    { show: pKyc, icon: 'shield', label: 'KYC Providers', hint: 'DigiLocker / ScoreMe / QuickeKYC / manual', color: '#9333ea', onPress: () => handleOpenKycProviders(p) },
                     { show: pGateways, icon: 'credit-card', label: 'Payment Gateways', hint: pgGatewaysHint(p), color: '#0284c7', onPress: () => setPgGatewaysPartner(p) },
                   ].filter((t) => t.show).map((t) => (
                     <TouchableOpacity key={t.label} style={styles.pdTile} onPress={t.onPress}>

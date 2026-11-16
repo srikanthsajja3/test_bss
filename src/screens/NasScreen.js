@@ -67,6 +67,39 @@ export const NasScreen = ({ refreshSignal, onOpenPools }) => {
   const [deleting, setDeleting] = useState(null);
   const [search, setSearch] = useState('');
   const rowsRef = useRef([]);
+  // operators of one NAS (many-to-many): { nas, list, sel: {partner_id: true}, loading, saving, q }
+  const [ops, setOps] = useState(null);
+
+  const openOps = async (row) => {
+    setOps({ nas: row, list: [], sel: {}, loading: true, saving: false, q: '' });
+    const res = await OneBssApi.getNasOperators(row.nas_id);
+    if (!res.ok) {
+      setOps(null);
+      return toast.error(res.data?.message || 'Could not load operators');
+    }
+    const list = Array.isArray(res.data?.operators) ? res.data.operators : [];
+    const sel = {};
+    list.forEach((o) => { if (o.assigned) sel[o.partner_id] = true; });
+    setOps((x) => (x ? { ...x, list, sel, loading: false } : x));
+  };
+
+  const toggleOp = (o) => {
+    if (o.pools > 0) return toast.info(`${o.name} has an IP pool on this NAS — take the pool back on IP Pools first.`);
+    setOps((x) => ({ ...x, sel: { ...x.sel, [o.partner_id]: !x.sel[o.partner_id] } }));
+  };
+
+  const saveOps = async () => {
+    const ids = Object.keys(ops.sel).filter((k) => ops.sel[k]).map(Number);
+    setOps((x) => ({ ...x, saving: true }));
+    const res = await OneBssApi.setNasOperators(ops.nas.nas_id, ids);
+    if (!res.ok) {
+      setOps((x) => ({ ...x, saving: false }));
+      return toast.error(res.data?.message || 'Could not save operators');
+    }
+    toast.success(res.data?.message || 'Saved');
+    setOps(null);
+    load(false);
+  };
 
   const mergeStatus = (results) => {
     setRows((prev) => prev.map((r) => {
@@ -244,7 +277,11 @@ export const NasScreen = ({ refreshSignal, onOpenPools }) => {
                     <View style={{ flex: 1, minWidth: 160, flexDirection: 'row', flexWrap: 'wrap', gap: 4, paddingRight: 8 }}>
                       {(r.operators || []).length ? r.operators.map((o) => (
                         <View key={o.partner_id} style={s.opChip}><Text style={s.opChipText} numberOfLines={1}>{o.name}</Text></View>
-                      )) : <Text style={s.sub}>No pool given to an operator yet</Text>}
+                      )) : <Text style={s.sub}>Not given to any operator</Text>}
+                      <TouchableOpacity style={s.opAdd} onPress={() => openOps(r)} accessibilityLabel="Operators" title="Choose the operators of this NAS">
+                        <Feather name={(r.operators || []).length ? 'edit-2' : 'user-plus'} size={11} color={INDIGO} />
+                        <Text style={s.opAddText}>{(r.operators || []).length ? 'Change' : 'Give to operators'}</Text>
+                      </TouchableOpacity>
                     </View>
                     <View style={{ width: 150, flexDirection: 'row', justifyContent: 'flex-end', gap: 6 }}>
                       {confirmDel === r.nas_id ? (
@@ -281,6 +318,59 @@ export const NasScreen = ({ refreshSignal, onOpenPools }) => {
           </View>
         )}
       </ScrollView>
+
+      <ModalShell
+        visible={!!ops}
+        title={ops ? `Operators of ${ops.nas.nas_name || `NAS #${ops.nas.nas_id}`}` : ''}
+        icon="users"
+        iconColor={INDIGO}
+        onClose={() => setOps(null)}
+        busy={ops?.saving}
+        footer={
+          <>
+            <Btn label="Cancel" kind="ghost" onPress={() => setOps(null)} disabled={ops?.saving} />
+            <Btn label="Save" onPress={saveOps} loading={ops?.saving} disabled={ops?.loading} />
+          </>
+        }
+      >
+        {ops ? (
+          ops.loading ? (
+            <ActivityIndicator color={INDIGO} style={{ marginVertical: 20 }} />
+          ) : (
+            <>
+              <Text style={[s.sub, { marginTop: 0, marginBottom: 10 }]}>
+                One NAS can be given to many operators, and an operator can have many NAS. An operator sees the authentication logs of its own NAS.
+              </Text>
+              <View style={[s.search, { maxWidth: '100%', marginBottom: 8 }]}>
+                <Feather name="search" size={14} color="#94a3b8" />
+                <TextInput style={s.searchInput} value={ops.q} onChangeText={(v) => setOps((x) => ({ ...x, q: v }))} placeholder="Search operators…" placeholderTextColor="#94a3b8" />
+              </View>
+              <Text style={[s.sub, { marginBottom: 6 }]}>
+                {Object.values(ops.sel).filter(Boolean).length} of {ops.list.length} selected
+              </Text>
+              <ScrollView style={{ maxHeight: 340 }}>
+                {ops.list
+                  .filter((o) => !ops.q.trim() || `${o.name} ${o.partner_id}`.toLowerCase().includes(ops.q.trim().toLowerCase()))
+                  .map((o) => {
+                    const on = !!ops.sel[o.partner_id];
+                    const locked = o.pools > 0;
+                    return (
+                      <TouchableOpacity key={o.partner_id} style={[s.opRow, on && s.opRowOn]} onPress={() => toggleOp(o)}>
+                        <Feather name={on ? 'check-square' : 'square'} size={16} color={on ? INDIGO : '#94a3b8'} />
+                        <View style={{ flex: 1, minWidth: 0 }}>
+                          <Text style={[s.td, { fontWeight: on ? '700' : '500' }]} numberOfLines={1}>{o.name}</Text>
+                          <Text style={[s.sub, { marginTop: 0 }]}>#{o.partner_id}{locked ? ` · ${o.pools} IP pool${o.pools === 1 ? '' : 's'} here` : ''}</Text>
+                        </View>
+                        {locked ? <Feather name="lock" size={13} color="#94a3b8" /> : null}
+                      </TouchableOpacity>
+                    );
+                  })}
+                {!ops.list.length ? <Text style={s.sub}>No operator accounts yet.</Text> : null}
+              </ScrollView>
+            </>
+          )
+        ) : null}
+      </ModalShell>
 
       <ModalShell
         visible={!!form}
@@ -338,6 +428,10 @@ export const s = StyleSheet.create({
   dot: { width: 7, height: 7, borderRadius: 4 },
   opChip: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, backgroundColor: '#eef2ff', maxWidth: 180 },
   opChipText: { fontSize: 11, fontWeight: '700', color: '#3730a3' },
+  opAdd: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 999, borderWidth: 1, borderColor: '#c7d2fe', borderStyle: 'dashed' },
+  opAddText: { fontSize: 11, fontWeight: '700', color: INDIGO },
+  opRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 10, paddingVertical: 9, borderRadius: 8, borderWidth: 1, borderColor: '#f1f5f9', marginBottom: 6 },
+  opRowOn: { borderColor: '#c7d2fe', backgroundColor: '#f5f7ff' },
   iconBtn: { width: 32, height: 32, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', alignItems: 'center', justifyContent: 'center', backgroundColor: '#ffffff' },
   smallGhost: { paddingHorizontal: 10, height: 32, justifyContent: 'center', borderRadius: 8, backgroundColor: 'rgba(0,0,0,0.05)' },
   smallGhostText: { fontSize: 12, fontWeight: '700', color: '#334155' },

@@ -181,9 +181,15 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
     const totalMobiles = jobs.reduce((n, j) => n + j.mobiles.length, 0);
     const st = { done: 0, total: totalMobiles, ok: 0, notFound: 0, failed: 0, failures: [] };
     setSync({ ...st });
-    for (const j of jobs) {
+    for (let k = 0; k < jobs.length; k += 1) {
+      const j = jobs[k];
       if (cancelRef.current) break;
       const res = await OneBssApi.syncIptvMobiles(j.op, j.mobiles);
+      // the server stops after ~40 s and hands back the mobiles it did not reach: send them next
+      const left = res.ok && Array.isArray(res.data.remaining) ? res.data.remaining : [];
+      if (left.length) {
+        jobs.splice(k + 1, 0, { op: j.op, mobiles: left });
+      }
       if (res.ok) {
         st.ok += res.data.summary?.synced_ok || 0;
         (res.data.failures || []).forEach((f) => {
@@ -198,7 +204,7 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
         st.failed += j.mobiles.length;
         j.mobiles.forEach((m) => st.failures.push({ mobile: m, message: res.data?.message || 'Sync request failed' }));
       }
-      st.done += j.mobiles.length;
+      st.done += j.mobiles.length - left.length;
       setSync({ ...st });
     }
     setBusy(false); setStage('done');

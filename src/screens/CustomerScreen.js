@@ -9,6 +9,7 @@ import { AddCustomerScreen } from './AddCustomerScreen';
 import { IptvAccountDetails } from '../components/IptvAccountDetails';
 import { InternetRechargeModal } from '../components/internet/InternetRechargeModal';
 import { PasswordModal, NetworkingModal, SessionHistoryModal, AuthLogsModal, VerifyCustomerModal, DocumentsModal } from '../components/internet/AccountActionModals';
+import { CustomerComplaintsPanel } from '../components/support/ComplaintParts';
 import { can, canAny } from '../services/staffAccess';
 import { CustomerPhoto, isSuperAdmin, isAccountVerified, isAadhaarVerified, isRadiusVerified, aadhaarBlocksRecharge, iptvLabel } from '../components/internet/shared';
 import { AadhaarVerifyModal } from '../components/internet/AadhaarVerifyModal';
@@ -18,7 +19,7 @@ import { OttRechargeModal } from '../components/ott/OttRechargeModal';
 import { AddOttModal } from '../components/ott/AddOttModal';
 import { CustomerAccountsOverview, defaultRechargeType, formatApiDate, normaliseInternetAccount, normaliseIptvAccount } from '../components/CustomerAccountsOverview';
 import { CustomerLocationModal } from '../components/CustomerLocationModal';
-import { ColSearch, ColSelect, ColDateRange, FilterCell, dateRangeParams } from '../components/ColumnFilters';
+import { ColSearch, ColSelect, ColDateRange, FilterCell, TABLE_GUTTER, dateRangeParams } from '../components/ColumnFilters';
 import { CustomerDevicesModal } from '../components/CustomerDevicesModal';
 import { OnlineSessionPanel } from '../components/internet/OnlineSessionPanel';
 import { IptvImportModal } from '../components/iptv/IptvImportModal';
@@ -410,7 +411,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     const v = cust.aadhar_verified ?? cust.aadhaar_verified ?? cust.is_aadhar_verified ?? cust.is_aadhaar_verified ?? cust.verified;
     if (v === true || v === 1 || v === '1' || v === 'true' || String(v).toLowerCase() === 'verified') return true;
     const k = String(cust.kyc || '').toLowerCase();
-    if (!/\b(un|not|non)[\s_-]?verified\b|pending|failed/.test(k) && /\b(verified|aadhaar|scoreme|digilocker)\b/.test(k)) return true;
+    if (!/\b(un|not|non)[\s_-]?verified\b|pending|failed/.test(k) && /\b(verified|aadhaar|scoreme|quickekyc|digilocker)\b/.test(k)) return true;
     return false;
   };
 
@@ -2203,12 +2204,14 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       { id: 'sessions', label: 'Session History', short: 'Sessions', icon: 'list', disabled: !currentInternetAccount },
       { id: 'auth', label: 'Authentication Logs', short: 'Auth logs', icon: 'shield', disabled: !currentInternetAccount },
       { id: 'onu', label: 'ONU Details', short: 'ONU', icon: 'hard-drive', disabled: !currentInternetAccount },
+      { id: 'complaints', label: 'Complaints', short: 'Tickets', icon: 'alert-circle', disabled: !currentInternetAccount },
       ...(canSeeDocuments ? [{ id: 'documents', label: 'Documents', short: 'Docs', icon: 'file-text' }] : []),
     ].filter((t) => ( // staff: only the tabs its role allows
       t.id === 'password' ? can(user, 'internet.password', 'view')
         : t.id === 'mac' ? canAny(user, [['internet.mac_binding', 'view'], ['internet.ip_binding', 'view']])
           : t.id === 'sessions' ? can(user, 'internet.session_history')
           : t.id === 'auth' ? can(user, 'internet.auth_logs')
+          : t.id === 'complaints' ? can(user, 'support.complaints', 'view')
           : t.id === 'online' ? can(user, 'internet.live_session')
             : t.id === 'onu' ? canAny(user, [['networking.olt', 'view'], ['internet.customers', 'view']])
               : true
@@ -2397,6 +2400,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           <SessionHistoryModal inline visible internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} onClose={() => setInternetTab('basic')} />
         ) : internetTab === 'auth' && currentInternetAccount ? (
           <AuthLogsModal inline visible internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} onClose={() => setInternetTab('basic')} />
+        ) : internetTab === 'complaints' && currentInternetAccount ? (
+          <CustomerComplaintsPanel internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} user={user} />
         ) : internetTab === 'onu' && currentInternetAccount ? (
           <CustomerDevicesModal inline visible customer={{ ...currentInternetAccount, full_name: activeSubProfile?.name }} onClose={() => setInternetTab('basic')} />
         ) : internetTab === 'documents' && canSeeDocuments ? (
@@ -3016,7 +3021,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: viewMode === 'iptv' ? 1040 : 1280, width: '100%' }}>
           <View style={{ width: '100%' }}>
             {/* Table Header (on phones the table scrolls sideways) */}
-            <View style={styles.tableHeader}>
+            <View style={styles.tableHeader} dataSet={TABLE_GUTTER}>
               {viewMode === 'iptv' ? (
                 <>
                   <Text style={[styles.th, { flex: 1.7, minWidth: 140 }]}>STB / Box No.</Text>
@@ -3084,7 +3089,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             </View>
 
             {/* Filter row: one control per column, filters the whole list on the server */}
-            <View style={styles.excelFilterRow}>
+            <View style={styles.excelFilterRow} dataSet={TABLE_GUTTER}>
               {viewMode === 'iptv' ? (
                 <>
                   <FilterCell flex={1.7} minWidth={140}>
@@ -3168,7 +3173,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             </View>
 
             {/* Table Rows Body Container (ONLY SUBSCRIBER LIST ROWS SCROLL) */}
-            <ScrollView style={isMobile ? null : { maxHeight: 600 }} nestedScrollEnabled={true} keyboardShouldPersistTaps="handled">
+            <ScrollView style={isMobile ? null : { maxHeight: 600 }} nestedScrollEnabled={true} keyboardShouldPersistTaps="handled" dataSet={{ ...TABLE_GUTTER, scrolls: '1' }}>
             {listError && !loadingData ? (
               <View style={{ padding: 30, alignItems: 'center', justifyContent: 'center' }}>
                 <Feather name="alert-circle" size={24} color="#dc2626" />

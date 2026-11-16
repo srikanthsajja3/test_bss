@@ -27,7 +27,11 @@ const TAB_NEEDS = {
   customer_prices: [['prices.customer', 'view']],
   inventory: [['inventory.devices', 'view'], ['inventory.inward', 'view'], ['inventory.catalog', 'view']],
   wallet: [['wallet.view', 'allow']],
-  networking: [['networking.nas', 'view'], ['networking.ip_pools', 'view']],
+  networking: [['networking.nas', 'view'], ['networking.ip_pools', 'view'], ['networking.auth_logs', 'allow']],
+  auth_logs: [['networking.auth_logs', 'allow']],
+  complaints: [['support.complaints', 'view']],
+  backups: [['system.backups', 'view']],
+  leads: [['support.leads', 'view']],
   nas: [['networking.nas', 'view']],
   ip_pools: [['networking.ip_pools', 'view']],
   dhcp_devices: [['networking.dhcp', 'view']],
@@ -43,7 +47,7 @@ export const tabAllowed = (user, tab) => {
   return need ? canAny(user, need) : false;
 };
 
-const TAB_ORDER = ['dashboard', 'customers', 'iptv_customers', 'ott_customers', 'partners', 'wallet', 'customer_prices', 'inventory', 'nas', 'dhcp_devices', 'iptv_renewals', 'payu_payments', 'staff', 'activity'];
+const TAB_ORDER = ['dashboard', 'customers', 'iptv_customers', 'ott_customers', 'partners', 'wallet', 'customer_prices', 'inventory', 'complaints', 'leads', 'nas', 'auth_logs', 'dhcp_devices', 'iptv_renewals', 'payu_payments', 'backups', 'staff', 'activity'];
 
 /** Where a staff member lands (null = nothing allowed). */
 export const firstAllowedTab = (user) => TAB_ORDER.find((t) => tabAllowed(user, t)) || null;

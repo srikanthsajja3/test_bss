@@ -8,7 +8,7 @@ import { ModalShell, Btn, Note, sharedStyles } from './shared';
 
 /**
  * Aadhaar verification of ONE internet account (each account of a customer is verified on its own).
- * Same methods as Add Customer — Aadhaar OTP (ScoreMe) / DigiLocker, whichever the account's operator
+ * Same methods as Add Customer — Aadhaar OTP (ScoreMe / QuickeKYC) / DigiLocker, whichever the account's operator
  * has. On success the server tells RADIUS aadhar_verified=1 for the account and uploads the photo
  * (type 4) + Aadhaar XML (type 1); this shows what went through, with Retry (no new OTP) if not.
  *
@@ -27,6 +27,7 @@ const cleanText = (v) => String(v || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g
 const errMsg = (res, fallback) => cleanText(res && res.data && (res.data.error || res.data.message)) || fallback;
 const METHODS = {
   scoreme: { label: 'Aadhaar OTP', icon: 'smartphone', hint: 'OTP to the mobile linked with Aadhaar' },
+  quickekyc: { label: 'Aadhaar OTP (QuickeKYC)', icon: 'zap', hint: 'OTP to the mobile linked with Aadhaar' },
   digilocker: { label: 'DigiLocker', icon: 'shield', hint: 'Customer signs in to DigiLocker' },
 };
 const STEP_LABEL = { flag: 'Aadhaar verified in RADIUS', photo: 'Customer photo uploaded', xml: 'Aadhaar XML uploaded' };
@@ -65,6 +66,8 @@ export const AadhaarVerifyModal = ({ visible, onClose, account, customerName, on
   const [now, setNow] = useState(Date.now());
   const [sending, setSending] = useState(false);
   const [verifying, setVerifying] = useState(false);
+  const [otpRef, setOtpRef] = useState(''); // QuickeKYC: signed request reference between send and verify
+  const [env, setEnv] = useState(''); // QuickeKYC: 'sandbox' | 'live'
 
   // DigiLocker
   const [starting, setStarting] = useState(false);
@@ -97,6 +100,8 @@ export const AadhaarVerifyModal = ({ visible, onClose, account, customerName, on
     setMethod(null);
     setAadhaar('');
     setOtp('');
+    setOtpRef('');
+    setEnv('');
     setOtpSent(false);
     setResendAt(null);
     setPollError('');
@@ -113,7 +118,7 @@ export const AadhaarVerifyModal = ({ visible, onClose, account, customerName, on
       }
       const raw = Array.isArray(res.data?.providers) ? res.data.providers : Array.isArray(res.data?.data) ? res.data.data : [];
       const names = raw.map((p) => String(typeof p === 'string' ? p : p?.provider || p?.name || '').toLowerCase());
-      const list = ['scoreme', 'digilocker'].filter((m) => names.includes(m));
+      const list = ['scoreme', 'quickekyc', 'digilocker'].filter((m) => names.includes(m));
       setProviders(list);
       setMethod(list.length === 1 ? list[0] : null);
     })();
@@ -138,14 +143,19 @@ export const AadhaarVerifyModal = ({ visible, onClose, account, customerName, on
     }
   };
 
-  // ---------- ScoreMe ----------
+  // ---------- Aadhaar OTP (ScoreMe / QuickeKYC) ----------
+  const isQek = method === 'quickekyc';
   const sendOtp = async () => {
     if (!/^\d{12}$/.test(aadhaar)) return toast.warning('Enter the 12-digit Aadhaar number');
     setSending(true);
-    const res = await OneBssApi.accountAadhaarSendOtp(internetId, aadhaar);
+    const res = isQek ? await OneBssApi.quickekycSendOtp(aadhaar, { internetId }) : await OneBssApi.accountAadhaarSendOtp(internetId, aadhaar);
     if (!aliveRef.current) return;
     setSending(false);
     if (!isOk(res)) return toast.error(errMsg(res, 'Could not send the OTP'));
+    if (isQek) {
+      setOtpRef(res.data.otp_ref || '');
+      setEnv(res.data.env || '');
+    }
     toast.success(res.data.message || 'OTP sent to the mobile linked with Aadhaar');
     setOtpSent(true);
     setOtp('');
@@ -155,10 +165,15 @@ export const AadhaarVerifyModal = ({ visible, onClose, account, customerName, on
   const verifyOtp = async () => {
     if (!otp.trim()) return toast.warning('Enter the OTP');
     setVerifying(true);
-    const res = await OneBssApi.accountAadhaarVerifyOtp(internetId, aadhaar, otp.trim());
+    const res = isQek
+      ? await OneBssApi.quickekycVerifyOtp(aadhaar, otp.trim(), otpRef, { internetId })
+      : await OneBssApi.accountAadhaarVerifyOtp(internetId, aadhaar, otp.trim());
     if (!aliveRef.current) return;
     setVerifying(false);
-    if (!isOk(res)) return toast.error(errMsg(res, 'OTP verification failed'));
+    if (!isOk(res)) {
+      if (res.data?.expired) { setOtpSent(false); setOtp(''); setOtpRef(''); setResendAt(null); }
+      return toast.error(errMsg(res, 'OTP verification failed'));
+    }
     finish(res);
   };
 
@@ -328,7 +343,7 @@ export const AadhaarVerifyModal = ({ visible, onClose, account, customerName, on
               </View>
               <Text style={s.resultName} numberOfLines={1}>{cust.full_name || '—'}</Text>
               <Text style={s.accSub}>
-                {[cust.masked_aadhaar, cust.dob ? `DOB ${cust.dob}` : null, kyc?.channel ? `via ${kyc.channel === 'scoreme' ? 'Aadhaar OTP' : kyc.channel === 'digilocker' ? 'DigiLocker' : kyc.channel}` : null].filter(Boolean).join(' · ')}
+                {[cust.masked_aadhaar, cust.dob ? `DOB ${cust.dob}` : null, kyc?.channel ? `via ${kyc.channel === 'scoreme' ? 'Aadhaar OTP' : kyc.channel === 'quickekyc' ? 'QuickeKYC' : kyc.channel === 'digilocker' ? 'DigiLocker' : kyc.channel}` : null].filter(Boolean).join(' · ')}
               </Text>
             </View>
           </View>
@@ -377,8 +392,9 @@ export const AadhaarVerifyModal = ({ visible, onClose, account, customerName, on
                 ))}
               </View>
             </>
-          ) : method === 'scoreme' ? (
+          ) : method === 'scoreme' || method === 'quickekyc' ? (
             <>
+              {isQek && env === 'sandbox' ? <Note tone="warning" text="QuickeKYC is in SANDBOX (test) mode — no real Aadhaar check is done." /> : null}
               <Text style={sharedStyles.label}>AADHAAR NUMBER</Text>
               <TextInput
                 style={[sharedStyles.input, s.mono]}
@@ -390,7 +406,7 @@ export const AadhaarVerifyModal = ({ visible, onClose, account, customerName, on
                 editable={!otpSent && !busy}
               />
               {!otpSent ? (
-                <View style={{ marginTop: 12, alignSelf: 'flex-start' }}>
+                <View style={{ marginTop: 12, flexDirection: 'row', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
                   <Btn label="Send OTP" icon="send" onPress={sendOtp} loading={sending} disabled={aadhaar.length !== 12} />
                 </View>
               ) : (
@@ -411,7 +427,7 @@ export const AadhaarVerifyModal = ({ visible, onClose, account, customerName, on
                     <TouchableOpacity onPress={sendOtp} disabled={resendLeft > 0 || sending}>
                       <Text style={[s.link, (resendLeft > 0 || sending) && { color: '#94a3b8' }]}>{resendLeft > 0 ? `Resend in ${resendLeft}s` : 'Resend OTP'}</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity onPress={() => { setOtpSent(false); setOtp(''); setResendAt(null); }} disabled={verifying}>
+                    <TouchableOpacity onPress={() => { setOtpSent(false); setOtp(''); setOtpRef(''); setResendAt(null); }} disabled={verifying}>
                       <Text style={s.link}>Change number</Text>
                     </TouchableOpacity>
                   </View>

@@ -152,6 +152,14 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
     ]);
     if (!inetRes.ok && !inetRes.data?.already_running) notes.push(`Internet: ${inetRes.data?.message || 'sync failed'}`);
     if (!iptvRes.ok && !iptvRes.data?.already_running) notes.push(`IPTV: ${iptvRes.data?.message || 'sync failed'}`);
+    // the IPTV sync keeps running on the server after it replies: wait for it before "done"
+    if (iptvRes.data?.background || iptvRes.data?.already_running) {
+      refreshData(true);
+      const done = await OneBssApi.waitIptvBulkSync(currentPartnerId);
+      const last = done.data?.last;
+      if (last?.error) notes.push(`IPTV: ${last.error}`);
+      else if (!done.ok) notes.push(`IPTV: ${done.data?.message || 'could not get the sync result'}`);
+    }
     setBgSync({ state: notes.length ? 'failed' : 'done', at: new Date(), notes });
     refreshData(true);
   };

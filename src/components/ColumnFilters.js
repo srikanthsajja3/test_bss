@@ -283,10 +283,30 @@ export const ColDateRange = ({ value, onChange, placeholder = 'Select date' }) =
   );
 };
 
-/** Wraps one filter cell so it lines up with its column header (same flex / minWidth). */
+/**
+ * Wraps one filter cell so it lines up with its column header (same flex / minWidth).
+ * The gap to the next box is a margin on the inner view: padding on the cell itself would
+ * change how the row shares out its width, so the boxes would drift away from the headers.
+ */
 export const FilterCell = ({ flex, minWidth, children }) => (
-  <View style={{ flex, minWidth, paddingRight: 8, justifyContent: 'center' }}>{children}</View>
+  <View style={{ flex, minWidth, justifyContent: 'center' }}>
+    <View style={{ marginRight: 10 }}>{children}</View>
+  </View>
 );
+
+/**
+ * Web: header, filter row and the scrolling body all keep the same space for a vertical
+ * scrollbar, so the columns stay lined up whether the list scrolls or not.
+ * Use on each of them: dataSet={TABLE_GUTTER}
+ */
+export const TABLE_GUTTER = { tableGutter: '1' };
+if (Platform.OS === 'web' && typeof document !== 'undefined' && !document.getElementById('onebss-table-gutter')) {
+  const css = document.createElement('style');
+  css.id = 'onebss-table-gutter';
+  css.textContent = '[data-table-gutter="1"]{scrollbar-gutter:stable;}'
+    + '[data-table-gutter="1"]:not([data-scrolls]){overflow-y:hidden;}';
+  document.head.appendChild(css);
+}
 
 const s = StyleSheet.create({
   box: {

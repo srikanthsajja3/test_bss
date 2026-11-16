@@ -15,7 +15,8 @@ export const fixDocUrl = (value) => {
   return idx > 0 ? s.slice(idx) : s;
 };
 
-export const isImageUrl = (url) => /\.(jpe?g|png|gif|webp|bmp)(\?|$)/i.test(url || '');
+// also private KYC links: kyc_file.php?f=photos%2Fabc.jpg&e=…&s=…
+export const isImageUrl = (url) => /\.(jpe?g|png|gif|webp|bmp)(\?|&|$)/i.test(url || '');
 
 export const openExternal = (url) => {
   if (!url) return;
@@ -40,7 +41,7 @@ export const isAccountVerified = (acc) => {
     return true;
   }
   const k = String(acc.kyc || '').toLowerCase();
-  if (!/\b(un|not|non)[\s_-]?verified\b|pending|failed/.test(k) && /\b(verified|aadhaar|scoreme|digilocker)\b/.test(k)) {
+  if (!/\b(un|not|non)[\s_-]?verified\b|pending|failed/.test(k) && /\b(verified|aadhaar|scoreme|quickekyc|digilocker)\b/.test(k)) {
     return true;
   }
   return false;

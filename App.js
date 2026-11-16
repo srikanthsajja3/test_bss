@@ -18,6 +18,10 @@ import { PayuPaymentsScreen } from './src/screens/PayuPaymentsScreen';
 import { WalletScreen } from './src/screens/WalletScreen';
 import { NasScreen } from './src/screens/NasScreen';
 import { IpPoolsScreen } from './src/screens/IpPoolsScreen';
+import { AuthLogsScreen } from './src/screens/AuthLogsScreen';
+import { ComplaintsScreen } from './src/screens/ComplaintsScreen';
+import { LeadsScreen } from './src/screens/LeadsScreen';
+import { BackupsScreen } from './src/screens/BackupsScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { StaffScreen } from './src/screens/StaffScreen';
 import { ActivityLogScreen } from './src/screens/ActivityLogScreen';
@@ -93,7 +97,7 @@ function MainApp() {
           const [routePart] = hash.split('&');
           const [rawTab, rawFilter] = routePart.split('?filter=');
           const tab = rawTab ? rawTab.split('?')[0] : '';
-          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'dhcp_devices', 'iptv_renewals', 'payu_payments', 'wallet', 'nas', 'ip_pools', 'staff', 'activity'].includes(tab)) {
+          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'dhcp_devices', 'iptv_renewals', 'payu_payments', 'wallet', 'nas', 'ip_pools', 'auth_logs', 'complaints', 'leads', 'backups', 'staff', 'activity'].includes(tab)) {
             const filter = rawFilter ? rawFilter.split('?')[0].split('&')[0] : 'all';
             const rangeMatch = hash.match(/[?&]range=([a-z0-9_]+)/);
             return { tab, filter, range: rangeMatch ? rangeMatch[1] : '' };
@@ -101,7 +105,7 @@ function MainApp() {
         }
         const savedTab = localStorage.getItem('onebss_active_tab');
         const savedFilter = localStorage.getItem('onebss_filter');
-        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'dhcp_devices', 'iptv_renewals', 'payu_payments', 'wallet', 'nas', 'ip_pools', 'staff', 'activity'].includes(savedTab)) {
+        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'dhcp_devices', 'iptv_renewals', 'payu_payments', 'wallet', 'nas', 'ip_pools', 'auth_logs', 'complaints', 'leads', 'backups', 'staff', 'activity'].includes(savedTab)) {
           return { tab: savedTab, filter: savedFilter || 'all', range: '' };
         }
       }
@@ -498,6 +502,17 @@ function MainApp() {
         return activeTab === 'nas'
           ? <NasScreen refreshSignal={globalRefreshKey} onOpenPools={() => setActiveTab('ip_pools')} />
           : <IpPoolsScreen refreshSignal={globalRefreshKey} />;
+      case 'complaints':
+        return <ComplaintsScreen user={user} refreshSignal={globalRefreshKey} />;
+      case 'leads':
+        return <LeadsScreen user={user} refreshSignal={globalRefreshKey} />;
+      case 'backups':
+        // super admin only (the API checks it too)
+        if (String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin') return null;
+        return <BackupsScreen user={user} refreshSignal={globalRefreshKey} />;
+      case 'auth_logs':
+        // super admin: every NAS · admin: its operators' NAS · operator: its own NAS (the API enforces it)
+        return <AuthLogsScreen user={user} refreshSignal={globalRefreshKey} />;
       case 'payu_payments':
         // super admin only
         if (String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin') {
@@ -557,6 +572,14 @@ function MainApp() {
         return { title: 'NAS' };
       case 'ip_pools':
         return { title: 'IP Pools' };
+      case 'complaints':
+        return { title: 'Complaints', subtitle: 'Customer tickets — raise, assign, resolve and close' };
+      case 'leads':
+        return { title: 'Leads', subtitle: 'Prospective customers' };
+      case 'backups':
+        return { title: 'Backups', subtitle: 'KYC documents and database backups on Google Drive' };
+      case 'auth_logs':
+        return { title: 'Auth Logs', subtitle: 'RADIUS login attempts (accept / reject) through a NAS' };
       case 'wallet':
         return { title: 'Wallet', subtitle: 'Add money and see your transactions' };
       case 'staff':
