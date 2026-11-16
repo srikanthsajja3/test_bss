@@ -109,7 +109,7 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
                     : item.id === 'customers'
                       ? customersTabFor(user)
                       : item.id === 'inventory'
-                        ? (INVENTORY_TABS.includes(activeTab) ? activeTab : 'inventory_devices')
+                        ? 'inventory_devices'
                         : item.id
                 )}
                 title={item.label}

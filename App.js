@@ -76,6 +76,14 @@ class ErrorBoundary extends React.Component {
   }
 }
 
+const VALID_TABS = [
+  'dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers',
+  'customer_prices', 'inventory', 'inventory_devices', 'inventory_configured',
+  'inventory_inward', 'inventory_catalog', 'inventory_scanner', 'inventory_add',
+  'dhcp_devices', 'iptv_renewals', 'payu_payments', 'wallet', 'nas', 'ip_pools',
+  'auth_logs', 'complaints', 'leads', 'backups', 'staff', 'activity',
+];
+
 export default function App() {
   return (
     <ErrorBoundary>
@@ -97,7 +105,7 @@ function MainApp() {
           const [routePart] = hash.split('&');
           const [rawTab, rawFilter] = routePart.split('?filter=');
           const tab = rawTab ? rawTab.split('?')[0] : '';
-          if (['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'dhcp_devices', 'iptv_renewals', 'payu_payments', 'wallet', 'nas', 'ip_pools', 'auth_logs', 'complaints', 'leads', 'backups', 'staff', 'activity'].includes(tab)) {
+          if (VALID_TABS.includes(tab)) {
             const filter = rawFilter ? rawFilter.split('?')[0].split('&')[0] : 'all';
             const rangeMatch = hash.match(/[?&]range=([a-z0-9_]+)/);
             return { tab, filter, range: rangeMatch ? rangeMatch[1] : '' };
@@ -105,7 +113,7 @@ function MainApp() {
         }
         const savedTab = localStorage.getItem('onebss_active_tab');
         const savedFilter = localStorage.getItem('onebss_filter');
-        if (savedTab && ['dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers', 'customer_prices', 'inventory', 'dhcp_devices', 'iptv_renewals', 'payu_payments', 'wallet', 'nas', 'ip_pools', 'auth_logs', 'complaints', 'leads', 'backups', 'staff', 'activity'].includes(savedTab)) {
+        if (savedTab && VALID_TABS.includes(savedTab)) {
           return { tab: savedTab, filter: savedFilter || 'all', range: '' };
         }
       }
@@ -498,6 +506,7 @@ function MainApp() {
         const currentSubTab = subTabMap[activeTab] || 'devices';
         return (
           <InventoryScreen
+            key={`inv_${currentSubTab}`}
             user={user}
             refreshSignal={globalRefreshKey}
             initialTab={currentSubTab}
