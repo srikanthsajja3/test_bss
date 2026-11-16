@@ -410,7 +410,7 @@ export const ConfiguredBoxesView = ({
           </View>
 
           {/* Clear Filters */}
-          {(vendorFilter !== 'all' || partnerFilter !== 'all' || searchQuery) && (
+          {Boolean(vendorFilter !== 'all' || partnerFilter !== 'all' || searchQuery) && (
             <TouchableOpacity
               style={styles.clearBtn}
               onPress={() => {

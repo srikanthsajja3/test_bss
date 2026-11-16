@@ -487,23 +487,24 @@ function MainApp() {
         // operators: one customer price per package for all their customers
         return <CustomerPricesPage key={`cp_${globalRefreshKey}`} partnerId={user?.partner_id} partnerName={user?.partner_name} readOnly={String(user?.role || '').toLowerCase() !== 'operator'} />;
       case 'inventory':
+      case 'inventory_inward':
       case 'inventory_devices':
       case 'inventory_configured':
-      case 'inventory_inward':
       case 'inventory_catalog':
       case 'inventory_scanner':
       case 'inventory_add': {
-        // everyone: super admin all devices, admins their tree, operators their own devices
+        const isOperator = String(user?.role || '').toLowerCase() === 'operator';
+        const defaultLanding = isOperator ? 'devices' : 'inward';
         const subTabMap = {
-          inventory: 'devices',
+          inventory: defaultLanding,
+          inventory_inward: 'inward',
           inventory_devices: 'devices',
           inventory_configured: 'configured',
-          inventory_inward: 'inward',
           inventory_catalog: 'catalog',
           inventory_scanner: 'scanner',
           inventory_add: 'add',
         };
-        const currentSubTab = subTabMap[activeTab] || 'devices';
+        const currentSubTab = subTabMap[activeTab] || defaultLanding;
         return (
           <InventoryScreen
             key={`inv_${currentSubTab}`}

@@ -65,7 +65,7 @@ const TABLE_COLS = {
   actions:  { width: 105, alignItems: 'flex-end', justifyContent: 'center' },
 };
 
-export const InventoryScreen = ({ user, refreshSignal, initialTab = 'devices', onTabChange }) => {
+export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
   const isSuper = isSuperAdmin(user);
@@ -121,8 +121,9 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab = 'devices', o
   const [pageSize, setPageSize] = useState(25);
   const [viewMode, setViewMode] = useState('table'); // 'table' (default) or 'cards' on mobile
 
-  // Active Full-Page Tab: 'devices' | 'inward' | 'catalog' | 'scanner' | 'add'
-  const [inventoryTab, setInventoryTabState] = useState(initialTab || 'devices');
+  // Active Full-Page Tab: 'inward' (default) | 'devices' | 'configured' | 'catalog' | 'scanner' | 'add'
+  const defaultTab = isOperator ? 'devices' : 'inward';
+  const [inventoryTab, setInventoryTabState] = useState(initialTab || defaultTab);
 
   const setInventoryTab = useCallback((t) => {
     setInventoryTabState(t);
@@ -669,80 +670,6 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab = 'devices', o
               {isSuper ? 'Master Inventory' : isOperator ? 'My Assigned Devices' : 'Branch Inventory'}
             </Text>
           </View>
-
-          {!isOperator && (canManageInventory || canInward || canCatalog) && (
-            <View style={[styles.headerActions, isMobile && styles.headerActionsMobile]}>
-              <TouchableOpacity
-                style={[styles.navTabBtn, inventoryTab === 'devices' && styles.navTabBtnActive]}
-                onPress={() => setInventoryTab('devices')}
-              >
-                <Feather name="box" size={13} color={inventoryTab === 'devices' ? '#ffffff' : '#334155'} />
-                <Text style={[styles.navTabBtnText, inventoryTab === 'devices' && styles.navTabBtnTextActive]}>
-                  Devices
-                </Text>
-              </TouchableOpacity>
-
-              {canEditDevice ? (
-              <TouchableOpacity
-                style={[styles.navTabBtn, inventoryTab === 'configured' && styles.navTabBtnActive]}
-                onPress={() => setInventoryTab('configured')}
-              >
-                <MaterialCommunityIcons name="checkbox-marked-circle-outline" size={15} color={inventoryTab === 'configured' ? '#ffffff' : '#334155'} />
-                <Text style={[styles.navTabBtnText, inventoryTab === 'configured' && styles.navTabBtnTextActive]}>
-                  Configured Boxes
-                </Text>
-              </TouchableOpacity>
-              ) : null}
-
-              {canInward ? (
-              <TouchableOpacity
-                style={[styles.navTabBtn, inventoryTab === 'inward' && styles.navTabBtnActive]}
-                onPress={() => setInventoryTab('inward')}
-              >
-                <MaterialCommunityIcons name="truck-delivery" size={15} color={inventoryTab === 'inward' ? '#ffffff' : '#334155'} />
-                <Text style={[styles.navTabBtnText, inventoryTab === 'inward' && styles.navTabBtnTextActive]}>
-                  Inward Stock
-                </Text>
-              </TouchableOpacity>
-              ) : null}
-
-              {canCatalog ? (
-              <TouchableOpacity
-                style={[styles.navTabBtn, inventoryTab === 'catalog' && styles.navTabBtnActive]}
-                onPress={() => setInventoryTab('catalog')}
-              >
-                <Feather name="layers" size={13} color={inventoryTab === 'catalog' ? '#ffffff' : '#334155'} />
-                <Text style={[styles.navTabBtnText, inventoryTab === 'catalog' && styles.navTabBtnTextActive]}>
-                  Vendors & Models
-                </Text>
-              </TouchableOpacity>
-              ) : null}
-
-              {canManageInventory ? (
-              <TouchableOpacity
-                style={[styles.navTabBtn, inventoryTab === 'scanner' && styles.navTabBtnActive]}
-                onPress={() => setInventoryTab('scanner')}
-              >
-                <Feather name="maximize" size={13} color={inventoryTab === 'scanner' ? '#ffffff' : '#334155'} />
-                <Text style={[styles.navTabBtnText, inventoryTab === 'scanner' && styles.navTabBtnTextActive]}>
-                  Bulk Scan
-                </Text>
-              </TouchableOpacity>
-              ) : null}
-
-              {canManageInventory ? (
-              <TouchableOpacity
-                style={[styles.navTabBtn, inventoryTab === 'add' && styles.navTabBtnActive]}
-                onPress={() => setInventoryTab('add')}
-              >
-                <Feather name="plus-circle" size={13} color={inventoryTab === 'add' ? '#ffffff' : '#334155'} />
-                <Text style={[styles.navTabBtnText, inventoryTab === 'add' && styles.navTabBtnTextActive]}>
-                  Add Device
-                </Text>
-              </TouchableOpacity>
-              ) : null}
-            </View>
-          )}
         </View>
 
         {/* ======================================================== */}

@@ -109,7 +109,7 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
                     : item.id === 'customers'
                       ? customersTabFor(user)
                       : item.id === 'inventory'
-                        ? 'inventory_devices'
+                        ? (isOperator ? 'inventory_devices' : 'inventory_inward')
                         : item.id
                 )}
                 title={item.label}
@@ -213,24 +213,49 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
 
               {item.id === 'inventory' && !isCollapsed && (
                 <View style={styles.treeContainer}>
-                  {/* Tree branch 1: Devices Stock */}
+                  {/* Tree branch 1: Inward Stock (FIRST OPTION) */}
+                  {!isOperator && tabAllowed(user, 'inventory_inward') ? (
+                    <TouchableOpacity
+                      style={[
+                        styles.treeSubItem,
+                        (activeTab === 'inventory_inward' || (!isOperator && activeTab === 'inventory')) && styles.treeSubItemActiveInventory,
+                      ]}
+                      onPress={() => onSelectTab('inventory_inward')}
+                    >
+                      <MaterialCommunityIcons
+                        name="truck-delivery"
+                        size={14}
+                        color={(activeTab === 'inventory_inward' || (!isOperator && activeTab === 'inventory')) ? '#0284c7' : COLORS.textMuted}
+                      />
+                      <Text
+                        style={[
+                          styles.treeSubText,
+                          (activeTab === 'inventory_inward' || (!isOperator && activeTab === 'inventory')) && styles.treeSubTextActiveInventory,
+                        ]}
+                      >
+                        Inward Stock
+                      </Text>
+                    </TouchableOpacity>
+                  ) : null}
+
+                  {/* Tree branch 2: Devices Stock */}
                   {tabAllowed(user, 'inventory_devices') ? (
                     <TouchableOpacity
                       style={[
                         styles.treeSubItem,
-                        (activeTab === 'inventory' || activeTab === 'inventory_devices') && styles.treeSubItemActiveInventory,
+                        (activeTab === 'inventory_devices' || (isOperator && activeTab === 'inventory')) && styles.treeSubItemActiveInventory,
                       ]}
                       onPress={() => onSelectTab('inventory_devices')}
                     >
                       <Feather
                         name="box"
                         size={13}
-                        color={(activeTab === 'inventory' || activeTab === 'inventory_devices') ? '#0284c7' : COLORS.textMuted}
+                        color={(activeTab === 'inventory_devices' || (isOperator && activeTab === 'inventory')) ? '#0284c7' : COLORS.textMuted}
                       />
                       <Text
                         style={[
                           styles.treeSubText,
-                          (activeTab === 'inventory' || activeTab === 'inventory_devices') && styles.treeSubTextActiveInventory,
+                          (activeTab === 'inventory_devices' || (isOperator && activeTab === 'inventory')) && styles.treeSubTextActiveInventory,
                         ]}
                       >
                         {isOperator ? 'My Devices' : 'Devices Stock'}
@@ -240,7 +265,7 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
 
                   {!isOperator && (
                     <>
-                      {/* Tree branch 2: Configured Boxes */}
+                      {/* Tree branch 3: Configured Boxes */}
                       {tabAllowed(user, 'inventory_configured') ? (
                         <TouchableOpacity
                           style={[
@@ -261,31 +286,6 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
                             ]}
                           >
                             Configured Boxes
-                          </Text>
-                        </TouchableOpacity>
-                      ) : null}
-
-                      {/* Tree branch 3: Inward Stock */}
-                      {tabAllowed(user, 'inventory_inward') ? (
-                        <TouchableOpacity
-                          style={[
-                            styles.treeSubItem,
-                            activeTab === 'inventory_inward' && styles.treeSubItemActiveInventory,
-                          ]}
-                          onPress={() => onSelectTab('inventory_inward')}
-                        >
-                          <MaterialCommunityIcons
-                            name="truck-delivery"
-                            size={14}
-                            color={activeTab === 'inventory_inward' ? '#0284c7' : COLORS.textMuted}
-                          />
-                          <Text
-                            style={[
-                              styles.treeSubText,
-                              activeTab === 'inventory_inward' && styles.treeSubTextActiveInventory,
-                            ]}
-                          >
-                            Inward Stock
                           </Text>
                         </TouchableOpacity>
                       ) : null}
