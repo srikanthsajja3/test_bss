@@ -223,7 +223,10 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
 
     if (typeof window !== 'undefined' && custId) {
       setTimeout(() => {
-        window.location.hash = `${tabName}?sub_id=${encodeURIComponent(custId)}`;
+        // open the account that was found (not just the customer's overview)
+        const open = isIptv ? (c.iptv_id ? `&open=iptv_${encodeURIComponent(c.iptv_id)}` : '')
+          : (c.internet_id ? `&open=int_${encodeURIComponent(c.internet_id)}` : c.username ? `&open=int_${encodeURIComponent(c.username)}` : '');
+        window.location.hash = `${tabName}?sub_id=${encodeURIComponent(custId)}${open}`;
       }, 50);
     }
   };

@@ -214,7 +214,12 @@ const AadhaarLine = ({ raw, onVerify }) => {
   );
 };
 
-const AccountCard = ({ account, isMobile, onInternetRecharge, onIptvRecharge, onOttRecharge, onOttDeactivate, onVerify, onVerifyCustomer, onDetails, onRecheck, onRename, readOnly }) => {
+const AccountCard = ({ account, isMobile, onInternetRecharge, onIptvRecharge, onOttRecharge, onOttDeactivate, onVerify, onVerifyCustomer, onDetails, onRecheck, onRename, readOnly, customerMobile = '', onUnlinkIptv }) => {
+  // IPTV account linked by hand: registered at Pioneer on another mobile than the customer's
+  const iptvMobile = account.kind === 'iptv' ? String(account.raw?.iptv_mobile || '').replace(/\D/g, '').slice(-10) : '';
+  const linkedByHand = iptvMobile.length === 10 && iptvMobile !== String(customerMobile || '').replace(/\D/g, '').slice(-10);
+  const [confirmUnlink, setConfirmUnlink] = React.useState(false);
+  const [unlinking, setUnlinking] = React.useState(false);
   const k = KIND[account.kind];
   const expiry = describeExpiry(account.expiration);
   const isInternet = account.kind === 'internet';
@@ -268,6 +273,29 @@ const AccountCard = ({ account, isMobile, onInternetRecharge, onIptvRecharge, on
           ) : (
             <Text style={styles.accSubtitle} numberOfLines={1}>{account.subtitle}</Text>
           )}
+          {linkedByHand ? (
+            <View style={styles.linkedRow}>
+              <Feather name="link" size={11} color="#6d28d9" />
+              <Text style={styles.linkedText} numberOfLines={1}>Linked · IPTV mobile {iptvMobile}</Text>
+              {onUnlinkIptv && !readOnly ? (
+                confirmUnlink ? (
+                  <>
+                    <TouchableOpacity
+                      disabled={unlinking}
+                      onPress={async () => { setUnlinking(true); await onUnlinkIptv(account.raw); setUnlinking(false); setConfirmUnlink(false); }}
+                    >
+                      <Text style={[styles.unlinkText, { color: '#b91c1c' }]}>{unlinking ? 'Unlinking…' : 'Confirm unlink'}</Text>
+                    </TouchableOpacity>
+                    {!unlinking ? (
+                      <TouchableOpacity onPress={() => setConfirmUnlink(false)}><Text style={styles.unlinkText}>Cancel</Text></TouchableOpacity>
+                    ) : null}
+                  </>
+                ) : (
+                  <TouchableOpacity onPress={() => setConfirmUnlink(true)}><Text style={styles.unlinkText}>Unlink</Text></TouchableOpacity>
+                )
+              ) : null}
+            </View>
+          ) : null}
         </View>
         <Pill text={account.statusText} tone={statusTone(account.statusText, account.statusColor)} />
       </View>
@@ -392,7 +420,7 @@ export const defaultRechargeType = (account) => {
  *  onInternetRecharge(rawInternetAccount, advance)  opens the plan-picker recharge modal
  *  onVerify(rawInternetAccount)                     opens Verify Customer (required before recharge)
  */
-export const CustomerAccountsOverview = ({ customer, loading = false, syncing = false, syncState = null, onBack, onOpenDetails, onInternetRecharge, onIptvRecharge, onVerify, onVerifyCustomer, onRefresh, onModifyMobile: onModifyMobileProp, onAddIptv, onComboRecharge: onComboRechargeProp, onRecheck, onOttRecharge, onAddOtt: onAddOttProp, onOttDeactivate, readOnly = false, operatorNames = {} }) => {
+export const CustomerAccountsOverview = ({ customer, loading = false, syncing = false, syncState = null, onBack, onOpenDetails, onInternetRecharge, onIptvRecharge, onVerify, onVerifyCustomer, onRefresh, onModifyMobile: onModifyMobileProp, onAddIptv, onComboRecharge: onComboRechargeProp, onRecheck, onOttRecharge, onAddOtt: onAddOttProp, onOttDeactivate, onUnlinkIptv, readOnly = false, operatorNames = {} }) => {
   // Admins (super distributor / distributor / sub distributor) only view: no recharge, edits or adds.
   const onModifyMobile = readOnly ? null : onModifyMobileProp;
   const onComboRecharge = readOnly ? null : onComboRechargeProp;
@@ -631,6 +659,8 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
         readOnly={readOnly}
         onDetails={(a) => onOpenDetails(a.kind, a.index)}
         onRename={(raw) => { setRenameText(raw?.device_name || ''); setRenameFor(raw); }}
+        customerMobile={customer?.mobile || customer?.cust_mobileno || ''}
+        onUnlinkIptv={onUnlinkIptv}
       />
     ));
 
@@ -1090,6 +1120,9 @@ export const CustomerAccountsOverview = ({ customer, loading = false, syncing = 
 };
 
 const styles = StyleSheet.create({
+  linkedRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 3, flexWrap: 'wrap' },
+  linkedText: { fontSize: 11.5, color: '#6d28d9', fontWeight: '600' },
+  unlinkText: { fontSize: 11.5, fontWeight: '700', color: '#475569', textDecorationLine: 'underline' },
   container: { flex: 1, width: '100%', backgroundColor: COLORS.bgSecondary },
   backBtn: { flexDirection: 'row', alignItems: 'center', alignSelf: 'flex-start', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#e5e9f0' },
   backBtnText: { fontSize: 12, fontWeight: '700', color: COLORS.textMain },

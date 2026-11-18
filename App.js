@@ -25,7 +25,7 @@ import { BackupsScreen } from './src/screens/BackupsScreen';
 import { LoginScreen } from './src/screens/LoginScreen';
 import { StaffScreen } from './src/screens/StaffScreen';
 import { ActivityLogScreen } from './src/screens/ActivityLogScreen';
-import { isStaffUser, tabAllowed, firstAllowedTab } from './src/services/staffAccess';
+import { isStaffUser, tabAllowed, firstAllowedTab, inventoryHome } from './src/services/staffAccess';
 import { ToastContainer, toast } from 'react-toastify';
 import { createPortal } from 'react-dom';
 
@@ -306,6 +306,12 @@ function MainApp() {
     return () => { gone = true; };
   }, [staffIdForRefresh, globalRefreshKey]);
 
+  // Super-admin-only pages (Auth Logs): anyone else opening the link lands on the dashboard
+  React.useEffect(() => {
+    if (!user || isStaffUser(user) || activeTab === 'login') return;
+    if (!tabAllowed(user, activeTab)) setActiveTab('dashboard');
+  }, [activeTab, user]);
+
   // Staff: a page its role doesn't allow (typed link, old saved tab) goes to the first allowed one
   React.useEffect(() => {
     if (!user || !isStaffUser(user) || activeTab === 'login') return;
@@ -490,15 +496,18 @@ function MainApp() {
       case 'inventory_inward':
       case 'inventory_devices':
       case 'inventory_catalog': {
-        const isOperator = String(user?.role || '').toLowerCase() === 'operator';
-        const defaultLanding = isOperator ? 'devices' : 'inward';
+        // master stock (Inward Stock, Vendors & Models) is the super admin's; admins and
+        // operators only see their own devices. Staff get the first page their role allows.
+        const isSuperInv = String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') === 'superadmin';
+        const home = inventoryHome(user, isSuperInv).replace('inventory_', '');
         const subTabMap = {
-          inventory: defaultLanding,
+          inventory: home,
           inventory_inward: 'inward',
           inventory_devices: 'devices',
           inventory_catalog: 'catalog',
         };
-        const currentSubTab = subTabMap[activeTab] || defaultLanding;
+        let currentSubTab = subTabMap[activeTab] || home;
+        if (!isSuperInv || !tabAllowed(user, `inventory_${currentSubTab}`)) currentSubTab = home;
         return (
           <InventoryScreen
             key={`inv_${currentSubTab}`}
@@ -541,7 +550,8 @@ function MainApp() {
         if (String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin') return null;
         return <BackupsScreen user={user} refreshSignal={globalRefreshKey} />;
       case 'auth_logs':
-        // super admin: every NAS · admin: its operators' NAS · operator: its own NAS (the API enforces it)
+        // super admin (and its staff) only — the API enforces it too
+        if (String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin') return null;
         return <AuthLogsScreen user={user} refreshSignal={globalRefreshKey} />;
       case 'payu_payments':
         // super admin only

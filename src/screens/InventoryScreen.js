@@ -74,6 +74,8 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
   const canManageInventory = isSuper && !isOperator && can(user, 'inventory.devices', 'add');
   const canInward = isSuper && !isOperator && can(user, 'inventory.inward', 'view');
   const canCatalog = isSuper && !isOperator && can(user, 'inventory.catalog', 'view');
+  const canAddInward = canInward && can(user, 'inventory.inward', 'add');
+  const canAddCatalog = canCatalog && can(user, 'inventory.catalog', 'add');
   const canAssign = isSuper && !isOperator && can(user, 'inventory.assign');
   const canEditDevice = isSuper && !isOperator && can(user, 'inventory.devices', 'edit');
   const canDeleteDevice = isSuper && !isOperator && can(user, 'inventory.devices', 'delete');
@@ -120,8 +122,10 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
   const [viewMode, setViewMode] = useState('table'); // 'table' (default) or 'cards' on mobile
 
   // Active Full-Page Tab: 'inward' (default) | 'devices' | 'configured' | 'catalog' | 'scanner' | 'add'
-  const defaultTab = isOperator ? 'devices' : 'inward';
-  const [inventoryTab, setInventoryTabState] = useState(initialTab || defaultTab);
+  // a page the role does not allow falls back to the devices list
+  const allowedTab = (t) => (t === 'inward' ? canInward : t === 'catalog' ? canCatalog : true);
+  const defaultTab = canInward ? 'inward' : 'devices';
+  const [inventoryTab, setInventoryTabState] = useState(initialTab && allowedTab(initialTab) ? initialTab : defaultTab);
 
   const setInventoryTab = useCallback((t) => {
     setInventoryTabState(t);
@@ -131,7 +135,7 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
   }, [onTabChange]);
 
   useEffect(() => {
-    if (initialTab && initialTab !== inventoryTab) {
+    if (initialTab && initialTab !== inventoryTab && allowedTab(initialTab)) {
       setInventoryTabState(initialTab);
     }
   }, [initialTab]);
@@ -685,9 +689,10 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
         {/* ======================================================== */}
         {/* Full-Page View 1: INWARD STOCK                           */}
         {/* ======================================================== */}
-        {!isOperator && inventoryTab === 'inward' && (
+        {canInward && inventoryTab === 'inward' && (
           <InwardStockModal
             isFullPage={true}
+            canAdd={canAddInward}
             onClose={() => setInventoryTab('devices')}
             onFilterByBatch={(batchId) => {
               setSelectedBatchFilter(batchId);
@@ -699,8 +704,9 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
         {/* ======================================================== */}
         {/* Full-Page View 2: VENDORS & MODELS HARDWARE CATALOG      */}
         {/* ======================================================== */}
-        {!isOperator && inventoryTab === 'catalog' && (
+        {canCatalog && inventoryTab === 'catalog' && (
           <HardwareCatalogView
+            canAdd={canAddCatalog}
             vendors={vendors}
             allModels={allModels}
             onReload={loadStatsAndVendors}
@@ -711,7 +717,7 @@ export const InventoryScreen = ({ user, refreshSignal, initialTab, onTabChange }
         {/* ======================================================== */}
         {/* Full-Page View 5: MASTER DEVICES INVENTORY               */}
         {/* ======================================================== */}
-        {(isOperator || inventoryTab === 'devices') && (
+        {(isOperator || inventoryTab === 'devices' || !allowedTab(inventoryTab)) && (
           <View>
             {/* Active Inward Batch Filter Pill */}
             {selectedBatchFilter && (

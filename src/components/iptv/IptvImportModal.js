@@ -97,7 +97,7 @@ const addSummary = (a, b) => {
   return out;
 };
 
-export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone }) => {
+export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone, onLinkRemaining }) => {
   const isOperator = String(user?.role || '').toLowerCase() === 'operator';
   const [file, setFile] = useState(null); // { name, rows }
   const [fileError, setFileError] = useState('');
@@ -297,6 +297,15 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
             <Text style={s.syncTitle}>{stage === 'done' ? 'Pioneer sync finished' : `Syncing with Pioneer… ${sync.done} / ${sync.total}`}</Text>
             <View style={s.progTrack}><View style={[s.progFill, { width: `${sync.total ? Math.round((sync.done / sync.total) * 100) : 100}%` }]} /></View>
             <Text style={s.syncLine}>{sync.ok} synced · {sync.notFound} not found on Pioneer · {sync.failed} failed</Text>
+            {stage === 'done' && onLinkRemaining && Number(S.customers_created || 0) > 0 ? (
+              <TouchableOpacity style={s.linkCta} onPress={() => onLinkRemaining(operatorId && operatorId !== '0' ? operatorId : '')}>
+                <Feather name="link" size={14} color="#7c3aed" />
+                <Text style={s.linkCtaText}>
+                  {S.customers_created} mobile{Number(S.customers_created) === 1 ? '' : 's'} matched no existing customer — link those IPTV accounts to internet customers
+                </Text>
+                <Feather name="arrow-right" size={14} color="#7c3aed" />
+              </TouchableOpacity>
+            ) : null}
             {stage === 'done' && sync.failures.length ? (
               <ScrollView style={{ maxHeight: 140, marginTop: 6 }}>
                 {sync.failures.map((f, i) => <Text key={i} style={s.errLine}>{f.mobile}: {f.message}</Text>)}
@@ -335,6 +344,8 @@ const s = StyleSheet.create({
   statLabel: { fontSize: 11.5, color: '#64748b', marginTop: 2 },
   syncBox: { padding: 12, borderRadius: 10, borderWidth: 1, borderColor: '#ddd6fe', backgroundColor: '#faf5ff', gap: 8 },
   syncTitle: { fontSize: 13, fontWeight: '700', color: '#0f172a' },
+  linkCta: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 10, borderRadius: 8, borderWidth: 1, borderColor: '#c4b5fd', backgroundColor: '#ffffff' },
+  linkCtaText: { flex: 1, fontSize: 12.5, fontWeight: '700', color: '#6d28d9' },
   syncLine: { fontSize: 12.5, color: '#334155' },
   errList: { maxHeight: 180, borderWidth: 1, borderColor: '#fecaca', borderRadius: 10, padding: 10, backgroundColor: '#fff7f7' },
   errLine: { fontSize: 12, color: '#7f1d1d', lineHeight: 18 },

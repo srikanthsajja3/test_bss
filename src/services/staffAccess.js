@@ -30,7 +30,7 @@ const TAB_NEEDS = {
   inventory_devices: [['inventory.devices', 'view']],
   inventory_catalog: [['inventory.catalog', 'view']],
   wallet: [['wallet.view', 'allow']],
-  networking: [['networking.nas', 'view'], ['networking.ip_pools', 'view'], ['networking.auth_logs', 'allow']],
+  networking: [['networking.nas', 'view'], ['networking.ip_pools', 'view'], ['networking.auth_logs', 'allow']], // Networking is in the super admin's menu only
   auth_logs: [['networking.auth_logs', 'allow']],
   complaints: [['support.complaints', 'view']],
   backups: [['system.backups', 'view']],
@@ -43,7 +43,12 @@ const TAB_NEEDS = {
   staff: [['staff.users', 'view'], ['staff.roles', 'view']],
 };
 
+const isSuperRole = (user) => String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') === 'superadmin';
+// pages only the super admin (and its staff) may open
+const SUPER_ONLY_TABS = ['auth_logs'];
+
 export const tabAllowed = (user, tab) => {
+  if (SUPER_ONLY_TABS.includes(tab) && !isSuperRole(user)) return false;
   if (!isStaffUser(user)) return true;
   if (tab === 'activity') return true; // everyone sees their own activity
   const need = TAB_NEEDS[tab];
@@ -51,6 +56,16 @@ export const tabAllowed = (user, tab) => {
 };
 
 const TAB_ORDER = ['dashboard', 'customers', 'iptv_customers', 'ott_customers', 'partners', 'wallet', 'customer_prices', 'inventory', 'inventory_inward', 'inventory_devices', 'inventory_catalog', 'complaints', 'leads', 'nas', 'auth_logs', 'dhcp_devices', 'iptv_renewals', 'payu_payments', 'backups', 'staff', 'activity'];
+
+/**
+ * The Inventory page to open: the super admin (and super admin staff) gets Inward Stock,
+ * Devices Stock or Vendors & Models — the first one their role allows; everyone else has
+ * only their own devices.
+ */
+export const inventoryHome = (user, isSuper) => {
+  if (!isSuper) return 'inventory_devices';
+  return ['inventory_inward', 'inventory_devices', 'inventory_catalog'].find((t) => tabAllowed(user, t)) || 'inventory_devices';
+};
 
 /** Where a staff member lands (null = nothing allowed). */
 export const firstAllowedTab = (user) => TAB_ORDER.find((t) => tabAllowed(user, t)) || null;

@@ -27,6 +27,7 @@ export const HardwareCatalogView = ({
   allModels = [],
   onReload,
   onBack,
+  canAdd = true, // false: look only (staff role without "Vendors & models: add")
 }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
@@ -114,6 +115,7 @@ export const HardwareCatalogView = ({
         </View>
 
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          {canAdd ? (<>
           <TouchableOpacity
             style={[styles.actionBtn, { backgroundColor: '#0f172a' }]}
             onPress={() => {
@@ -138,6 +140,7 @@ export const HardwareCatalogView = ({
             <Feather name="plus" size={13} color="#ffffff" />
             <Text style={styles.actionBtnText}>Add Model</Text>
           </TouchableOpacity>
+          </>) : null}
 
           {onBack && (
             <TouchableOpacity onPress={onBack} style={styles.backBtn}>
@@ -157,6 +160,7 @@ export const HardwareCatalogView = ({
             <Text style={styles.emptySub}>
               Register hardware vendors like Huawei, TP-Link, Syrotech and add models.
             </Text>
+            {canAdd ? (
             <TouchableOpacity
               style={[styles.actionBtn, { backgroundColor: '#0f172a', marginTop: 16 }]}
               onPress={() => setShowAddVendor(true)}
@@ -164,6 +168,7 @@ export const HardwareCatalogView = ({
               <Feather name="plus" size={13} color="#ffffff" />
               <Text style={styles.actionBtnText}>Add First Vendor</Text>
             </TouchableOpacity>
+            ) : null}
           </View>
         ) : (
           <View style={{ gap: 16, paddingBottom: 20 }}>
@@ -182,6 +187,7 @@ export const HardwareCatalogView = ({
                       </View>
                     </View>
 
+                    {canAdd ? (
                     <TouchableOpacity
                       style={styles.addModelPill}
                       onPress={() => {
@@ -195,6 +201,7 @@ export const HardwareCatalogView = ({
                       <Feather name="plus" size={12} color={COLORS.primary} />
                       <Text style={styles.addModelPillText}>Add Model</Text>
                     </TouchableOpacity>
+                    ) : null}
                   </View>
 
                   {vendorModels.length === 0 ? (

@@ -89,13 +89,17 @@ export const InwardStockModal = ({
   onOpenScannerForBatch,
   onFilterByBatch,
   isFullPage = false,
+  canAdd = true, // false: History only (staff role without "Inward stock: add")
 }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
 
   // Active view: 'list' (History) | 'create' (New Inward 2-Step Flow)
   // Full-page / Modal tab state: 'create' (default) | 'list'
-  const [activeTab, setActiveTab] = useState('create');
+  const [activeTab, setActiveTab] = useState(canAdd ? 'create' : 'list');
+  useEffect(() => {
+    if (!canAdd && activeTab === 'create') setActiveTab('list');
+  }, [canAdd, activeTab]);
   // 2-Step flow within 'create': Step 1 (Consignment Details) -> Step 2 (Scan & Match Devices)
   const [createStep, setCreateStep] = useState(1);
 
@@ -793,6 +797,7 @@ export const InwardStockModal = ({
 
       {/* Navigation Buttons: New & History */}
       <View style={styles.tabBar}>
+        {canAdd ? (
         <TouchableOpacity
           style={[styles.tabBtn, activeTab === 'create' && styles.tabBtnActive]}
           onPress={() => {
@@ -804,6 +809,7 @@ export const InwardStockModal = ({
             New
           </Text>
         </TouchableOpacity>
+        ) : null}
 
         <TouchableOpacity
           style={[styles.tabBtn, activeTab === 'list' && styles.tabBtnActive]}

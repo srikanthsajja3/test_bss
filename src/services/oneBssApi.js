@@ -8,19 +8,19 @@
 //   2. No hard-coded partner IDs, phone numbers or credentials. A missing
 //      required argument returns a client-side error instead of falling back
 //      to someone else's account.
-//   3. Only the logged-in user's own token is ever sent. The original token kept
-//      during impersonation is used ONLY to return to that account.
+//   3. Only the logged-in user's own token is ever sent. The original tokens kept
+//      during impersonation are used ONLY to return to those accounts.
 
 // const DEFAULT_BASE_URL = 'https://demo.onebss.in/b_bss'; // 'https://crm.polfibernet.in/api';
 const getDefaultBaseUrl = () => {
   if (typeof window !== 'undefined' && window.location?.origin) {
     if (window.location.origin.includes('localhost') || window.location.origin.includes('127.0.0.1')) {
-      return 'https://demo.onebss.in/b_bss';
+      return 'https://crm.polfibernet.in/api';
     }
     return `${window.location.origin}/api`;
   }
 
-  return 'https://demo.onebss.in/b_bss';
+  return 'https://crm.polfibernet.in/api';
 };
 
 const DEFAULT_BASE_URL = getDefaultBaseUrl();
@@ -32,7 +32,9 @@ let AUTH_TOKEN = '';
 
 const TOKEN_KEY = 'onebss_token';
 const USER_KEY = 'onebss_user';
-// Kept in sessionStorage (cleared when the tab closes), never sent with API calls.
+// The accounts to switch back to after "Login as". Kept in localStorage next to the login it
+// belongs to, so closing and reopening the tab keeps the way back; removed on logout / a new
+// login. Never sent with API calls.
 const ORIGINAL_SESSION_KEY = 'onebss_original_session';
 // Keys used by older builds — removed on login/logout so stale copies don't linger.
 const LEGACY_KEYS = ['onebss_impersonate_token', 'onebss_super_admin_session', 'onebss_verified_cust_ids'];
@@ -68,6 +70,7 @@ export const clearStoredSession = () => {
     if (ls) {
       ls.removeItem(TOKEN_KEY);
       ls.removeItem(USER_KEY);
+      ls.removeItem(ORIGINAL_SESSION_KEY);
       LEGACY_KEYS.forEach((k) => ls.removeItem(k));
     }
     if (ss) ss.removeItem(ORIGINAL_SESSION_KEY);
@@ -78,9 +81,19 @@ export const clearStoredSession = () => {
 // Super admin -> admin -> operator keeps [super admin, admin]; "Return" pops one level
 // (operator -> admin -> super admin), never skipping a level.
 const readSessionStack = () => {
+  const ls = safeStorage('localStorage');
   const ss = safeStorage('sessionStorage');
   try {
-    const raw = ss && ss.getItem(ORIGINAL_SESSION_KEY);
+    let raw = ls && ls.getItem(ORIGINAL_SESSION_KEY);
+    // older builds kept it in sessionStorage (lost when the tab closed): carry it over
+    const old = ss && ss.getItem(ORIGINAL_SESSION_KEY);
+    if (old) {
+      if (!raw && ls) {
+        ls.setItem(ORIGINAL_SESSION_KEY, old);
+        raw = old;
+      }
+      ss.removeItem(ORIGINAL_SESSION_KEY);
+    }
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     const list = Array.isArray(parsed) ? parsed : parsed && parsed.token ? [parsed] : []; // old single-object format
@@ -90,11 +103,11 @@ const readSessionStack = () => {
   }
 };
 const writeSessionStack = (list) => {
-  const ss = safeStorage('sessionStorage');
+  const ls = safeStorage('localStorage');
   try {
-    if (!ss) return;
-    if (list.length) ss.setItem(ORIGINAL_SESSION_KEY, JSON.stringify(list));
-    else ss.removeItem(ORIGINAL_SESSION_KEY);
+    if (!ls) return;
+    if (list.length) ls.setItem(ORIGINAL_SESSION_KEY, JSON.stringify(list));
+    else ls.removeItem(ORIGINAL_SESSION_KEY);
   } catch (e) {}
 };
 
@@ -131,6 +144,29 @@ export const popOriginalSession = () => {
 };
 
 export const clearOriginalSession = () => writeSessionStack([]);
+
+/**
+ * The accounts "Switch To" offers, nearest first: [{ level, user }] (level = index in the
+ * stack). Expired ones are left out.
+ */
+export const getSwitchBackTargets = () => readSessionStack()
+  .map((s, level) => ({ level, user: s.user || {}, token: s.token }))
+  .filter((t) => !isJwtExpired(t.token))
+  .reverse()
+  .map(({ level, user }) => ({ level, user }));
+
+/**
+ * Switch straight back to one saved level (e.g. operator -> super admin in one click). The
+ * levels above it are dropped. Returns false when that login has expired.
+ */
+export const switchBackToLevel = (level, hash = 'partners') => {
+  const list = readSessionStack();
+  const target = list[level];
+  if (!target || !target.token || isJwtExpired(target.token)) return false;
+  writeSessionStack(list.slice(0, level));
+  switchSession(target.token, target.user || {}, hash, (target.user && target.user.partner_name) || '');
+  return true;
+};
 
 /**
  * Switch the whole app to another account in one step (impersonate, or return one level).
@@ -325,6 +361,7 @@ export const OneBssApi = {
     if (res.ok && !res.data?.token) {
       return { ...res, ok: false, data: { success: false, message: 'Login response did not include a token.' } };
     }
+    if (res.ok) writeSessionStack([]); // a fresh login never offers someone else's way back
     return res;
   },
 
@@ -361,12 +398,15 @@ export const OneBssApi = {
   // GET /partner.php?role=&status= — server scopes the list to what the caller may see.
   // scope 'direct' = only the caller's own level-1 partners (the main Partners table);
   // default = everyone the caller may see (super admin: all; admin: everyone below it).
-  getPartners: async (role = '', status = '', scope = '') => {
+  // opts: { level: 1|2|3 (Super Distributor / Distributor / Sub Distributor), createdBy: parent id }
+  getPartners: async (role = '', status = '', scope = '', opts = {}) => {
     let query = '';
     const params = [];
     if (role) params.push(`role=${q(role)}`);
     if (status) params.push(`status=${q(status)}`);
     if (scope) params.push(`scope=${q(scope)}`);
+    if (opts.level) params.push(`level=${q(opts.level)}`);
+    if (opts.createdBy) params.push(`created_by=${q(opts.createdBy)}`);
     if (params.length) query = `?${params.join('&')}`;
     const res = await get(`/partner.php${query}`);
     if (res.ok) {
@@ -599,11 +639,20 @@ export const OneBssApi = {
     return post(`/internet_customer_detail_sync.php?internet_id=${q(numericId)}`);
   },
 
-  syncIptvCustomers: async (mobile) => {
+  // partnerId (optional): the operator of the IPTV account, for an account linked by hand
+  syncIptvCustomers: async (mobile, partnerId) => {
     const clean = tenDigits(mobile);
     if (clean.length !== 10) return clientError('A 10-digit mobile number is required.');
-    return post('/iptv_customer_sync.php', { mobile: clean });
+    return post('/iptv_customer_sync.php', partnerId ? { mobile: clean, partner_id: Number(partnerId) } : { mobile: clean });
   },
+
+  // ---- Link IPTV accounts that the import / sync could not match (iptv_link.php) ----
+  iptvUnlinked: async ({ partnerId = 0, q: search = '', page = 1, pageSize = 25 } = {}) =>
+    get(`/iptv_link.php?partner_id=${q(partnerId || 0)}&q=${q(search)}&page=${q(page)}&page_size=${q(pageSize)}`),
+  iptvLinkCustomers: async (partnerId, search) =>
+    get(`/iptv_link.php?action=customers&partner_id=${q(partnerId)}&q=${q(search)}`),
+  iptvLink: async (iptvIds, custId, withGroup = false) => post('/iptv_link.php', { action: 'link', iptv_ids: iptvIds, cust_id: custId, with_group: !!withGroup }),
+  iptvUnlink: async (iptvId, custId) => post('/iptv_link.php', { action: 'unlink', iptv_id: iptvId, cust_id: custId }),
 
   checkInternetUsername: async (username, operatorId) =>
     get(`/check_internet_username.php?username=${q(username)}&operator_id=${q(operatorId)}`),

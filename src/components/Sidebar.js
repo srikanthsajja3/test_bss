@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, Platform } from '
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { isSuperAdmin } from './internet/shared';
-import { isStaffUser, tabAllowed, customersTabFor } from '../services/staffAccess';
+import { isStaffUser, tabAllowed, customersTabFor, inventoryHome } from '../services/staffAccess';
 
 // Networking group (super admin): NAS and IP Pools pages
 const NETWORKING_TABS = ['nas', 'ip_pools', 'auth_logs'];
@@ -28,7 +28,6 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
         { id: 'wallet', label: 'Wallet', icon: 'credit-card' },
         { id: 'complaints', label: 'Complaints', icon: 'alert-circle' },
         { id: 'leads', label: 'Leads', icon: 'user-plus' },
-        { id: 'auth_logs', label: 'Auth Logs', icon: 'log-in' },
         { id: 'staff', label: 'Staff & Roles', icon: 'user-check' },
         { id: 'activity', label: 'Activity Log', icon: 'clock' },
       ]
@@ -43,7 +42,6 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
         ...(isSuper ? [{ id: 'dhcp_devices', label: 'DHCP-devices', icon: 'server' }] : []),
         ...(isSuper ? [{ id: 'iptv_renewals', label: 'IPTV Auto-Renewals', icon: 'repeat' }] : []),
         ...(isSuper ? [{ id: 'payu_payments', label: 'Online Payments', icon: 'credit-card' }] : []),
-        ...(!isSuper ? [{ id: 'auth_logs', label: 'Auth Logs', icon: 'log-in' }] : []),
         { id: 'staff', label: 'Staff & Roles', icon: 'user-check' },
         { id: 'activity', label: 'Activity Log', icon: 'clock' },
         ...(isSuper ? [{ id: 'backups', label: 'Backups', icon: 'database' }] : []),
@@ -54,7 +52,8 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
   const networkingSubs = [
     { id: 'nas', label: 'NAS', icon: 'server' },
     { id: 'ip_pools', label: 'IP Pools', icon: 'layers' },
-    { id: 'auth_logs', label: 'Auth Logs', icon: 'log-in' },
+    // Auth Logs: super admin (and super admin staff with "Auth logs by NAS") only
+    ...(isSuper ? [{ id: 'auth_logs', label: 'Auth Logs', icon: 'log-in' }] : []),
   ].filter((sub) => tabAllowed(user, sub.id));
   const networkingHome = networkingSubs[0]?.id || 'nas';
   const staff = isStaffUser(user) ? user.staff : null;
@@ -106,7 +105,7 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
                     : item.id === 'customers'
                       ? customersTabFor(user)
                       : item.id === 'inventory'
-                        ? (isOperator ? 'inventory_devices' : 'inventory_inward')
+                        ? inventoryHome(user, isSuper)
                         : item.id
                 )}
                 title={item.label}
@@ -211,23 +210,23 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
               {item.id === 'inventory' && !isCollapsed && (
                 <View style={styles.treeContainer}>
                   {/* Tree branch 1: Inward Stock (FIRST OPTION) */}
-                  {!isOperator && tabAllowed(user, 'inventory_inward') ? (
+                  {isSuper && tabAllowed(user, 'inventory_inward') ? (
                     <TouchableOpacity
                       style={[
                         styles.treeSubItem,
-                        (activeTab === 'inventory_inward' || (!isOperator && activeTab === 'inventory')) && styles.treeSubItemActiveInventory,
+                        (activeTab === 'inventory_inward' || (isSuper && activeTab === 'inventory' && inventoryHome(user, isSuper) === 'inventory_inward')) && styles.treeSubItemActiveInventory,
                       ]}
                       onPress={() => onSelectTab('inventory_inward')}
                     >
                       <MaterialCommunityIcons
                         name="truck-delivery"
                         size={14}
-                        color={(activeTab === 'inventory_inward' || (!isOperator && activeTab === 'inventory')) ? '#0284c7' : COLORS.textMuted}
+                        color={(activeTab === 'inventory_inward' || (isSuper && activeTab === 'inventory' && inventoryHome(user, isSuper) === 'inventory_inward')) ? '#0284c7' : COLORS.textMuted}
                       />
                       <Text
                         style={[
                           styles.treeSubText,
-                          (activeTab === 'inventory_inward' || (!isOperator && activeTab === 'inventory')) && styles.treeSubTextActiveInventory,
+                          (activeTab === 'inventory_inward' || (isSuper && activeTab === 'inventory' && inventoryHome(user, isSuper) === 'inventory_inward')) && styles.treeSubTextActiveInventory,
                         ]}
                       >
                         Inward Stock
@@ -240,28 +239,28 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
                     <TouchableOpacity
                       style={[
                         styles.treeSubItem,
-                        (activeTab === 'inventory_devices' || (isOperator && activeTab === 'inventory')) && styles.treeSubItemActiveInventory,
+                        (activeTab === 'inventory_devices' || (activeTab === 'inventory' && inventoryHome(user, isSuper) === 'inventory_devices')) && styles.treeSubItemActiveInventory,
                       ]}
                       onPress={() => onSelectTab('inventory_devices')}
                     >
                       <Feather
                         name="box"
                         size={13}
-                        color={(activeTab === 'inventory_devices' || (isOperator && activeTab === 'inventory')) ? '#0284c7' : COLORS.textMuted}
+                        color={(activeTab === 'inventory_devices' || (activeTab === 'inventory' && inventoryHome(user, isSuper) === 'inventory_devices')) ? '#0284c7' : COLORS.textMuted}
                       />
                       <Text
                         style={[
                           styles.treeSubText,
-                          (activeTab === 'inventory_devices' || (isOperator && activeTab === 'inventory')) && styles.treeSubTextActiveInventory,
+                          (activeTab === 'inventory_devices' || (activeTab === 'inventory' && inventoryHome(user, isSuper) === 'inventory_devices')) && styles.treeSubTextActiveInventory,
                         ]}
                       >
-                        {isOperator ? 'My Devices' : 'Devices Stock'}
+                        {isSuper ? 'Devices Stock' : 'My Devices'}
                       </Text>
                     </TouchableOpacity>
                   ) : null}
 
                   {/* Tree branch 3: Vendors & Models */}
-                  {!isOperator && tabAllowed(user, 'inventory_catalog') ? (
+                  {isSuper && tabAllowed(user, 'inventory_catalog') ? (
                     <TouchableOpacity
                       style={[
                         styles.treeSubItem,

@@ -23,6 +23,7 @@ import { ColSearch, ColSelect, ColDateRange, FilterCell, TABLE_GUTTER, dateRange
 import { CustomerDevicesModal } from '../components/CustomerDevicesModal';
 import { OnlineSessionPanel } from '../components/internet/OnlineSessionPanel';
 import { IptvImportModal } from '../components/iptv/IptvImportModal';
+import { IptvLinkModal } from '../components/iptv/IptvLinkModal';
 
 const calculateBalanceDays = (expiryDateStr) => {
   if (!expiryDateStr || expiryDateStr === '—' || expiryDateStr === 'N/A') {
@@ -455,6 +456,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [resettingPassword, setResettingPassword] = useState(false);
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [showIptvImport, setShowIptvImport] = useState(false);
+  // IPTV accounts the import / sync could not put on an internet customer (iptv_link.php)
+  const [iptvLinkFor, setIptvLinkFor] = useState(null); // null = closed, else { operatorId }
+  const [iptvUnlinkedCount, setIptvUnlinkedCount] = useState(null);
   // an operator without IPTV (no IPTV plans assigned) gets no IPTV import
   const [ownServices, setOwnServices] = useState(null);
   useEffect(() => {
@@ -636,6 +640,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [activeCustomerId, setActiveCustomerId] = useState(null);
   const [activeAccountSel, setActiveAccountSel] = useState(null); // { kind: 'internet'|'iptv', index }
   const [activeSubProfile, setActiveSubProfile] = useState(null);
+  // an account to open as soon as its customer's accounts are loaded: { kind, id }
+  const [pendingOpen, setPendingOpen] = useState(null);
 
   // customers_list.php does not include internet_accounts / iptv_accounts, so the
   // full record for the opened customer is fetched from customer_lookup.php.
@@ -811,6 +817,18 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             })
           );
         }
+        // IPTV accounts linked by hand: registered at Pioneer on another mobile -> sync that one too
+        const linkedIptv = (customerDetailsRef.current[key]?.iptv_accounts || [])
+          .map((a) => ({ m: String(a.iptv_mobile || '').replace(/\D/g, '').slice(-10), op: a.partner_id }))
+          .filter((x) => x.m.length === 10 && x.m !== cleanMobile)
+          .filter((x, i, arr) => arr.findIndex((y) => y.m === x.m) === i);
+        linkedIptv.forEach(({ m, op }) => {
+          tasks.push(
+            OneBssApi.syncIptvCustomers(m, op).then((r) => {
+              if (!r.ok && r.status >= 500) problems.push(`IPTV (${m}): ${r.data?.message || 'not synced'}`);
+            })
+          );
+        });
         if (cleanMobile.length === 10) {
           tasks.push(
             OneBssApi.syncIptvCustomers(cleanMobile).then((syncRes) => {
@@ -956,6 +974,24 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     }
   }, [refreshSignal]);
 
+  // Username clicked in the list / search: open THAT account's details (not the overview)
+  // once the customer's accounts are loaded. Not found -> stay on the overview.
+  useEffect(() => {
+    if (!pendingOpen || !activeCustomer || !activeDetailsLoaded) return;
+    const list = pendingOpen.kind === 'iptv' ? activeCustomer.iptv_accounts : activeCustomer.internet_accounts;
+    const index = (Array.isArray(list) ? list : []).findIndex((a) => (pendingOpen.kind === 'iptv'
+      ? String(a.id ?? a.iptv_id) === String(pendingOpen.id)
+      : String(a.internet_id) === String(pendingOpen.id) || (a.username && String(a.username) === String(pendingOpen.id))));
+    setPendingOpen(null);
+    if (index < 0) return;
+    setActiveAccountSel({ kind: pendingOpen.kind, index });
+    if (typeof window !== 'undefined' && window.history && window.history.replaceState) {
+      // replace (not push): Back from the details goes to the account overview, then the list
+      const hash = buildListHash([`sub_id=${activeCustomer.cust_id}`, `acc=${pendingOpen.kind === 'iptv' ? 'iptv' : 'int'}_${index}`, ...ottParam()]);
+      window.history.replaceState(null, '', `#${hash}`);
+    }
+  }, [pendingOpen, activeCustomer, activeDetailsLoaded]);
+
   // Build the detail-screen row for one specific account of a customer.
   // customers_list rows carry the FIRST account's username / package / expiry / status at the
   // top level, and the row mappers prefer top-level values — so those are stripped here to make
@@ -992,23 +1028,30 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     const hash = window.location.hash;
     const sub = hash.match(/sub_id=([^&]+)/);
     const acc = hash.match(/acc=(int|iptv)_(\d+)/);
+    // open=int_<internet_id> / open=iptv_<iptv_id>: open that account's details straight away
+    // (a username clicked in the list or in search) once the customer's accounts are loaded
+    const open = hash.match(/[?&]open=(int|iptv)_([^&]+)/);
     return {
       subId: sub ? decodeURIComponent(sub[1]) : null,
       accKind: acc ? (acc[1] === 'iptv' ? 'iptv' : 'internet') : null,
       accIndex: acc ? Number(acc[2]) : null,
+      openKind: open ? (open[1] === 'iptv' ? 'iptv' : 'internet') : null,
+      openId: open ? decodeURIComponent(open[2]) : null,
     };
   };
 
   // Apply the current URL hash to screen state (page reload + browser back/forward)
   const applyHashToState = () => {
-    const { subId, accKind, accIndex } = parseSubHash();
+    const { subId, accKind, accIndex, openKind, openId } = parseSubHash();
     if (!subId) {
       setActiveCustomerId(null);
       setActiveAccountSel(null);
+      setPendingOpen(null);
       return;
     }
     setActiveCustomerId((cur) => (String(cur) === String(subId) ? cur : subId));
     setActiveAccountSel(accKind ? { kind: accKind, index: accIndex } : null);
+    setPendingOpen(!accKind && openKind ? { kind: openKind, id: openId } : null);
   };
 
   useEffect(() => {
@@ -2018,6 +2061,20 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const paginatedCustomers = filteredCustomers; // the server already returned just this page
   const totalPages = Math.max(1, Math.ceil(listTotal / pageSize));
 
+  // "Not linked" IPTV accounts: super admin and operators (staff: IPTV customers view);
+  // linking needs iptv.link. Admins only view customers.
+  const isAdminViewer = String(user?.role || user?.account_role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'admin';
+  const canSeeIptvLink = !isAdminViewer && can(user, 'iptv.customers', 'view');
+  const canLinkIptv = canSeeIptvLink && can(user, 'iptv.link');
+  const refreshIptvUnlinkedCount = async () => {
+    if (!canSeeIptvLink) return;
+    const res = await OneBssApi.iptvUnlinked({ page: 1, pageSize: 10 });
+    setIptvUnlinkedCount(res.ok ? Number(res.data?.total || 0) : null);
+  };
+  useEffect(() => {
+    if (viewMode === 'iptv') refreshIptvUnlinkedCount();
+  }, [viewMode]);
+
   const handleToggleMode = (newMode) => {
     setViewMode(newMode);
     setActiveFilter('all');
@@ -2038,10 +2095,15 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       toast.warning(`${cust.username || cust.stb_box || 'This account'} is not linked to a customer yet.`);
       return;
     }
+    // the clicked username / STB opens straight on its own details
+    const open = viewMode === 'iptv'
+      ? (cust.iptv_id ? `iptv_${cust.iptv_id}` : null)
+      : (cust.internet_id ? `int_${encodeURIComponent(cust.internet_id)}` : null);
     setActiveCustomerId(cId);
     setActiveAccountSel(null);
+    setPendingOpen(open ? { kind: viewMode === 'iptv' ? 'iptv' : 'internet', id: decodeURIComponent(open.replace(/^(int|iptv)_/, '')) } : null);
     if (typeof window !== 'undefined') {
-      window.location.hash = buildListHash([`sub_id=${cId}`]);
+      window.location.hash = buildListHash([`sub_id=${cId}`, ...(open ? [`open=${open}`] : [])]);
     }
     if (onAutoCloseSidebar) {
       onAutoCloseSidebar();
@@ -2156,6 +2218,16 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         onModifyMobile={can(user, 'internet.profile', 'edit') ? (c) => { setModifyMobileCust(c); setNewMobileVal(c?.mobile || ''); } : null}
         onAddIptv={can(user, 'iptv.customers', 'add') ? handleAddIptvForCustomer : null}
         onComboRecharge={can(user, 'combo.recharge') ? (c) => setComboRechargeFor(c) : null}
+        onUnlinkIptv={canLinkIptv ? async (raw) => {
+          const res = await OneBssApi.iptvUnlink(raw.id, activeCustomer.cust_id);
+          if (!res.ok) {
+            toast.error(res.data?.message || 'Could not unlink the IPTV account.');
+            return;
+          }
+          toast.success(res.data?.message || 'IPTV account unlinked.');
+          await fetchCustomerDetails(activeCustomer.cust_id, true);
+          refreshIptvUnlinkedCount();
+        } : null}
         // admins (super distributor / distributor / sub distributor) only view customers
         readOnly={String(user?.role || user?.account_role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'admin'}
         operatorNames={Object.fromEntries((operators || []).map((o) => [String(o.partner_id), o.partner_name]))}
@@ -2857,12 +2929,30 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               <Text style={styles.addCustomerHeaderBtnText}>Import CSV</Text>
             </TouchableOpacity>
           ) : null}
+          {viewMode === 'iptv' && canSeeIptvLink ? (
+            <TouchableOpacity style={[styles.addCustomerHeaderBtn, { backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#c4b5fd' }]} onPress={() => setIptvLinkFor({ operatorId: '' })}>
+              <Feather name="link" size={14} color="#7c3aed" />
+              <Text style={[styles.addCustomerHeaderBtnText, { color: '#6d28d9' }]}>
+                Not linked{iptvUnlinkedCount ? ` (${iptvUnlinkedCount})` : ''}
+              </Text>
+            </TouchableOpacity>
+          ) : null}
           <IptvImportModal
             visible={showIptvImport}
             user={user}
             operators={operators.map((o) => ({ value: o.partner_id, label: o.partner_name || o.name || `#${o.partner_id}` }))}
             onClose={() => setShowIptvImport(false)}
-            onDone={() => loadCustomerDataFromApi()}
+            onDone={() => { loadCustomerDataFromApi(); refreshIptvUnlinkedCount(); }}
+            onLinkRemaining={canSeeIptvLink ? (opId) => { setShowIptvImport(false); setIptvLinkFor({ operatorId: opId || '' }); } : null}
+          />
+          <IptvLinkModal
+            visible={!!iptvLinkFor}
+            user={user}
+            initialOperatorId={iptvLinkFor?.operatorId || ''}
+            canLink={canLinkIptv}
+            operators={operators.map((o) => ({ value: o.partner_id, label: o.partner_name || o.name || `#${o.partner_id}` }))}
+            onClose={() => { setIptvLinkFor(null); refreshIptvUnlinkedCount(); }}
+            onLinked={() => loadCustomerDataFromApi()}
           />
 
           {viewMode !== 'iptv' && canAny(user, [['internet.bulk_renew'], ['internet.migrate']]) ? (

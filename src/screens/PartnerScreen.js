@@ -145,6 +145,17 @@ const flattenComboOptions = (options) => {
   return { inetList, iptvList };
 };
 
+// Partners page filters. chip = shown as a button; 'admin' (every admin level) comes from the
+// dashboard's "Total admins" card. level: admin_level from partner.php (hierarchy.php).
+const PARTNER_FILTERS = [
+  { key: '', label: 'All', chip: true },
+  { key: 'operator', label: 'Operators', role: 'operator', chip: true },
+  { key: 'l1', label: 'Super Distributors', role: 'admin', level: 1, chip: true },
+  { key: 'l2', label: 'Distributors', role: 'admin', level: 2, chip: true },
+  { key: 'l3', label: 'Sub Distributors', role: 'admin', level: 3, chip: true },
+  { key: 'admin', label: 'Admins', role: 'admin' },
+];
+
 export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRoleFilter, refreshSignal = 0 }) => {
   const [detailReloadKey, setDetailReloadKey] = useState(0);
   const isSuperAdminUser = String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'superadmin';
@@ -192,11 +203,18 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   const [partners, setPartners] = useState([]);
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState('');
+  // Level filter: '' = All (the caller's own level, opened as a tree); any other filter lists
+  // EVERY partner of that level below the caller, whatever its parent, with a Parent filter.
+  // 'admin' (all admin levels) is still accepted from the dashboard's "Total admins" link.
   const [selectedRole, setSelectedRole] = useState(initialRoleFilter || '');
+  const [parentFilter, setParentFilter] = useState(''); // '' = every parent
+  const [parentOptions, setParentOptions] = useState([]); // admins that can be a parent
+  const [myLevel, setMyLevel] = useState(null); // an admin's own level (1-3); null = super admin
 
   React.useEffect(() => {
     setSelectedRole(initialRoleFilter || '');
   }, [initialRoleFilter]);
+  React.useEffect(() => { setParentFilter(''); }, [selectedRole]);
   const [selectedPartner, setSelectedPartner] = useState(null);
   const [partner, setPartner] = useState(null);
   const [loadingPartner, setLoadingPartner] = useState(false);
@@ -517,7 +535,10 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       // search is filtered client-side below; the server filters by role and scope
       // Main table = only the caller's own level (super admin: its super distributors and
       // direct operators). Deeper levels are opened from each admin's page.
-      const res = await OneBssApi.getPartners(selectedRole, '', 'direct');
+      const f = PARTNER_FILTERS.find((x) => x.key === selectedRole) || PARTNER_FILTERS[0];
+      const res = f.key === ''
+        ? await OneBssApi.getPartners('', '', 'direct')
+        : await OneBssApi.getPartners(f.role, '', '', { level: f.level, createdBy: parentFilter || undefined });
       if (!res.ok) {
         toast.error(res.data?.message || 'Could not load partners.');
         setPartners([]);
@@ -545,6 +566,20 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
 
   useEffect(() => {
     fetchPartners();
+  }, [selectedRole, parentFilter]);
+
+  // Parent filter: the caller itself + every admin below it (once, when a level filter is used)
+  useEffect(() => {
+    if (!selectedRole || parentOptions.length) return;
+    (async () => {
+      const res = await OneBssApi.getPartners('admin');
+      const admins = res.ok && Array.isArray(res.data) ? res.data : [];
+      setParentOptions(admins.map((a) => ({ id: String(a.partner_id), name: a.partner_name || `#${a.partner_id}`, level: Number(a.admin_level) || null, label: levelLabelOf(a) })));
+      if (!isSuperAdminUser) {
+        const me = await OneBssApi.getPartnerById(user?.partner_id);
+        setMyLevel(Number(me?.data?.data?.admin_level) || null);
+      }
+    })();
   }, [selectedRole]);
 
   useEffect(() => {
@@ -651,7 +686,9 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       p.partner_mobile?.includes(query) ||
       String(p.partner_id).includes(query);
 
-    const matchesRole = !selectedRole || p.account_role?.toLowerCase() === selectedRole.toLowerCase();
+    const fdef = PARTNER_FILTERS.find((x) => x.key === selectedRole);
+    const matchesRole = !fdef || !fdef.role || (p.account_role?.toLowerCase() === fdef.role
+      && (!fdef.level || Number(p.admin_level) === fdef.level));
 
     return matchesSearch && matchesRole;
   });
@@ -1694,7 +1731,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       }
 
       // Remember the account we are leaving — one entry per level (super admin -> admin ->
-      // operator), so "Back" returns one level at a time (this tab only, never sent to the API).
+      // operator), so "Switch To" can return to any of them (kept with the login, never sent to the API).
       if (user?.token) {
         const { token: _t, ...origUser } = user;
         saveOriginalSession(user.token, origUser);
@@ -3962,34 +3999,49 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
             </View>
             ) : null}
 
-            {!readOnly ? (
-            <View style={[styles.roleFilters, isMobile && { width: '100%', justifyContent: 'space-between', marginTop: 4 }]}>
-              {['', 'operator', 'admin'].map((role) => (
-                <TouchableOpacity
-                  key={role}
-                  style={[
-                    styles.roleChip,
-                    isMobile && { flex: 1, alignItems: 'center', justifyContent: 'center', paddingVertical: 8, paddingHorizontal: 4 },
-                    selectedRole === role && styles.roleChipActive,
-                  ]}
-                  onPress={() => setSelectedRole(role)}
-                >
-                  <Text style={[styles.roleChipText, selectedRole === role && styles.roleChipTextActive]}>
-                    {role === '' ? 'All' : role === 'operator' ? 'Operators' : 'Super Distributors'}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-            ) : null}
           </View>
         </View>
 
-        {/* PARTNERS TABLE — only this login's own level; deeper levels open from each admin */}
+        {/* Level + Parent dropdowns (all screen sizes). Level: every partner of that level below
+            this login (any depth); Parent: only those directly under the chosen partner. */}
+        {!readOnly ? (() => {
+          const f = PARTNER_FILTERS.find((x) => x.key === selectedRole);
+          const levelOpts = PARTNER_FILTERS
+            .filter((x) => (x.chip || x.key === selectedRole) && (!x.level || !myLevel || x.level > myLevel))
+            .map((x) => ({ value: x.key, label: x.key === '' ? 'All' : x.label, search: x.label }));
+          const meLabel = isSuperAdminUser ? 'Super Admin' : `${user?.partner_name || 'Me'} (me)`;
+          // a parent must be a higher level than the partners listed (operators: any admin)
+          const parentOpts = [
+            { value: '', label: 'Show All' },
+            { value: String(user?.partner_id || ''), label: meLabel, search: meLabel },
+            ...parentOptions
+              .filter((pOpt) => !f?.level || (pOpt.level && pOpt.level < f.level))
+              .map((pOpt) => ({ value: pOpt.id, label: pOpt.name, sub: pOpt.label, search: `${pOpt.name} ${pOpt.id}` })),
+          ];
+          return (
+            <View style={styles.filterBar}>
+              <View style={[styles.filterField, isMobile && styles.filterFieldMobile]}>
+                <Text style={styles.filterLabel}>Level</Text>
+                <SearchSelect value={selectedRole} options={levelOpts} onChange={(v) => setSelectedRole(String(v || ''))} placeholder="All" searchPlaceholder="Search levels…" />
+              </View>
+              {selectedRole ? (
+                <View style={[styles.filterField, isMobile && styles.filterFieldMobile]}>
+                  <Text style={styles.filterLabel}>Parent</Text>
+                  <SearchSelect value={parentFilter} options={parentOpts} onChange={(v) => setParentFilter(String(v || ''))} placeholder="Show All" searchPlaceholder="Search parent…" />
+                </View>
+              ) : null}
+            </View>
+          );
+        })() : null}
+
+        {/* PARTNERS TABLE — All: this login's own level; a level filter: every partner of that level. Admins open with + */}
         <View style={styles.card}>
           <PartnersTable
             list={filteredPartners}
             loading={loading}
             isMobile={isMobile}
+            showParent={!!selectedRole}
+            // + on every admin row (All and the level filters) opens the partners under it
             fetchChildren={(id) => OneBssApi.getPartnersCreatedBy(id)}
             onOpen={(item, above = []) => handleOpenFromTree(item, above)}
             onWallet={(item) => handleOpenWallet(item)}
@@ -4096,6 +4148,23 @@ const styles = StyleSheet.create({
     color: COLORS.textMain,
     padding: 0,
   },
+  filterBar: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginBottom: 12,
+  },
+  filterField: { width: 260, gap: 4 },
+  filterFieldMobile: { flexGrow: 1, flexBasis: 140, width: undefined },
+  filterLabel: { fontSize: 12, fontWeight: '700', color: '#475569' },
+  parentBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 10,
+    marginBottom: 12,
+  },
+  parentLabel: { fontSize: 13, fontWeight: '700', color: '#334155' },
   roleFilters: {
     flexDirection: 'row',
     gap: 8,

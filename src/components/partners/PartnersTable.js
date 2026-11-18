@@ -43,7 +43,14 @@ const n = (v) => Number(v ?? 0);
  */
 const TREE_TONES = ['#6366f1', '#14b8a6', '#f59e0b', '#ec4899'];
 
-export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWallet, onToggleStatus, onImpersonate, impersonatingId, onResetPassword, fetchChildren }) => {
+/** "Under Super Admin" / "Under Ravi Networks" (showParent: flat lists of one level). */
+const parentLine = (p) => {
+  const superParent = String(p.created_by_role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'superadmin';
+  if (superParent) return 'Under Super Admin';
+  return p.created_by_name ? `Under ${p.created_by_name}` : '';
+};
+
+export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWallet, onToggleStatus, onImpersonate, impersonatingId, onResetPassword, fetchChildren, showParent = false }) => {
   const [open, setOpen] = useState({}); // partner_id -> true
   const [kids, setKids] = useState({}); // partner_id -> { loading, list, error }
 
@@ -80,7 +87,7 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
     if (!hasKids(p)) return <View style={styles.expSpacer} />;
     const on = !!open[String(p.partner_id)];
     return (
-      <TouchableOpacity style={[styles.exp, on && styles.expOn]} onPress={() => toggle(p)} title={on ? 'Hide partners below' : 'Show partners below'}>
+      <TouchableOpacity style={[styles.exp, on && styles.expOn]} onPress={() => toggle(p)} title={on ? 'Hide partners below' : 'Show partners below'} accessibilityLabel={on ? 'Hide partners below' : 'Show partners below'}>
         <Feather name={on ? 'minus' : 'plus'} size={13} color={on ? '#fff' : '#334155'} />
       </TouchableOpacity>
     );
@@ -143,6 +150,12 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
               <LevelBadge partner={p} small />
             </TouchableOpacity>
             </View>
+            {showParent && depth === 0 && parentLine(p) ? (
+              <View style={styles.mParent}>
+                <Feather name="corner-left-up" size={12} color="#64748b" />
+                <Text style={styles.mParentText} numberOfLines={1}>{parentLine(p)}</Text>
+              </View>
+            ) : null}
             <View style={styles.mRow}>
               <View style={styles.mStat}><Text style={styles.mStatNum}>{n(p.active_internet_accounts)}</Text><Text style={styles.mStatLbl}>Internet active</Text></View>
               <View style={styles.mStat}><Text style={styles.mStatNum}>{n(p.active_iptv_accounts)}</Text><Text style={styles.mStatLbl}>IPTV active</Text></View>
@@ -222,6 +235,7 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
               </View>
               <View style={[styles.td, { flex: 1.2, minWidth: 125 }]}>
                 <LevelBadge partner={p} />
+                {showParent && depth === 0 && parentLine(p) ? <Text style={[styles.sub, { marginTop: 3, color: '#334155', fontWeight: '600' }]} numberOfLines={1}>{parentLine(p)}</Text> : null}
                 {isAdmin ? <Text style={[styles.sub, { marginTop: 3 }]}>{n(p.subtree_operators)} operator(s) · {n(p.subtree_admins)} admin(s) below</Text> : null}
               </View>
               <View style={[styles.td, { flex: 0.8, minWidth: 80 }]}>
@@ -260,6 +274,8 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
 };
 
 const styles = StyleSheet.create({
+  mParent: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: -4 },
+  mParentText: { fontSize: 12, fontWeight: '600', color: '#475569', flexShrink: 1 },
   exp: { width: 22, height: 22, borderRadius: 5, borderWidth: 1, borderColor: '#cbd5e1', backgroundColor: '#fff', alignItems: 'center', justifyContent: 'center' },
   expOn: { backgroundColor: '#4f46e5', borderColor: '#4f46e5' },
   expSpacer: { width: 22 },
