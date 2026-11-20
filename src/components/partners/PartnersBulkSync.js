@@ -8,6 +8,8 @@ import { ModalShell, Btn, Note } from '../internet/shared';
 const TYPES = {
   internet: { label: 'Internet', color: '#059669', icon: 'wifi' },
   iptv: { label: 'IPTV', color: '#7c3aed', icon: 'tv' },
+  // RADIUS branches of each operator (super admin only)
+  branches: { label: 'Partner branches', short: 'Branches', color: '#0369a1', icon: 'git-branch', noun: '' },
 };
 
 const STATE = {
@@ -25,8 +27,9 @@ const finishedCount = (c) => (c ? c.done + c.failed + c.skipped : 0);
  * for every operator the login covers, one operator after another. The run lives on the server
  * (partners_bulk_sync.php), so the page can be closed; opening it again shows the progress.
  */
-export const PartnersBulkSync = ({ isMobile, scopeLabel }) => {
-  const [status, setStatus] = useState({ internet: null, iptv: null });
+export const PartnersBulkSync = ({ isMobile, scopeLabel, showBranches = false }) => {
+  const types = showBranches ? ['internet', 'iptv', 'branches'] : ['internet', 'iptv'];
+  const [status, setStatus] = useState({ internet: null, iptv: null, branches: null });
   const [openType, setOpenType] = useState(null);
   const [busy, setBusy] = useState(false);
   const timer = useRef(null);
@@ -37,15 +40,15 @@ export const PartnersBulkSync = ({ isMobile, scopeLabel }) => {
     return res.data;
   }, []);
 
-  useEffect(() => { load('internet'); load('iptv'); }, [load]);
+  useEffect(() => { types.forEach((t) => load(t)); }, [load, showBranches]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // refresh every 4 s while a run is going or the panel is open
-  const anyRunning = !!(status.internet?.running || status.iptv?.running);
+  const anyRunning = types.some((t) => !!status[t]?.running);
   useEffect(() => {
     if (!anyRunning && !openType) return undefined;
     timer.current = setInterval(() => {
       if (openType) load(openType);
-      ['internet', 'iptv'].forEach((t) => { if (t !== openType && status[t]?.running) load(t); });
+      types.forEach((t) => { if (t !== openType && status[t]?.running) load(t); });
     }, 4000);
     return () => clearInterval(timer.current);
   }, [anyRunning, openType, load]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -81,11 +84,11 @@ export const PartnersBulkSync = ({ isMobile, scopeLabel }) => {
         key={type}
         style={[st_.btn, { borderColor: m.color }, isMobile && { flex: 1, justifyContent: 'center' }]}
         onPress={() => setOpenType(type)}
-        accessibilityLabel={`Sync ${m.label} customers of all partners`}
+        accessibilityLabel={type === 'branches' ? 'Sync the RADIUS branches of all partners' : `Sync ${m.label} customers of all partners`}
       >
         {running ? <ActivityIndicator size="small" color={m.color} /> : <Feather name="refresh-cw" size={14} color={m.color} />}
         <Text style={[st_.btnText, { color: m.color }]} numberOfLines={1}>
-          {isMobile ? `Sync ${m.label}` : `Sync ${m.label} customers`}
+          {type === 'branches' ? (isMobile ? `Sync ${m.short}` : `Sync ${m.label}`) : isMobile ? `Sync ${m.label}` : `Sync ${m.label} customers`}
           {running && s.counts ? ` · ${finishedCount(s.counts)}/${s.counts.total}` : ''}
         </Text>
       </TouchableOpacity>
@@ -94,8 +97,7 @@ export const PartnersBulkSync = ({ isMobile, scopeLabel }) => {
 
   return (
     <>
-      {button('internet')}
-      {button('iptv')}
+      {types.map((t) => button(t))}
       <ModalShell
         visible={!!openType}
         title={meta ? `${meta.label} sync — all ${scopeLabel ? 'my ' : ''}partners` : ''}
@@ -119,7 +121,9 @@ export const PartnersBulkSync = ({ isMobile, scopeLabel }) => {
           <>
             <Note
               tone="info"
-              text={`Syncs the ${meta.label} customers of every enabled operator ${scopeLabel || ''}one after another, the same as each partner's own "Sync ${meta.label} Users" button. It runs on the server — you can close this window or the page and come back to see the progress.${openType === 'iptv' ? ' IPTV checks every customer mobile with Pioneer, so it can take a long time.' : ''}`}
+              text={openType === 'branches'
+                ? 'Brings each enabled operator\'s RADIUS branches in line with RADIUS, one operator after another: new branches of its RADIUS partner are added and branches RADIUS no longer lists are removed (at least one always stays). When several operators share one RADIUS partner, a new branch is only reported — assign it in the partner\'s RADIUS branches. It runs on the server; you can close this window.'
+                : `Syncs the ${meta.label} customers of every enabled operator ${scopeLabel || ''}one after another, the same as each partner's own "Sync ${meta.label} Users" button. It runs on the server — you can close this window or the page and come back to see the progress.${openType === 'iptv' ? ' IPTV checks every customer mobile with Pioneer, so it can take a long time.' : ''}`}
             />
             {st?.interrupted ? (
               <View style={{ marginTop: 10 }}><Note tone="warn" text="The server stopped this run before it finished. Use Continue to go on with the operators that are left." /></View>

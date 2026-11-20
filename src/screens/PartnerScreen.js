@@ -4021,7 +4021,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
           ]}>
             {isSuperAdminUser || isAdminUser ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: isMobile ? '100%' : 'auto' }}>
-                <PartnersBulkSync isMobile={isMobile} scopeLabel={isSuperAdminUser ? '' : 'under you '} />
+                <PartnersBulkSync isMobile={isMobile} scopeLabel={isSuperAdminUser ? '' : 'under you '} showBranches={isSuperAdminUser && pEdit} />
               </View>
             ) : null}
             {!readOnly && pAdd ? (
