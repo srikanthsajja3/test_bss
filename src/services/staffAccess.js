@@ -16,6 +16,19 @@ export const can = (user, key, action = 'allow') => {
 
 export const canAny = (user, pairs) => pairs.some(([k, a]) => can(user, k, a || 'allow'));
 
+/**
+ * 'search' for staff whose role has "Search By Username" (internet.search_only): a page with only
+ * a search bar — this account's customers by full mobile / email / username or 3+ letters of the
+ * name; view details and reset MAC only (the server enforces it: staff_customer_scope.php).
+ * 'all' for everyone else.
+ */
+export const staffCustomerScope = (user) => {
+  if (!isStaffUser(user)) return 'all';
+  const perm = (user.staff.permissions || {})['internet.search_only'];
+  return user.staff.customer_scope === 'search' || (Array.isArray(perm) && perm.includes('allow')) ? 'search' : 'all';
+};
+export const isLimitedStaff = (user) => staffCustomerScope(user) !== 'all';
+
 // sidebar pages -> what a staff member needs to open them
 const TAB_NEEDS = {
   dashboard: [['dashboard.view', 'allow']],
@@ -50,7 +63,7 @@ const SUPER_ONLY_TABS = ['auth_logs'];
 export const tabAllowed = (user, tab) => {
   if (SUPER_ONLY_TABS.includes(tab) && !isSuperRole(user)) return false;
   if (!isStaffUser(user)) return true;
-  if (tab === 'activity') return true; // everyone sees their own activity
+  if (tab === 'activity') return !isLimitedStaff(user); // everyone sees their own activity (not technicians)
   const need = TAB_NEEDS[tab];
   return need ? canAny(user, need) : false;
 };

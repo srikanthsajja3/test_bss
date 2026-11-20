@@ -452,6 +452,12 @@ export const OneBssApi = {
     return put(`/partner.php?id=${q(id)}`, payload);
   },
 
+  // One-time edit of the partner's own details (partner_profile.php)
+  getMyProfile: async () => get('/partner_profile.php'),
+  saveMyProfile: async (payload) => post('/partner_profile.php', payload || {}),
+  // super admin: open / close the one-time edit for a partner
+  setProfileEditAccess: async (partnerId, allow) => post('/partner_profile.php', { action: 'grant', partner_id: toNum(partnerId), allow: !!allow }),
+
   // POST /reset_password.php { partner_id, new_password? } -> { new_password, auto_generated }
   // Leave newPassword empty to let the server generate one.
   resetPartnerPassword: async (partnerId, newPassword = '') => {
@@ -876,13 +882,19 @@ export const OneBssApi = {
     return { ok: false, status: 0, data: { success: false, message: 'Still running on the server — check again later.' } };
   },
 
+  // Partners page: sync every operator one after another (runs on the server). type 'internet' | 'iptv'
+  partnersBulkSyncStatus: async (type) => get(`/partners_bulk_sync.php?type=${q(type)}`),
+  // action: 'start' | 'stop' | 'resume'
+  partnersBulkSync: async (type, action = 'start') => post('/partners_bulk_sync.php', { type, action }),
+
   // IPTV sync for just these mobiles of an operator (max 50 per call) — used after a CSV import
   syncIptvMobiles: async (partnerId, mobiles) => post(`/iptv_bulk_customer_sync.php?partner_id=${q(partnerId)}`, { mobiles }),
 
   // Pioneer customer export (CSV rows) -> iptv_users + customers. partnerId 0 = operator by Branch column.
   // Max 200 rows per call. -> { summary, results, mobiles_by_operator }
-  importIptvCustomers: async (partnerId, rows, dryRun = false) =>
-    post('/iptv_import.php', { partner_id: partnerId ? Number(partnerId) : 0, rows, dry_run: !!dryRun }),
+  // opts.byIptvPartner (super admin): each row's operator from its "IPTV Partner ID" column
+  importIptvCustomers: async (partnerId, rows, dryRun = false, opts = {}) =>
+    post('/iptv_import.php', { partner_id: partnerId ? Number(partnerId) : 0, rows, dry_run: !!dryRun, ...(opts.byIptvPartner ? { by_iptv_partner: true } : {}) }),
 
   // ------------------------------------------------------------------
   // Hierarchy changes (super admin): move a partner / change a distributor's level

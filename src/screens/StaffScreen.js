@@ -137,6 +137,9 @@ const RoleEditorModal = ({ visible, role, catalog, myPermissions, onClose, onSav
           <TextInput placeholderTextColor="#94a3b8" style={sharedStyles.input} value={desc} onChangeText={setDesc} placeholder="What this role is for" maxLength={255} />
         </View>
       </View>
+      {has('internet.search_only', 'allow') ? (
+        <Note tone="info" text="Search By Username is ticked: staff with this role get only a search page. They find this account's customers by full mobile, email, username or name, and can view everything on them (password, online session, session history, auth logs, networking, ONU, complaints) and reset MAC. Adding, editing, recharge, documents and session log-out are blocked, whatever else is ticked below." />
+      ) : null}
       {myPermissions ? <Note tone="info" text="You can only give permissions you have yourself; the others are greyed out." /> : null}
 
       <View style={s.matrix}>
@@ -445,7 +448,9 @@ export const StaffScreen = ({ user, refreshSignal }) => {
                     </View>
                   </View>
                   <View style={s.chips}>
-                    {mods.length ? mods.map((md) => <View key={md} style={s.chip}><Text style={s.chipText}>{md}</Text></View>) : <Text style={s.sub}>No permissions ticked</Text>}
+                    {r.permissions?.['internet.search_only']?.includes('allow') ? (
+                      <View style={[s.chip, s.scopeChip]}><Feather name="search" size={11} color="#0e7490" /><Text style={[s.chipText, { color: '#0e7490' }]}>Search By Username · view + MAC reset</Text></View>
+                    ) : mods.length ? mods.map((md) => <View key={md} style={s.chip}><Text style={s.chipText}>{md}</Text></View>) : <Text style={s.sub}>No permissions ticked</Text>}
                   </View>
                   <View style={s.roleFoot}>
                     <Text style={s.sub}>{r.staff_count} staff · {permCount(r.permissions)} permissions</Text>
@@ -536,6 +541,7 @@ const PasswordInput = ({ value, onChangeText, placeholder }) => {
 };
 
 const s = StyleSheet.create({
+  scopeChip: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: '#ecfeff' },
   pwWrap: { flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(0,0,0,0.15)', borderRadius: 8, backgroundColor: '#ffffff', height: 40, paddingLeft: 12 },
   pwWrapFocus: { borderColor: '#10b981' },
   pwInput: { flex: 1, minWidth: 0, height: '100%', fontSize: 13, color: '#0f172a', outlineStyle: 'none' },

@@ -14,10 +14,54 @@ import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { OneBssApi, decodeJwt, saveOriginalSession, switchSession } from '../services/oneBssApi';
 import { PartnersTable, LevelBadge, levelLabelOf } from '../components/partners/PartnersTable';
+import { PartnersBulkSync } from '../components/partners/PartnersBulkSync';
 import { CustomerPricesPage } from '../components/plans/CustomerPricesPage';
 import { PartnerDevices } from '../components/partners/PartnerDevices';
 import { OttPlansPage } from '../components/ott/OttPlansPage';
 import { PlanCardList } from '../components/plans/PlanCardList';
+
+/**
+ * Super admin: let the partner update its own details (name, company, mobile, email, region)
+ * ONE time (partners.profile_edit_allowed). The partner's save closes it again.
+ */
+const ProfileEditAccessTile = ({ partner, onChanged }) => {
+  const raw = partner?.profile_edit_allowed;
+  const ready = raw !== undefined; // undefined = migrations/partner_profile_edit.sql not run yet
+  const on = raw === 1 || raw === '1' || raw === true;
+  const [busy, setBusy] = useState(false);
+  const toggle = async () => {
+    if (busy || !partner) return;
+    setBusy(true);
+    const res = await OneBssApi.setProfileEditAccess(partner.partner_id || partner.id, !on);
+    setBusy(false);
+    if (!res.ok || res.data?.success === false) {
+      toast.error(res.data?.message || 'Could not change the details-edit access');
+      return;
+    }
+    onChanged(on ? 0 : 1);
+    toast.success(res.data?.message || (on ? 'One-time edit closed' : 'One-time edit opened'));
+  };
+  const updated = partner?.profile_updated_at ? String(partner.profile_updated_at).slice(0, 16) : '';
+  const hint = !ready ? 'Run the partner_profile_edit migration' : on ? 'Open · partner can edit once' : updated ? `Last updated by partner ${updated}` : 'Closed · tap to allow once';
+  return (
+    <TouchableOpacity style={styles.pdTile} onPress={toggle} disabled={busy || !ready} accessibilityRole="switch" accessibilityState={{ checked: on }}>
+      <View style={[styles.pdTileIcon, { backgroundColor: on ? '#16a34a18' : '#94a3b818' }]}>
+        <Feather name="user-check" size={16} color={on ? '#16a34a' : '#64748b'} />
+      </View>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.pdTileLabel}>One-time Details Edit</Text>
+        <Text style={styles.pdTileHint} numberOfLines={1}>{hint}</Text>
+      </View>
+      {busy ? (
+        <ActivityIndicator size="small" color="#16a34a" />
+      ) : (
+        <View style={{ width: 38, height: 22, borderRadius: 11, padding: 2, backgroundColor: on ? '#16a34a' : '#cbd5e1', alignItems: on ? 'flex-end' : 'flex-start', opacity: ready ? 1 : 0.5 }}>
+          <View style={{ width: 18, height: 18, borderRadius: 9, backgroundColor: '#ffffff' }} />
+        </View>
+      )}
+    </TouchableOpacity>
+  );
+};
 
 /**
  * Operator setting: must an internet account be Aadhaar-verified before Recharge / Advance renewal /
@@ -3882,6 +3926,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                       <Feather name="chevron-right" size={16} color="#94a3b8" />
                     </TouchableOpacity>
                   ))}
+                  {pEdit ? <ProfileEditAccessTile partner={p} onChanged={(v) => setSelectedPartner((prev) => (prev ? { ...prev, profile_edit_allowed: v } : prev))} /> : null}
                   {pKyc ? <AadhaarForRechargeTile partner={p} onChanged={(v) => setSelectedPartner((prev) => (prev ? { ...prev, aadhaar_required_for_recharge: v } : prev))} /> : null}
                 </View>
                 )}
@@ -3974,6 +4019,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
             { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', flex: 1, justifyContent: 'flex-end' },
             isMobile && { width: '100%', flexGrow: 0, flexShrink: 0, flexBasis: 'auto', justifyContent: 'space-between', marginTop: 4 }
           ]}>
+            {isSuperAdminUser || isAdminUser ? (
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: isMobile ? '100%' : 'auto' }}>
+                <PartnersBulkSync isMobile={isMobile} scopeLabel={isSuperAdminUser ? '' : 'under you '} />
+              </View>
+            ) : null}
             {!readOnly && pAdd ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, width: isMobile ? '100%' : 'auto' }}>
               {/* ADD PARTNER BUTTON (super admin only — admins are view-only) */}

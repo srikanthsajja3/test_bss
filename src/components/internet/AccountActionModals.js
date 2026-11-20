@@ -21,7 +21,8 @@ const copy = (text, what) => {
 // =====================================================================
 // PASSWORD — view current RADIUS password + set a new one
 // =====================================================================
-export const PasswordModal = ({ visible, onClose, internetId, username, inline = false }) => {
+// canEdit: false = see the password only (no change form) — staff without "Customer password: edit"
+export const PasswordModal = ({ visible, onClose, internetId, username, inline = false, canEdit = true }) => {
   const [loading, setLoading] = useState(false);
   const [current, setCurrent] = useState('');
   const [loadError, setLoadError] = useState('');
@@ -88,7 +89,7 @@ export const PasswordModal = ({ visible, onClose, internetId, username, inline =
       footer={
         <>
           {inline ? null : <Btn label="Close" kind="ghost" onPress={onClose} disabled={saving} />}
-          <Btn label="Change Password" onPress={save} loading={saving} disabled={!pw || !pw2 || mismatch} />
+          {canEdit ? <Btn label="Change Password" onPress={save} loading={saving} disabled={!pw || !pw2 || mismatch} /> : null}
         </>
       }
     >
@@ -111,14 +112,18 @@ export const PasswordModal = ({ visible, onClose, internetId, username, inline =
         </View>
       )}
 
-      <View style={styles.divider} />
+      {canEdit ? (
+        <>
+          <View style={styles.divider} />
 
-      <Text style={sharedStyles.label}>NEW PASSWORD</Text>
-      <TextInput style={sharedStyles.input} value={pw} onChangeText={setPw} secureTextEntry={!reveal} placeholder="Minimum 4 characters" placeholderTextColor="#94a3b8" />
-      <Text style={[sharedStyles.label, { marginTop: 12 }]}>CONFIRM PASSWORD</Text>
-      <TextInput style={[sharedStyles.input, mismatch && { borderColor: '#f87171' }]} value={pw2} onChangeText={setPw2} secureTextEntry={!reveal} placeholder="Re-enter password" placeholderTextColor="#94a3b8" />
-      {mismatch ? <Text style={styles.errText}>Passwords do not match</Text> : null}
-      <Note tone="info" text="The customer's PPPoE session may need to reconnect with the new password." />
+          <Text style={sharedStyles.label}>NEW PASSWORD</Text>
+          <TextInput style={sharedStyles.input} value={pw} onChangeText={setPw} secureTextEntry={!reveal} placeholder="Minimum 4 characters" placeholderTextColor="#94a3b8" />
+          <Text style={[sharedStyles.label, { marginTop: 12 }]}>CONFIRM PASSWORD</Text>
+          <TextInput style={[sharedStyles.input, mismatch && { borderColor: '#f87171' }]} value={pw2} onChangeText={setPw2} secureTextEntry={!reveal} placeholder="Re-enter password" placeholderTextColor="#94a3b8" />
+          {mismatch ? <Text style={styles.errText}>Passwords do not match</Text> : null}
+          <Note tone="info" text="The customer's PPPoE session may need to reconnect with the new password." />
+        </>
+      ) : null}
     </ModalShell>
   );
 };
@@ -164,7 +169,9 @@ const bindingValue = (b) => {
 
 const EMPTY_FORM = { mac: '', ip: '', nas: '', framed: '', delegated: '' };
 
-export const NetworkingModal = ({ visible, onClose, internetId, username, inline = false }) => {
+// canAdd: false hides Add Binding; canRemoveMac / canRemoveIp: false hides Remove on those rows
+// (staff without MAC / IP binding "add" / "delete", e.g. Search By Username staff: MAC reset only)
+export const NetworkingModal = ({ visible, onClose, internetId, username, inline = false, canAdd = true, canRemoveMac = true, canRemoveIp = true }) => {
   const [loading, setLoading] = useState(false);
   const [bindings, setBindings] = useState([]);
   const [loadError, setLoadError] = useState('');
@@ -364,7 +371,7 @@ export const NetworkingModal = ({ visible, onClose, internetId, username, inline
       footer={
         <>
           <Btn label="Refresh" kind="ghost" icon="refresh-cw" onPress={load} disabled={loading || busy} />
-          {adding ? null : <Btn label="Add Binding" icon="plus" onPress={() => setAdding(true)} disabled={loading || busy || !!loadError} />}
+          {adding || !canAdd ? null : <Btn label="Add Binding" icon="plus" onPress={() => setAdding(true)} disabled={loading || busy || !!loadError} />}
           {inline ? null : <Btn label="Close" kind="ghost" onPress={onClose} disabled={busy} />}
         </>
       }
@@ -515,12 +522,12 @@ export const NetworkingModal = ({ visible, onClose, internetId, username, inline
                       {removing === b.id ? <ActivityIndicator size="small" color="#ffffff" /> : <Text style={styles.smallDangerText}>Yes, remove</Text>}
                     </TouchableOpacity>
                   </View>
-                ) : (
+                ) : ([1, 2].includes(Number(b.acctype)) ? canRemoveMac : canRemoveIp) ? (
                   <TouchableOpacity style={styles.smallOutline} onPress={() => setConfirmId(b.id)} disabled={busy}>
                     <Feather name="trash-2" size={12} color="#dc2626" />
                     <Text style={styles.smallOutlineText}>Remove</Text>
                   </TouchableOpacity>
-                )}
+                ) : null}
               </View>
             </View>
           ))}

@@ -10,7 +10,7 @@ import { IptvAccountDetails } from '../components/IptvAccountDetails';
 import { InternetRechargeModal } from '../components/internet/InternetRechargeModal';
 import { PasswordModal, NetworkingModal, SessionHistoryModal, AuthLogsModal, VerifyCustomerModal, DocumentsModal } from '../components/internet/AccountActionModals';
 import { CustomerComplaintsPanel } from '../components/support/ComplaintParts';
-import { can, canAny } from '../services/staffAccess';
+import { can, staffCustomerScope, canAny } from '../services/staffAccess';
 import { CustomerPhoto, isSuperAdmin, isAccountVerified, isAadhaarVerified, isRadiusVerified, aadhaarBlocksRecharge, iptvLabel } from '../components/internet/shared';
 import { AadhaarVerifyModal } from '../components/internet/AadhaarVerifyModal';
 import { IptvRechargeModal } from '../components/iptv/IptvRechargeModal';
@@ -367,6 +367,10 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     setActiveRange(findDateRange(initialRange) ? initialRange : '');
   }, [initialRange]);
   const [searchQuery, setSearchQuery] = useState(initialSearch || '');
+  // "Search By Username" staff: a search-only page (this account's customers), view + MAC reset
+  const custScope = staffCustomerScope(user);
+  const limitedStaff = custScope !== 'all';
+  const searchOnly = custScope === 'search';
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch || '');
 
   useEffect(() => {
@@ -822,14 +826,15 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           .map((a) => ({ m: String(a.iptv_mobile || '').replace(/\D/g, '').slice(-10), op: a.partner_id }))
           .filter((x) => x.m.length === 10 && x.m !== cleanMobile)
           .filter((x, i, arr) => arr.findIndex((y) => y.m === x.m) === i);
-        linkedIptv.forEach(({ m, op }) => {
+        // technicians refresh the internet accounts only (IPTV / OTT sync is not open to them)
+        (limitedStaff ? [] : linkedIptv).forEach(({ m, op }) => {
           tasks.push(
             OneBssApi.syncIptvCustomers(m, op).then((r) => {
               if (!r.ok && r.status >= 500) problems.push(`IPTV (${m}): ${r.data?.message || 'not synced'}`);
             })
           );
         });
-        if (cleanMobile.length === 10) {
+        if (cleanMobile.length === 10 && !limitedStaff) {
           tasks.push(
             OneBssApi.syncIptvCustomers(cleanMobile).then((syncRes) => {
               if (!syncRes.ok) {
@@ -856,7 +861,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           customerDetailsRef.current = { ...customerDetailsRef.current, [key]: refRec };
           setCustomerDetails((prev) => ({ ...prev, [key]: refRec }));
         }
-        const total = (ids.length > 0 ? 1 : 0) + (cleanMobile.length === 10 ? 1 : 0);
+        const total = (ids.length > 0 ? 1 : 0) + (cleanMobile.length === 10 && !limitedStaff ? 1 : 0);
         setSyncState((prev) => ({
           ...prev,
           [key]: {
@@ -1287,7 +1292,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     setInternetTab('basic');
     setOnlineOverride(null);
   }, [activeAccountSel?.kind, activeAccountSel?.index, activeCustomerId]);
-  const canSeeDocuments = isSuperAdmin(user);
+  const canSeeDocuments = isSuperAdmin(user) && !limitedStaff; // not for Search By Username staff
 
   // ---- Recheck: a recharge that was paid but not completed by the provider ----
   const recheckBusy = React.useRef(false);
@@ -1612,8 +1617,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         onClose={() => setVerifyReq(null)}
         onVerified={handleVerified}
       />
-      <PasswordModal visible={!!passwordReq} internetId={passwordReq?.internet_id} username={passwordReq?.username} onClose={() => setPasswordReq(null)} />
-      <NetworkingModal visible={!!macReq} internetId={macReq?.internet_id} username={macReq?.username} onClose={() => setMacReq(null)} />
+      <PasswordModal visible={!!passwordReq} internetId={passwordReq?.internet_id} username={passwordReq?.username} canEdit={can(user, 'internet.password', 'edit')} onClose={() => setPasswordReq(null)} />
+      <NetworkingModal visible={!!macReq} internetId={macReq?.internet_id} username={macReq?.username} canAdd={canAny(user, [['internet.mac_binding', 'add'], ['internet.ip_binding', 'add']])} canRemoveMac={can(user, 'internet.mac_binding', 'delete')} canRemoveIp={can(user, 'internet.ip_binding', 'delete')} onClose={() => setMacReq(null)} />
       <SessionHistoryModal visible={!!sessionReq} internetId={sessionReq?.internet_id} username={sessionReq?.username} onClose={() => setSessionReq(null)} />
       <AuthLogsModal visible={!!authLogsReq} internetId={authLogsReq?.internet_id} username={authLogsReq?.username} onClose={() => setAuthLogsReq(null)} />
       {canSeeDocuments ? <DocumentsModal visible={documentsOpen} customer={activeCustomer} onClose={() => setDocumentsOpen(false)} /> : null}
@@ -2229,7 +2234,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           refreshIptvUnlinkedCount();
         } : null}
         // admins (super distributor / distributor / sub distributor) only view customers
-        readOnly={String(user?.role || user?.account_role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'admin'}
+        readOnly={limitedStaff || String(user?.role || user?.account_role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'admin'}
         operatorNames={Object.fromEntries((operators || []).map((o) => [String(o.partner_id), o.partner_name]))}
       />
       {accountActionModals}
@@ -2251,7 +2256,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           onBack={handleCloseSubscriberScreen}
           onOpenRecharge={() => openIptvRecharge(iptvAcc)}
           onDeviceNameSaved={() => fetchCustomerDetails(activeCustomerId, true)}
-          readOnly={String(user?.role || user?.account_role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'admin'}
+          readOnly={limitedStaff || String(user?.role || user?.account_role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'admin'}
           onSync={async () => {
             await handleIptvCustomerDetailSync({ id: `iptv_${iptvAcc.id}`, mobile: activeCustomer.mobile, name: activeCustomer.full_name });
             await fetchCustomerDetails(activeCustomerId, true);
@@ -2457,7 +2462,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           <OnlineSessionPanel
             internetId={currentInternetAccount.internet_id}
             username={activeSubProfile.username}
-            readOnly={readOnlyViewer}
+            // no "Log out this session" without the Disconnect permission (e.g. Search By Username staff)
+            readOnly={readOnlyViewer || !can(user, 'internet.disconnect')}
             onStatus={(online) => setOnlineOverride(!!online)}
             onRefreshAccount={async () => {
               await handleAccountDetailSync(currentInternetAccount.internet_id, true);
@@ -2465,9 +2471,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             }}
           />
         ) : internetTab === 'password' && currentInternetAccount ? (
-          <PasswordModal inline visible internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} onClose={() => setInternetTab('basic')} />
+          <PasswordModal inline visible internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} canEdit={!readOnlyViewer && can(user, 'internet.password', 'edit')} onClose={() => setInternetTab('basic')} />
         ) : internetTab === 'mac' && currentInternetAccount ? (
-          <NetworkingModal inline visible internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} onClose={() => setInternetTab('basic')} />
+          <NetworkingModal inline visible internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} canAdd={canAny(user, [['internet.mac_binding', 'add'], ['internet.ip_binding', 'add']])} canRemoveMac={can(user, 'internet.mac_binding', 'delete')} canRemoveIp={can(user, 'internet.ip_binding', 'delete')} onClose={() => setInternetTab('basic')} />
         ) : internetTab === 'sessions' && currentInternetAccount ? (
           <SessionHistoryModal inline visible internetId={currentInternetAccount.internet_id} username={currentInternetAccount.username} onClose={() => setInternetTab('basic')} />
         ) : internetTab === 'auth' && currentInternetAccount ? (
@@ -2511,6 +2517,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
                   <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>{activeSubProfile.mobile || '—'}</Text>
                   {activeSubProfile.mobile_verified ? <Feather name="check-circle" size={13} color="#10b981" /> : null}
+                  {/* only with "Edit customer profile" (not admins / technicians) */}
+                  {!readOnlyViewer && can(user, 'internet.profile', 'edit') ? (
                   <TouchableOpacity
                     onPress={() => {
                       setModifyMobileCust(activeSubProfile);
@@ -2522,6 +2530,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                     <Feather name="edit-2" size={10} color="#8b5cf6" />
                     <Text style={{ fontSize: 11, fontWeight: '600', color: '#8b5cf6' }}>Edit</Text>
                   </TouchableOpacity>
+                  ) : null}
                 </View>
               </View>
 
@@ -2697,13 +2706,15 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       <View style={styles.unifiedControlCard}>
         {/* Search Bar, Operator Filter & Add Customer Button */}
         <View style={[styles.topControlRow, { gap: 10, flexWrap: 'wrap', alignItems: 'center' }]}>
-          <View style={[styles.searchBox, { width: isMobile ? '100%' : 260, maxWidth: '100%' }]}>
+          <View style={[styles.searchBox, { width: isMobile || searchOnly ? '100%' : 260, maxWidth: searchOnly ? 560 : '100%' }]}>
             <Feather name="search" size={15} color={COLORS.textDim} />
             <TextInput
               style={styles.searchInput}
-              placeholder={viewMode === 'iptv'
-                ? 'Search STB / VC number, Pioneer ID, name, mobile, operator...'
-                : 'Search username, mobile, name, email, account ID, operator...'}
+              placeholder={searchOnly
+                ? 'Full mobile, email, username or name (3+ letters)'
+                : viewMode === 'iptv'
+                  ? 'Search STB / VC number, Pioneer ID, name, mobile, operator...'
+                  : 'Search username, mobile, name, email, account ID, operator...'}
               value={searchQuery}
               onChangeText={setSearchQuery}
               onSubmitEditing={() => setDebouncedSearch(searchQuery.trim())}
@@ -2926,7 +2937,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           {viewMode === 'iptv' && (isSuperAdmin(user) || (isOperatorRole && ownServices?.iptv !== false)) ? (
             <TouchableOpacity style={[styles.addCustomerHeaderBtn, { backgroundColor: '#7c3aed' }]} onPress={() => setShowIptvImport(true)}>
               <Feather name="upload" size={14} color="#ffffff" />
-              <Text style={styles.addCustomerHeaderBtnText}>Import CSV</Text>
+              <Text style={styles.addCustomerHeaderBtnText}>Import Excel / CSV</Text>
             </TouchableOpacity>
           ) : null}
           {viewMode === 'iptv' && canSeeIptvLink ? (
@@ -3014,8 +3025,13 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           </View>
         ) : null}
 
+        {searchOnly ? (
+          <Text style={styles.searchOnlyHint}>
+            Search a customer by their full mobile number, email or username, or at least 3 letters of their name.
+          </Text>
+        ) : null}
         {/* Bottom Filter Chips Line — counts come from the server and cover every account */}
-        <View style={styles.bottomChipRowContainer}>
+        <View style={[styles.bottomChipRowContainer, searchOnly && { display: 'none' }]}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
             {(viewMode === 'iptv'
               ? [
@@ -3054,8 +3070,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         </View>
       </View>
 
-      {/* SERVICE DATA DISPLAY TABLE */}
-      <View style={styles.card}>
+      {/* SERVICE DATA DISPLAY TABLE (search-only technicians: only after a search) */}
+      <View style={[styles.card, searchOnly && !debouncedSearch && { display: 'none' }]}>
         <View style={{ width: '100%' }}>
           {/* PAGINATION CONTROLS BAR (TOP) */}
           <View style={{ flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight || '#e2e8f0', gap: 10, backgroundColor: COLORS.cardBg || '#ffffff' }}>
@@ -3126,6 +3142,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   <TouchableOpacity
                     style={{ width: 34, alignItems: 'center', justifyContent: 'center' }}
                     title="Tick all on this page"
+                    disabled={limitedStaff}
                     onPress={() => {
                       const pageRows = paginatedCustomers.filter((c) => c.internet_id !== undefined && c.internet_id !== null);
                       const allOn = pageRows.length > 0 && pageRows.every((c) => bulkSel[c.internet_id]);
@@ -3139,7 +3156,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       });
                     }}
                   >
-                    {(() => {
+                    {limitedStaff ? null : (() => {
                       const pageRows = paginatedCustomers.filter((c) => c.internet_id !== undefined && c.internet_id !== null);
                       const n = pageRows.filter((c) => bulkSel[c.internet_id]).length;
                       return <Feather name={n && n === pageRows.length ? 'check-square' : n ? 'minus-square' : 'square'} size={16} color="#1d4ed8" />;
@@ -3179,7 +3196,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             </View>
 
             {/* Filter row: one control per column, filters the whole list on the server */}
-            <View style={styles.excelFilterRow} dataSet={TABLE_GUTTER}>
+            <View style={[styles.excelFilterRow, searchOnly && { display: 'none' }]} dataSet={TABLE_GUTTER}>
               {viewMode === 'iptv' ? (
                 <>
                   <FilterCell flex={1.7} minWidth={140}>
@@ -3453,8 +3470,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
                 return (
                   <View key={intRowKey} style={[styles.tr, bulkSel[cust.internet_id] && { backgroundColor: '#eff6ff' }]}>
-                    <TouchableOpacity style={{ width: 34, alignItems: 'center', justifyContent: 'center' }} onPress={() => bulkPick(cust)}>
-                      <Feather name={bulkSel[cust.internet_id] ? 'check-square' : 'square'} size={16} color={bulkSel[cust.internet_id] ? '#1d4ed8' : '#94a3b8'} />
+                    <TouchableOpacity style={{ width: 34, alignItems: 'center', justifyContent: 'center' }} disabled={limitedStaff} onPress={() => bulkPick(cust)}>
+                      {limitedStaff ? null : <Feather name={bulkSel[cust.internet_id] ? 'check-square' : 'square'} size={16} color={bulkSel[cust.internet_id] ? '#1d4ed8' : '#94a3b8'} />}
                     </TouchableOpacity>
                     {/* Username */}
                     <View style={{ flex: 1.5, minWidth: 120, gap: 3 }}>
@@ -3703,6 +3720,11 @@ const styles = StyleSheet.create({
     zIndex: 50,
   },
   th: { fontSize: 10, fontWeight: '700', color: COLORS.textMuted, textTransform: 'uppercase' },
+  searchOnlyHint: {
+    fontSize: 12.5,
+    color: '#475569',
+    marginTop: 10,
+  },
   excelFilterRow: {
     flexDirection: 'row',
     flexWrap: 'nowrap',

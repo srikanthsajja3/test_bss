@@ -10,8 +10,8 @@ import { ModalShell, Btn, Note, SearchSelect } from '../internet/shared';
  * IPTV sync for exactly those mobiles (iptv_bulk_customer_sync.php with a mobiles list).
  *   1. pick the file (read here in the browser)   2. Check: dry run, shows what will happen per row
  *   3. Import (200 rows per call)                  4. Sync with Pioneer (5 mobiles per call)
- * Super admin picks the operator, or lets each row's Branch column decide; an operator imports
- * into its own account.
+ * Super admin picks the operator, or lets each row's IPTV Partner ID (Pioneer cid, required on
+ * every row) or Branch column decide; an operator imports into its own account. Reads .xlsx and .csv.
  */
 const IMPORT_CHUNK = 200;
 const SYNC_CHUNK = 5;
@@ -55,38 +55,177 @@ const HEADERS = {
   mobile: 'mobile', 'mobile number': 'mobile', 'caf number': 'caf', 'last renewal': 'last_renewal',
   'operator name': 'operator_name', branch: 'branch', 'installation address': 'address', address: 'address',
   email: 'email', 'date added': 'date_added',
+  // super admin bulk import: Pioneer's partner id (cid) of the operator
+  'iptv partner id': 'iptv_partner_id', 'iptv partnerid': 'iptv_partner_id', 'iptv partner': 'iptv_partner_id',
+  'partner id': 'iptv_partner_id', cid: 'iptv_partner_id',
+};
+const DATE_FIELDS = ['last_renewal', 'date_added'];
+
+// Excel date serial (days since 1899-12-30) -> "YYYY-MM-DD HH:MM:SS"
+const excelSerialToText = (v) => {
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 1 || n > 2958465) return v;
+  const ms = Math.round((n - 25569) * 86400 * 1000);
+  const d = new Date(ms);
+  const p = (x) => String(x).padStart(2, '0');
+  return `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())} ${p(d.getUTCHours())}:${p(d.getUTCMinutes())}:${p(d.getUTCSeconds())}`;
 };
 
-export const csvToRows = (text) => {
-  const grid = parseCsv(text);
-  if (!grid.length) return { error: 'The file is empty.' };
-  const head = grid[0].map((h) => HEADERS[h.trim().toLowerCase().replace(/\s+/g, ' ')] || null);
-  const missing = ['stb', 'mobile'].filter((f) => !head.includes(f));
+/**
+ * grid (array of rows of cells) -> { rows } | { error }.
+ * needCid: every row must have an "IPTV Partner ID" (super admin bulk import).
+ */
+export const gridToRows = (grid, needCid = false) => {
+  if (!grid || !grid.length) return { error: 'The file is empty.' };
+  const head = grid[0].map((h) => HEADERS[String(h || '').trim().toLowerCase().replace(/[\s_]+/g, ' ')] || null);
+  const need = [['stb', 'Stb Number'], ['mobile', 'Mobile'], ...(needCid ? [['iptv_partner_id', 'IPTV Partner ID']] : [])];
+  const missing = need.filter(([f]) => !head.includes(f)).map(([, l]) => l);
   if (missing.length) {
-    return { error: `The file needs the columns "Stb Number" and "Mobile" (missing: ${missing.map((m) => (m === 'stb' ? 'Stb Number' : 'Mobile')).join(', ')}). Use the Pioneer customer export.` };
+    return { error: `The file needs the columns ${need.map(([, l]) => `"${l}"`).join(', ')} (missing: ${missing.join(', ')}). Use the Pioneer customer export${needCid ? ' with an "IPTV Partner ID" column added' : ''}.` };
   }
   const rows = [];
   // line numbers as a spreadsheet shows them: header = 1 (multi-line cells count once)
   grid.slice(1).forEach((cells, i) => {
     const r = { line: i + 2 };
-    head.forEach((f, j) => { if (f) r[f] = (cells[j] || '').trim(); });
+    head.forEach((f, j) => {
+      if (!f) return;
+      let v = String(cells[j] ?? '').trim();
+      if (DATE_FIELDS.includes(f) && /^\d+(\.\d+)?$/.test(v)) v = excelSerialToText(v);
+      r[f] = v;
+    });
     rows.push(r);
   });
+  if (needCid) {
+    const empty = rows.filter((r) => !r.iptv_partner_id).map((r) => r.line);
+    if (empty.length) {
+      return { error: `"IPTV Partner ID" must not be empty — fill it in on line${empty.length === 1 ? '' : 's'} ${empty.slice(0, 15).join(', ')}${empty.length > 15 ? ` and ${empty.length - 15} more` : ''}.` };
+    }
+    const bad = rows.filter((r) => !/^\d+$/.test(r.iptv_partner_id)).map((r) => r.line);
+    if (bad.length) {
+      return { error: `"IPTV Partner ID" must be a number (Pioneer's partner id) — check line${bad.length === 1 ? '' : 's'} ${bad.slice(0, 15).join(', ')}${bad.length > 15 ? ` and ${bad.length - 15} more` : ''}.` };
+    }
+  }
   return { rows };
+};
+
+export const csvToRows = (text, needCid = false) => gridToRows(parseCsv(text), needCid);
+
+// ---- minimal .xlsx reader (no library): zip directory + DecompressionStream + DOMParser ----
+const unzipEntries = (buf) => {
+  const dv = new DataView(buf);
+  let eocd = -1;
+  for (let i = buf.byteLength - 22; i >= Math.max(0, buf.byteLength - 65557); i -= 1) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('not a zip');
+  const count = dv.getUint16(eocd + 10, true);
+  let p = dv.getUint32(eocd + 16, true);
+  const dec = new TextDecoder();
+  const out = {};
+  for (let k = 0; k < count; k += 1) {
+    if (dv.getUint32(p, true) !== 0x02014b50) break;
+    const method = dv.getUint16(p + 10, true);
+    const size = dv.getUint32(p + 20, true);
+    const nameLen = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const commentLen = dv.getUint16(p + 32, true);
+    const local = dv.getUint32(p + 42, true);
+    const name = dec.decode(new Uint8Array(buf, p + 46, nameLen));
+    const start = local + 30 + dv.getUint16(local + 26, true) + dv.getUint16(local + 28, true);
+    out[name] = { method, data: new Uint8Array(buf, start, size) };
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  return out;
+};
+
+const entryText = async (e) => {
+  if (!e) return '';
+  if (e.method === 0) return new TextDecoder().decode(e.data);
+  if (e.method !== 8 || typeof DecompressionStream === 'undefined') throw new Error('unsupported');
+  const stream = new Blob([e.data]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  return new Response(stream).text();
+};
+
+const colIndex = (ref) => {
+  const letters = String(ref || '').replace(/[^A-Z]/gi, '').toUpperCase();
+  let n = 0;
+  for (let i = 0; i < letters.length; i += 1) n = n * 26 + (letters.charCodeAt(i) - 64);
+  return n - 1;
+};
+
+/** first worksheet of an .xlsx -> grid of strings */
+export const xlsxToGrid = async (buf) => {
+  const files = unzipEntries(buf);
+  const xml = (t) => new DOMParser().parseFromString(t, 'application/xml');
+  const strings = [];
+  if (files['xl/sharedStrings.xml']) {
+    const doc = xml(await entryText(files['xl/sharedStrings.xml']));
+    Array.from(doc.getElementsByTagName('si')).forEach((si) => {
+      // rich text: all <t> pieces, but not the phonetic (<rPh>) ones
+      strings.push(Array.from(si.getElementsByTagName('t')).filter((t) => t.parentNode && t.parentNode.nodeName !== 'rPh').map((t) => t.textContent).join(''));
+    });
+  }
+  // the first sheet in workbook order
+  let sheetPath = 'xl/worksheets/sheet1.xml';
+  try {
+    const wb = xml(await entryText(files['xl/workbook.xml']));
+    const first = wb.getElementsByTagName('sheet')[0];
+    const rid = first && (first.getAttribute('r:id') || first.getAttributeNS('http://schemas.openxmlformats.org/officeDocument/2006/relationships', 'id'));
+    if (rid && files['xl/_rels/workbook.xml.rels']) {
+      const rels = xml(await entryText(files['xl/_rels/workbook.xml.rels']));
+      const rel = Array.from(rels.getElementsByTagName('Relationship')).find((r) => r.getAttribute('Id') === rid);
+      const target = rel && rel.getAttribute('Target');
+      if (target) sheetPath = target.startsWith('/') ? target.slice(1) : `xl/${target.replace(/^\.\//, '')}`;
+    }
+  } catch (e) { /* keep sheet1 */ }
+  if (!files[sheetPath]) sheetPath = Object.keys(files).find((n) => /^xl\/worksheets\/[^/]+\.xml$/.test(n));
+  if (!sheetPath) throw new Error('no sheet');
+  const sheet = xml(await entryText(files[sheetPath]));
+  const grid = [];
+  Array.from(sheet.getElementsByTagName('row')).forEach((rowEl, ri) => {
+    const rIdx = Number(rowEl.getAttribute('r')) ? Number(rowEl.getAttribute('r')) - 1 : ri;
+    const cells = [];
+    Array.from(rowEl.getElementsByTagName('c')).forEach((c, ci) => {
+      const idx = c.getAttribute('r') ? colIndex(c.getAttribute('r')) : ci;
+      const t = c.getAttribute('t');
+      const vEl = c.getElementsByTagName('v')[0];
+      let v = vEl ? vEl.textContent : '';
+      if (t === 's') v = strings[Number(v)] ?? '';
+      else if (t === 'inlineStr') v = Array.from(c.getElementsByTagName('t')).map((x) => x.textContent).join('');
+      else if (t === 'b') v = v === '1' ? 'TRUE' : 'FALSE';
+      cells[idx] = v;
+    });
+    if (cells.some((v) => String(v ?? '').trim() !== '')) {
+      grid[rIdx] = Array.from(cells, (v) => (v == null ? '' : String(v)));
+    }
+  });
+  // keep the header as row 1 even when the sheet starts lower: drop leading empty rows only
+  const compact = [];
+  let started = false;
+  grid.forEach((r) => { if (r) { started = true; } if (started) compact.push(r || []); });
+  return compact.filter((r) => r.length);
 };
 
 const pickFile = () => new Promise((resolve) => {
   if (Platform.OS !== 'web' || typeof document === 'undefined') { resolve(null); return; }
   const input = document.createElement('input');
   input.type = 'file';
-  input.accept = '.csv,text/csv';
-  input.onchange = () => {
+  input.accept = '.csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+  input.onchange = async () => {
     const f = input.files && input.files[0];
     if (!f) { resolve(null); return; }
-    const reader = new FileReader();
-    reader.onload = () => resolve({ name: f.name, text: String(reader.result || '') });
-    reader.onerror = () => resolve(null);
-    reader.readAsText(f);
+    const lower = f.name.toLowerCase();
+    if (lower.endsWith('.xls')) { resolve({ name: f.name, error: 'Old .xls files cannot be read — save the sheet as .xlsx or .csv and choose it again.' }); return; }
+    try {
+      if (lower.endsWith('.xlsx')) {
+        const grid = await xlsxToGrid(await f.arrayBuffer());
+        resolve({ name: f.name, grid });
+      } else {
+        resolve({ name: f.name, grid: parseCsv(await f.text()) });
+      }
+    } catch (e) {
+      resolve({ name: f.name, error: 'Could not read this file. Save it as .xlsx or .csv and try again.' });
+    }
   };
   input.click();
 });
@@ -99,9 +238,11 @@ const addSummary = (a, b) => {
 
 export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone, onLinkRemaining }) => {
   const isOperator = String(user?.role || '').toLowerCase() === 'operator';
-  const [file, setFile] = useState(null); // { name, rows }
+  const isSuper = String(user?.role || '').toLowerCase().replace(/[\s_-]+/g, '') === 'superadmin';
+  const defaultOp = isOperator ? String(user?.partner_id || '') : isSuper ? 'cid' : '0';
+  const [file, setFile] = useState(null); // { name, grid, rows }
   const [fileError, setFileError] = useState('');
-  const [operatorId, setOperatorId] = useState(isOperator ? String(user?.partner_id || '') : '0');
+  const [operatorId, setOperatorId] = useState(defaultOp); // 'cid' = by the IPTV Partner ID column
   const [stage, setStage] = useState('pick'); // pick | checked | importing | syncing | done
   const [busy, setBusy] = useState(false);
   const [check, setCheck] = useState(null); // { summary, results }
@@ -113,23 +254,35 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
   useEffect(() => {
     if (!visible) return;
     setFile(null); setFileError(''); setStage('pick'); setCheck(null); setImported(null); setSync(null); setProgress(null);
-    setOperatorId(isOperator ? String(user?.partner_id || '') : '0');
+    setOperatorId(defaultOp);
     cancelRef.current = false;
   }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const byCid = operatorId === 'cid';
+
+  // reads the grid for the current mode (the IPTV Partner ID column is required only in 'cid' mode)
+  const applyGrid = (name, grid, cidMode) => {
+    const parsed = gridToRows(grid, cidMode);
+    if (parsed.error) { setFile({ name, grid, rows: null }); setFileError(parsed.error); return; }
+    if (!parsed.rows.length) { setFile({ name, grid, rows: null }); setFileError('The file has a header but no customers.'); return; }
+    setFileError('');
+    setFile({ name, grid, rows: parsed.rows });
+  };
+
   // a new file or operator needs a new check
-  useEffect(() => { if (stage === 'checked') { setStage('pick'); setCheck(null); } }, [operatorId]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (stage === 'checked') { setStage('pick'); setCheck(null); }
+    if (file?.grid) applyGrid(file.name, file.grid, byCid);
+  }, [operatorId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const choose = async () => {
     const f = await pickFile();
     if (!f) return;
-    const parsed = csvToRows(f.text);
     setCheck(null); setStage('pick');
-    if (parsed.error) { setFile(null); setFileError(parsed.error); return; }
-    if (!parsed.rows.length) { setFile(null); setFileError('The file has a header but no customers.'); return; }
-    setFileError('');
-    setFile({ name: f.name, rows: parsed.rows });
+    if (f.error) { setFile(null); setFileError(f.error); return; }
+    applyGrid(f.name, f.grid, byCid);
   };
+  const ready = !!(file && file.rows && file.rows.length);
 
   // runs the rows through iptv_import.php in chunks
   const sendRows = async (dryRun) => {
@@ -140,7 +293,7 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
     for (let i = 0; i < total; i += IMPORT_CHUNK) {
       if (cancelRef.current) break;
       const part = file.rows.slice(i, i + IMPORT_CHUNK);
-      const res = await OneBssApi.importIptvCustomers(operatorId === '0' ? 0 : operatorId, part, dryRun);
+      const res = await OneBssApi.importIptvCustomers(operatorId === '0' || byCid ? 0 : operatorId, part, dryRun, { byIptvPartner: byCid });
       if (!res.ok) {
         part.forEach((r) => results.push({ line: r.line, ok: false, mobile: r.mobile, name: r.name, message: res.data?.message || 'Request failed', stbs: [] }));
         summary = addSummary(summary, { rows: part.length, errors: part.length });
@@ -157,7 +310,7 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
   };
 
   const runCheck = async () => {
-    if (!file || busy) return;
+    if (!ready || busy) return;
     setBusy(true);
     const out = await sendRows(true);
     setBusy(false); setProgress(null);
@@ -165,7 +318,7 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
   };
 
   const runImport = async () => {
-    if (!file || busy) return;
+    if (!ready || busy) return;
     setBusy(true); setStage('importing');
     const out = await sendRows(false);
     setProgress(null);
@@ -216,6 +369,7 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
   const errors = (check?.results || imported?.results || []).filter((r) => !r.ok);
   const S = (stage === 'done' || stage === 'syncing' || stage === 'importing') ? imported?.summary || {} : check?.summary || {};
   const opOptions = [
+    ...(isSuper ? [{ value: 'cid', label: 'Bulk — by the IPTV Partner ID column', sub: 'every row needs Pioneer\'s partner id (cid) of its operator' }] : []),
     ...(!isOperator ? [{ value: '0', label: 'Automatic — by the Branch column', sub: 'each branch must be given to exactly one operator' }] : []),
     ...operators.map((o) => ({ value: String(o.value), label: o.label, search: o.label })),
   ];
@@ -223,7 +377,7 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
   return (
     <ModalShell
       visible={visible}
-      title="Import IPTV customers (CSV)"
+      title="Import IPTV customers (Excel / CSV)"
       icon="upload"
       iconColor="#7c3aed"
       onClose={close}
@@ -232,7 +386,7 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
       footer={(
         <>
           <Btn label={stage === 'done' ? 'Close' : 'Cancel'} kind="ghost" onPress={close} disabled={busy && stage === 'importing'} />
-          {stage === 'pick' ? <Btn label={busy ? 'Checking…' : 'Check file'} icon="search" onPress={runCheck} disabled={!file || busy || (!isOperator && !operatorId)} /> : null}
+          {stage === 'pick' ? <Btn label={busy ? 'Checking…' : 'Check file'} icon="search" onPress={runCheck} disabled={!ready || busy || (!isOperator && !operatorId)} /> : null}
           {stage === 'checked' ? (
             <Btn label={`Import ${S.stbs_added || 0} STB(s) and sync`} icon="upload" onPress={runImport} disabled={!S.stbs_added && !S.stbs_existing} />
           ) : null}
@@ -243,12 +397,12 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
         {stage === 'pick' || stage === 'checked' ? (
           <>
             <View>
-              <Text style={s.label}>1. CSV file</Text>
+              <Text style={s.label}>1. Excel / CSV file</Text>
               <TouchableOpacity style={s.fileBox} onPress={choose} disabled={busy}>
                 <Feather name={file ? 'file-text' : 'upload-cloud'} size={20} color="#7c3aed" />
                 <View style={{ flex: 1 }}>
-                  <Text style={s.fileName}>{file ? file.name : 'Choose the Pioneer customer export (.csv)'}</Text>
-                  <Text style={s.fileSub}>{file ? `${file.rows.length} customer row(s)` : 'Columns used: Stb Number, Name, Mobile, Status, Last Renewal, Branch, Installation Address, Email, Date Added'}</Text>
+                  <Text style={s.fileName}>{file ? file.name : 'Choose the Pioneer customer export (.xlsx or .csv)'}</Text>
+                  <Text style={s.fileSub}>{file?.rows ? `${file.rows.length} customer row(s)` : `Columns used: ${byCid ? 'IPTV Partner ID (required), ' : ''}Stb Number, Name, Mobile, Status, Last Renewal, Branch, Installation Address, Email, Date Added`}</Text>
                 </View>
                 <Text style={s.fileBtn}>{file ? 'Change' : 'Browse'}</Text>
               </TouchableOpacity>
@@ -259,6 +413,7 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
               <View>
                 <Text style={s.label}>2. Operator</Text>
                 <SearchSelect value={operatorId} options={opOptions} onChange={(v) => setOperatorId(String(v))} placeholder="Pick the operator…" searchPlaceholder="Search operators…" accent="#7c3aed" />
+                {byCid ? <View style={{ marginTop: 8 }}><Note tone="info" text="Each row goes to the operator whose IPTV settings have that IPTV Partner ID. Rows with an ID that no operator has are skipped and listed." /></View> : null}
               </View>
             ) : null}
           </>
@@ -298,7 +453,7 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
             <View style={s.progTrack}><View style={[s.progFill, { width: `${sync.total ? Math.round((sync.done / sync.total) * 100) : 100}%` }]} /></View>
             <Text style={s.syncLine}>{sync.ok} synced · {sync.notFound} not found on Pioneer · {sync.failed} failed</Text>
             {stage === 'done' && onLinkRemaining && Number(S.customers_created || 0) > 0 ? (
-              <TouchableOpacity style={s.linkCta} onPress={() => onLinkRemaining(operatorId && operatorId !== '0' ? operatorId : '')}>
+              <TouchableOpacity style={s.linkCta} onPress={() => onLinkRemaining(operatorId && operatorId !== '0' && !byCid ? operatorId : '')}>
                 <Feather name="link" size={14} color="#7c3aed" />
                 <Text style={s.linkCtaText}>
                   {S.customers_created} mobile{Number(S.customers_created) === 1 ? '' : 's'} matched no existing customer — link those IPTV accounts to internet customers
@@ -319,7 +474,7 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
             <Text style={s.label}>Rows that {stage === 'checked' ? 'will be skipped' : 'were skipped'} ({errors.length})</Text>
             <ScrollView style={s.errList}>
               {errors.map((r) => (
-                <Text key={r.line} style={s.errLine}><Text style={{ fontWeight: '700' }}>Line {r.line}</Text>{r.name ? ` · ${r.name}` : ''}{r.mobile ? ` · ${r.mobile}` : ''} — {r.message}</Text>
+                <Text key={r.line} style={s.errLine}><Text style={{ fontWeight: '700' }}>Line {r.line}</Text>{r.name ? ` · ${r.name}` : ''}{r.mobile ? ` · ${r.mobile}` : ''}{r.iptv_partner_id ? ` · IPTV partner ${r.iptv_partner_id}` : ''} — {r.message}</Text>
               ))}
             </ScrollView>
           </View>

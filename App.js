@@ -6,6 +6,7 @@ import { COLORS } from './src/constants/theme';
 import { setApiConfig, onUnauthorized, isJwtExpired, clearStoredSession, OneBssApi } from './src/services/oneBssApi';
 import { Sidebar } from './src/components/Sidebar';
 import { Header } from './src/components/Header';
+import { ProfileUpdatePrompt } from './src/components/partners/ProfileUpdatePrompt';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { PartnerScreen } from './src/screens/PartnerScreen';
 import { CustomerPricesPage } from './src/components/plans/CustomerPricesPage';
@@ -704,6 +705,7 @@ function MainApp() {
             user={user}
           />
 
+          <ProfileUpdatePrompt key={`pp-${user?.partner_id || ''}-${user?.staff?.staff_id || ''}`} user={user} />
           <View style={styles.contentArea}>
             {renderActiveScreen()}
           </View>

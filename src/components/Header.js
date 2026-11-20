@@ -34,7 +34,8 @@ export const Header = ({
   }, [user]);
 
   useEffect(() => {
-    if (!user?.partner_id) return undefined;
+    // staff without the Wallet permission (e.g. technicians) never see the wallet: don't load it
+    if (!user?.partner_id || !can(user, 'wallet.view')) return undefined;
     const load = () =>
       OneBssApi.getWallet(user.partner_id).then((res) => {
         if (res.ok && res.data && res.data.wallet_balance !== undefined) {

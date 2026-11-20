@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "onebss_expo",
+    "name": "OneBSS",
     "slug": "onebss_expo",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -19,7 +19,9 @@
     },
     "web": {
       "bundler": "metro",
-      "favicon": "./assets/favicon.png"
+      "favicon": "./assets/favicon.png",
+      "name": "OneBSS",
+      "shortName": "OneBSS"
     },
     "plugins": [
       "expo-font"
