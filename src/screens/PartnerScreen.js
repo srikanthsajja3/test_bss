@@ -20,6 +20,16 @@ import { PartnerDevices } from '../components/partners/PartnerDevices';
 import { OttPlansPage } from '../components/ott/OttPlansPage';
 import { PlanCardList } from '../components/plans/PlanCardList';
 
+/** wallet_balance (total) + wallet_mode + wallets from a wallet answer (getWallet / wallet_mode / credit). */
+const walletFieldsFrom = (d) => {
+  const out = { wallet_balance: Number(d.wallet_balance) };
+  if (d.wallet_mode) out.wallet_mode = d.wallet_mode;
+  if (Array.isArray(d.wallets)) out.wallets = d.wallets;
+  return out;
+};
+
+const WALLET_COLORS = { Internet: '#059669', IPTV: '#7c3aed', OTT: '#0284c7' };
+
 /**
  * Super admin: let the partner update its own details (name, company, mobile, email, region)
  * ONE time (partners.profile_edit_allowed). The partner's save closes it again.
@@ -374,7 +384,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       OneBssApi.getWallet(selectedPartner.partner_id)
         .then((wRes) => {
           if (wRes.ok && wRes.data && wRes.data.wallet_balance !== undefined) {
-            setSelectedPartner((prev) => (prev ? { ...prev, wallet_balance: Number(wRes.data.wallet_balance) } : prev));
+            setSelectedPartner((prev) => (prev ? { ...prev, ...walletFieldsFrom(wRes.data) } : prev));
           }
         })
         .catch(() => {});
@@ -594,7 +604,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
           try {
             const wRes = await OneBssApi.getWallet(p.partner_id);
             if (wRes.ok && wRes.data && wRes.data.wallet_balance !== undefined) {
-              return { ...p, wallet_balance: Number(wRes.data.wallet_balance) };
+              return { ...p, ...walletFieldsFrom(wRes.data) };
             }
           } catch (e) {}
           return { ...p, wallet_balance: p.wallet_balance !== undefined ? Number(p.wallet_balance) : 0 };
@@ -888,6 +898,10 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
     toast.success(res.data.message || 'Wallets updated');
     setWalletPartner((prev) => (prev ? { ...prev, wallet_mode: res.data.wallet_mode, wallets: res.data.wallets || [], wallet_balance: res.data.wallet_balance } : prev));
+    // the Partners list and the open partner show the new wallets too
+    const modeFields = { wallet_mode: res.data.wallet_mode, wallets: res.data.wallets || [], wallet_balance: Number(res.data.wallet_balance) };
+    setPartners((prev) => prev.map((x) => (String(x.partner_id) === String(pid) ? { ...x, ...modeFields } : x)));
+    setSelectedPartner((prev) => (prev && String(prev.partner_id) === String(pid) ? { ...prev, ...modeFields } : prev));
     setWalletTarget(res.data.wallet_mode === 'split' && res.data.wallets?.length ? res.data.wallets[0].type : '');
     const h = await OneBssApi.getWallet(pid);
     if (h.ok && Array.isArray(h.data?.transactions)) setWalletTransactions(h.data.transactions);
@@ -932,11 +946,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         setWalletPartner((prev) => (prev ? { ...prev, wallets: data.wallets, wallet_mode: data.wallet_mode || prev.wallet_mode } : prev));
       }
 
+      const wFields = { wallet_balance: newBalance, ...(Array.isArray(data.wallets) ? { wallets: data.wallets } : {}), ...(data.wallet_mode ? { wallet_mode: data.wallet_mode } : {}) };
       setPartners((prev) =>
-        prev.map((p) => (p.partner_id === walletPartner.partner_id ? { ...p, wallet_balance: newBalance } : p))
+        prev.map((p) => (p.partner_id === walletPartner.partner_id ? { ...p, ...wFields } : p))
       );
       if (selectedPartner?.partner_id === walletPartner.partner_id) {
-        setSelectedPartner((prev) => ({ ...prev, wallet_balance: newBalance }));
+        setSelectedPartner((prev) => ({ ...prev, ...wFields }));
       }
       setWalletPartner((prev) => (prev ? { ...prev, wallet_balance: newBalance } : prev));
 
@@ -971,11 +986,12 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
           }
           if (walletRes.data.wallet_balance !== undefined && walletRes.data.wallet_balance !== null && !isNaN(Number(walletRes.data.wallet_balance))) {
             const freshBal = Number(walletRes.data.wallet_balance);
+            const fresh = walletFieldsFrom(walletRes.data);
             setPartners((prev) =>
-              prev.map((p) => (p.partner_id === walletPartner.partner_id ? { ...p, wallet_balance: freshBal } : p))
+              prev.map((p) => (p.partner_id === walletPartner.partner_id ? { ...p, ...fresh } : p))
             );
             if (selectedPartner?.partner_id === walletPartner.partner_id) {
-              setSelectedPartner((prev) => ({ ...prev, wallet_balance: freshBal }));
+              setSelectedPartner((prev) => ({ ...prev, ...fresh }));
             }
             setWalletPartner((prev) => (prev ? { ...prev, wallet_balance: freshBal } : prev));
           }
@@ -3811,8 +3827,38 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
               </View>
 
               <View style={styles.pdWallet}>
-                <Text style={styles.heroWalletLabel}>WALLET BALANCE</Text>
-                <Text style={styles.heroWalletValue}>₹{Number(p.wallet_balance || 0).toLocaleString('en-IN')}</Text>
+                {p.wallet_mode === 'split' && Array.isArray(p.wallets) && p.wallets.length ? (
+                  <>
+                    <View style={{ flexDirection: 'row', alignItems: 'baseline', gap: 8, flexWrap: 'wrap' }}>
+                      <Text style={styles.heroWalletLabel}>WALLETS · TOTAL</Text>
+                      <Text style={[styles.heroWalletValue, { fontSize: 15 }]}>₹{Number(p.wallet_balance || 0).toLocaleString('en-IN')}</Text>
+                    </View>
+                    <View style={{ flexDirection: 'row', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
+                      {p.wallets.map((w) => {
+                        const c = WALLET_COLORS[w.type] || '#475569';
+                        const neg = Number(w.balance) < 0;
+                        return (
+                          <View key={w.type} style={{ borderWidth: 1, borderColor: `${c}55`, backgroundColor: '#ffffff', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5, minWidth: 86 }}>
+                            <Text style={{ fontSize: 10, fontWeight: '800', color: c, letterSpacing: 0.4 }}>{String(w.type).toUpperCase()}</Text>
+                            <Text style={{ fontSize: 15, fontWeight: '800', color: neg ? '#dc2626' : '#0f172a' }}>₹{Number(w.balance || 0).toLocaleString('en-IN')}</Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                    {(() => {
+                      // money still in a wallet of the other mode (e.g. left in the old single wallet) counts in the total
+                      const rest = Math.round((Number(p.wallet_balance || 0) - p.wallets.reduce((t, w) => t + Number(w.balance || 0), 0)) * 100) / 100;
+                      return Math.abs(rest) >= 0.01 ? (
+                        <Text style={{ fontSize: 11, color: '#b45309', marginTop: 4 }}>₹{rest.toLocaleString('en-IN')} is still in the old single wallet (part of the total)</Text>
+                      ) : null;
+                    })()}
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.heroWalletLabel}>WALLET BALANCE</Text>
+                    <Text style={styles.heroWalletValue}>₹{Number(p.wallet_balance || 0).toLocaleString('en-IN')}</Text>
+                  </>
+                )}
                 <View style={{ flexDirection: 'row', gap: 6, marginTop: 8 }}>
                   {!readOnly && pWallet ? (
                     <>

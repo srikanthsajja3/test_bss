@@ -88,7 +88,7 @@ export const PartnersBulkSync = ({ isMobile, scopeLabel, showBranches = false })
       >
         {running ? <ActivityIndicator size="small" color={m.color} /> : <Feather name="refresh-cw" size={14} color={m.color} />}
         <Text style={[st_.btnText, { color: m.color }]} numberOfLines={1}>
-          {type === 'branches' ? (isMobile ? `Sync ${m.short}` : `Sync ${m.label}`) : isMobile ? `Sync ${m.label}` : `Sync ${m.label} customers`}
+          {isMobile ? (m.short || m.label) : type === 'branches' ? `Sync ${m.label}` : `Sync ${m.label} customers`}
           {running && s.counts ? ` · ${finishedCount(s.counts)}/${s.counts.total}` : ''}
         </Text>
       </TouchableOpacity>

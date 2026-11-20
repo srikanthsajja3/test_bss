@@ -27,6 +27,21 @@ export const LevelBadge = ({ partner, small }) => {
 
 const n = (v) => Number(v ?? 0);
 
+const WALLET_COLORS = { Internet: '#059669', IPTV: '#7c3aed', OTT: '#0284c7' };
+const isSplit = (p) => p.wallet_mode === 'split' && Array.isArray(p.wallets) && p.wallets.length > 0;
+
+/** Separate Internet / IPTV / OTT wallets: one line each (inline = one row for the mobile card). */
+const SplitWallets = ({ p, inline = false }) => (
+  <View style={inline ? { flexDirection: 'row', flexWrap: 'wrap', gap: 8 } : null}>
+    {p.wallets.map((w) => (
+      <Text key={w.type} style={{ fontSize: 12, color: '#475569' }} numberOfLines={1}>
+        <Text style={{ fontWeight: '800', color: WALLET_COLORS[w.type] || '#475569' }}>{w.type}</Text>
+        {' '}<Text style={{ fontWeight: '700', color: n(w.balance) < 0 ? '#dc2626' : '#0f172a' }}>₹{n(w.balance).toLocaleString('en-IN')}</Text>
+      </Text>
+    ))}
+  </View>
+);
+
 /**
  * The partners table, used for the main Partners page AND for "partners under this admin",
  * so every level shows the same columns. Admin rows show the counts of every operator below
@@ -42,6 +57,23 @@ const n = (v) => Number(v ?? 0);
  * argument: the expanded admins above the clicked row, top first (for the Back trail).
  */
 const TREE_TONES = ['#6366f1', '#14b8a6', '#f59e0b', '#ec4899'];
+
+// One width per column, used by the header AND every row (same box, same padding), so each
+// value starts exactly under its heading. basis = the column's width; extra screen width is
+// shared out by grow.
+const COLS = {
+  partner:  { flexBasis: 200, flexGrow: 2.2 },
+  contact:  { flexBasis: 125, flexGrow: 1 },
+  level:    { flexBasis: 135, flexGrow: 1 },
+  wallet:   { flexBasis: 110, flexGrow: 0.8 },
+  internet: { flexBasis: 135, flexGrow: 1 },
+  iptv:     { flexBasis: 90,  flexGrow: 0.7 },
+  ott:      { flexBasis: 90,  flexGrow: 0.7 },
+  status:   { flexBasis: 100, flexGrow: 0.6 },
+  actions:  { flexBasis: 140, flexGrow: 0.8 },
+};
+const TABLE_MIN = Object.values(COLS).reduce((t, c) => t + c.flexBasis, 0) + 32; // + row padding
+const col = (k) => [styles.col, COLS[k]];
 
 /** "Under Super Admin" / "Under Ravi Networks" (showParent: flat lists of one level). */
 const parentLine = (p) => {
@@ -84,7 +116,7 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
 
   const Expander = ({ p }) => {
     if (!fetchChildren) return null;
-    if (!hasKids(p)) return <View style={styles.expSpacer} />;
+    if (!hasKids(p)) return isMobile ? null : <View style={styles.expSpacer} />;
     const on = !!open[String(p.partner_id)];
     return (
       <TouchableOpacity style={[styles.exp, on && styles.expOn]} onPress={() => toggle(p)} title={on ? 'Hide partners below' : 'Show partners below'} accessibilityLabel={on ? 'Hide partners below' : 'Show partners below'}>
@@ -163,7 +195,9 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
             </View>
             <View style={[styles.mRow, { justifyContent: 'space-between', alignItems: 'center' }]}>
               <TouchableOpacity onPress={() => onWallet && onWallet(p)}>
-                <Text style={{ fontSize: 12, fontWeight: '700', color: '#059669' }}>Wallet ₹{n(p.wallet_balance).toLocaleString('en-IN')}</Text>
+                {isSplit(p) ? <SplitWallets p={p} inline /> : (
+                  <Text style={{ fontSize: 12, fontWeight: '700', color: '#059669' }}>Wallet ₹{n(p.wallet_balance).toLocaleString('en-IN')}</Text>
+                )}
               </TouchableOpacity>
               <StatusTag p={p} />
             </View>
@@ -192,18 +226,18 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
   }
 
   return (
-    <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: 1020, width: '100%' }}>
+    <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: TABLE_MIN, width: '100%' }}>
       <View style={{ width: '100%' }}>
         <View style={styles.thRow}>
-          <Text style={[styles.th, { flex: 2.0, minWidth: 170 }, fetchChildren && { paddingLeft: 30 }]}>Partner</Text>
-          <Text style={[styles.th, { flex: 1.0, minWidth: 95 }]}>Contact</Text>
-          <Text style={[styles.th, { flex: 1.2, minWidth: 125 }]}>Level</Text>
-          <Text style={[styles.th, { flex: 0.8, minWidth: 80 }]}>Wallet</Text>
-          <Text style={[styles.th, { flex: 1.3, minWidth: 125 }]}>Internet</Text>
-          <Text style={[styles.th, { flex: 0.8, minWidth: 75 }]}>IPTV</Text>
-          <Text style={[styles.th, { flex: 0.8, minWidth: 75 }]}>OTT</Text>
-          <Text style={[styles.th, { flex: 0.9, minWidth: 90 }]}>Status</Text>
-          <Text style={[styles.th, { flex: 1.2, minWidth: 135 }]}>Actions</Text>
+          <View style={[col('partner'), fetchChildren && { paddingLeft: 30 }]}><Text style={styles.th}>Partner</Text></View>
+          <View style={col('contact')}><Text style={styles.th}>Contact</Text></View>
+          <View style={col('level')}><Text style={styles.th}>Level</Text></View>
+          <View style={col('wallet')}><Text style={styles.th}>Wallet</Text></View>
+          <View style={col('internet')}><Text style={styles.th}>Internet</Text></View>
+          <View style={col('iptv')}><Text style={styles.th}>IPTV</Text></View>
+          <View style={col('ott')}><Text style={styles.th}>OTT</Text></View>
+          <View style={col('status')}><Text style={styles.th}>Status</Text></View>
+          <View style={col('actions')}><Text style={styles.th}>Actions</Text></View>
         </View>
         {flatten(list, 0, [], []).map((row) => {
           if (row.marker) {
@@ -217,7 +251,7 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
           const isAdmin = String(p.account_role || '').toLowerCase() === 'admin';
           return (
             <View key={p.partner_id} style={[styles.tr, treeStyle(depth)]}>
-              <View style={[styles.td, { flex: 2.0, minWidth: 170, flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: depth * 22 }]}>
+              <View style={[col('partner'), { flexDirection: 'row', alignItems: 'center', gap: 8, paddingLeft: depth * 22 }]}>
               <Expander p={p} />
               <TouchableOpacity style={{ flex: 1, minWidth: 0 }} onPress={() => onOpen(p, ancestors)}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
@@ -229,31 +263,33 @@ export const PartnersTable = ({ list, loading, isMobile, emptyText, onOpen, onWa
                 </View>
               </TouchableOpacity>
               </View>
-              <View style={[styles.td, { flex: 1.0, minWidth: 95 }]}>
-                <Text style={styles.cell}>{p.partner_mobile || '—'}</Text>
-                {p.account_username ? <Text style={styles.sub}>{p.account_username}</Text> : null}
+              <View style={col('contact')}>
+                <Text style={styles.cell} numberOfLines={1}>{p.partner_mobile || '—'}</Text>
+                {p.account_username ? <Text style={styles.sub} numberOfLines={1}>{p.account_username}</Text> : null}
               </View>
-              <View style={[styles.td, { flex: 1.2, minWidth: 125 }]}>
+              <View style={col('level')}>
                 <LevelBadge partner={p} />
                 {showParent && depth === 0 && parentLine(p) ? <Text style={[styles.sub, { marginTop: 3, color: '#334155', fontWeight: '600' }]} numberOfLines={1}>{parentLine(p)}</Text> : null}
-                {isAdmin ? <Text style={[styles.sub, { marginTop: 3 }]}>{n(p.subtree_operators)} operator(s) · {n(p.subtree_admins)} admin(s) below</Text> : null}
+                {isAdmin ? <Text style={[styles.sub, { marginTop: 3 }]} numberOfLines={2}>{n(p.subtree_operators)} operator(s) · {n(p.subtree_admins)} admin(s) below</Text> : null}
               </View>
-              <View style={[styles.td, { flex: 0.8, minWidth: 80 }]}>
-                <TouchableOpacity onPress={() => onWallet && onWallet(p)}>
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: n(p.wallet_balance) > 0 ? '#059669' : '#64748b' }}>₹{n(p.wallet_balance).toLocaleString('en-IN')}</Text>
+              <View style={col('wallet')}>
+                <TouchableOpacity onPress={() => onWallet && onWallet(p)} style={{ alignSelf: 'flex-start' }}>
+                  {isSplit(p) ? <SplitWallets p={p} /> : (
+                    <Text style={{ fontSize: 13, fontWeight: '700', color: n(p.wallet_balance) > 0 ? '#059669' : '#64748b' }}>₹{n(p.wallet_balance).toLocaleString('en-IN')}</Text>
+                  )}
                 </TouchableOpacity>
               </View>
-              <View style={[styles.td, { flex: 1.3, minWidth: 125 }]}><Counts p={p} /></View>
-              <View style={[styles.td, { flex: 0.8, minWidth: 75 }]}>
+              <View style={col('internet')}><Counts p={p} /></View>
+              <View style={col('iptv')}>
                 <Text style={styles.cell}><Text style={{ fontWeight: '800', color: '#7c3aed' }}>{n(p.active_iptv_accounts)}</Text> active</Text>
                 <Text style={styles.sub}>{n(p.total_iptv_accounts)} total</Text>
               </View>
-              <View style={[styles.td, { flex: 0.8, minWidth: 75 }]}>
+              <View style={col('ott')}>
                 <Text style={styles.cell}><Text style={{ fontWeight: '800', color: '#0ea5e9' }}>{n(p.active_ott_accounts)}</Text> active</Text>
                 <Text style={styles.sub}>{n(p.total_ott_accounts)} total</Text>
               </View>
-              <View style={[styles.td, { flex: 0.9, minWidth: 90 }]}><StatusTag p={p} /></View>
-              <View style={[styles.td, { flex: 1.2, minWidth: 135, flexDirection: 'row', gap: 6, alignItems: 'center' }]}>
+              <View style={col('status')}><StatusTag p={p} /></View>
+              <View style={[col('actions'), { flexDirection: 'row', gap: 6, alignItems: 'center' }]}>
                 <TouchableOpacity style={styles.btn} onPress={() => onOpen(p, ancestors)}>
                   <Feather name="eye" size={12} color="#2563eb" />
                   <Text style={[styles.btnText, { color: '#2563eb' }]}>View</Text>
@@ -286,7 +322,10 @@ const styles = StyleSheet.create({
   th: { fontSize: 12, fontWeight: '700', color: '#334155' },
   tr: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   td: { paddingRight: 8, justifyContent: 'center' },
-  idBadge: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, backgroundColor: 'rgba(16,185,129,0.1)' },
+  // a table column: fixed basis, never shrinks below it, nothing spills out of it
+  col: { flexShrink: 0, minWidth: 0, paddingRight: 12, justifyContent: 'center', overflow: 'hidden' },
+  // same width for #53 and #1020 so the names line up
+  idBadge: { minWidth: 52, alignItems: 'center', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, backgroundColor: 'rgba(16,185,129,0.1)' },
   idText: { fontSize: 11, fontWeight: '700', color: '#059669' },
   name: { fontSize: 13.5, fontWeight: '700', color: COLORS.textMain },
   sub: { fontSize: 11.5, color: COLORS.textMuted, marginTop: 1 },
