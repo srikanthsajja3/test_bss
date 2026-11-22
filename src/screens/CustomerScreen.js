@@ -20,6 +20,7 @@ import { AddOttModal } from '../components/ott/AddOttModal';
 import { CustomerAccountsOverview, defaultRechargeType, formatApiDate, normaliseInternetAccount, normaliseIptvAccount } from '../components/CustomerAccountsOverview';
 import { CustomerLocationModal } from '../components/CustomerLocationModal';
 import { ListPager } from '../components/ListPager';
+import { ScrollTabs } from '../components/ScrollTabs';
 import { ColSearch, ColSelect, ColDateRange, FilterCell, TABLE_GUTTER, dateRangeParams } from '../components/ColumnFilters';
 import { CustomerDevicesModal } from '../components/CustomerDevicesModal';
 import { OnlineSessionPanel } from '../components/internet/OnlineSessionPanel';
@@ -1106,6 +1107,10 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       } else if (data.summary) {
         const s = data.summary;
         toast.success(`Bulk RADIUS Sync Complete! Created: ${s.customers_created || 0}, Matched: ${s.customers_matched || 0}, Added: ${s.accounts_added || 0}`);
+        const notSaved = (s.failed_rows || []).filter((f) => f.error !== 'No mobile number in RADIUS');
+        if (notSaved.length) {
+          toast.warn(`${notSaved.length} account(s) could not be saved: ${notSaved.slice(0, 3).map((f) => `${f.username || f.acc_id} (${f.error})`).join('; ')}${notSaved.length > 3 ? '…' : ''}`, { autoClose: 12000 });
+        }
       } else {
         toast.success(data.message || 'Bulk RADIUS Sync complete! Subscriber accounts imported.');
       }
@@ -2365,13 +2370,13 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         ) : null}
 
         {/* BACK TO SUBSCRIBERS LIST BUTTON */}
-        <TouchableOpacity style={[styles.backBtn, { marginBottom: 16 }]} onPress={handleCloseSubscriberScreen}>
+        <TouchableOpacity style={[styles.backBtn, { marginBottom: isMobile ? 8 : 12 }]} onPress={handleCloseSubscriberScreen}>
           <Feather name="arrow-left" size={16} color={COLORS.textMain} />
           <Text style={styles.backBtnText}>{activeCustomer ? 'Back to Accounts' : 'Back to Subscribers List'}</Text>
         </TouchableOpacity>
 
         {/* TOP SUBSCRIBER IDENTITY HEADER CARD */}
-        <View style={{ backgroundColor: '#ffffff', borderRadius: 14, padding: 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)', marginBottom: 16, flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', gap: 16 }}>
+        <View style={{ backgroundColor: '#ffffff', borderRadius: 14, padding: isMobile ? 14 : 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)', marginBottom: isMobile ? 12 : 16, flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', gap: isMobile ? 12 : 16 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: isMobile ? 12 : 16, maxWidth: '100%' }}>
             {/* PROFILE AVATAR THUMBNAIL */}
             <CustomerPhoto uri={accountPhoto} size={isMobile ? 52 : 64} height={isMobile ? 65 : 80} radius={12} dark={false} />
@@ -2398,8 +2403,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             </View>
           </View>
 
-          {/* RIGHT STATUS BADGES */}
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+          {/* STATUS BADGES + RECHARGE / VERIFY, side by side (wraps on narrow phones) */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: isMobile ? 8 : 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: isMobile ? 8 : 10 }}>
             {/* ONLINE opens the Online Session tab */}
             <TouchableOpacity
               style={{ flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20, backgroundColor: isOnline ? 'rgba(16, 185, 129, 0.1)' : 'rgba(100, 116, 139, 0.1)' }}
@@ -2427,28 +2433,28 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               {/* operator doesn't require Aadhaar to recharge: verifying stays available */}
               {currentInternetAccount && can(user, 'internet.aadhaar') && !aadhaarBlocksRecharge(currentInternetAccount) && !isAadhaarVerified(currentInternetAccount) ? (
                 <TouchableOpacity
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#93c5fd', paddingHorizontal: 14, paddingVertical: 9, borderRadius: 8 }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#93c5fd', paddingHorizontal: isMobile ? 10 : 14, paddingVertical: isMobile ? 6 : 9, borderRadius: 8 }}
                   onPress={() => setVerifyReq(currentInternetAccount)}
                 >
-                  <Feather name="shield" size={14} color="#2563eb" />
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#2563eb' }}>Verify Aadhaar</Text>
+                  <Feather name="shield" size={isMobile ? 12 : 14} color="#2563eb" />
+                  <Text style={{ fontSize: isMobile ? 12 : 13, fontWeight: '700', color: '#2563eb' }}>Verify Aadhaar</Text>
                 </TouchableOpacity>
               ) : null}
               {currentInternetAccount && !currentInternetAccount.open_recharge && !isRadiusVerified(currentInternetAccount) ? (!can(user, 'internet.verify') ? null :
                 <TouchableOpacity
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#2563eb', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#2563eb', paddingHorizontal: isMobile ? 11 : 16, paddingVertical: isMobile ? 6 : 10, borderRadius: 8 }}
                   onPress={() => setVerifyCustReq(currentInternetAccount)}
                 >
-                  <Feather name="user-check" size={14} color="#ffffff" />
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>Verify Customer</Text>
+                  <Feather name="user-check" size={isMobile ? 12 : 14} color="#ffffff" />
+                  <Text style={{ fontSize: isMobile ? 12 : 13, fontWeight: '700', color: '#ffffff' }}>Verify Customer</Text>
                 </TouchableOpacity>
               ) : currentInternetAccount && !currentInternetAccount.open_recharge && aadhaarBlocksRecharge(currentInternetAccount) ? (!can(user, 'internet.aadhaar') ? null :
                 <TouchableOpacity
-                  style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#2563eb', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }}
+                  style={{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#2563eb', paddingHorizontal: isMobile ? 11 : 16, paddingVertical: isMobile ? 6 : 10, borderRadius: 8 }}
                   onPress={() => setVerifyReq(currentInternetAccount)}
                 >
-                  <Feather name="shield" size={14} color="#ffffff" />
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>Verify Aadhaar</Text>
+                  <Feather name="shield" size={isMobile ? 12 : 14} color="#ffffff" />
+                  <Text style={{ fontSize: isMobile ? 12 : 13, fontWeight: '700', color: '#ffffff' }}>Verify Aadhaar</Text>
                 </TouchableOpacity>
               ) : currentInternetAccount && !currentInternetAccount.open_recharge && currentInternetAccount.combo_lock ? (
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: 360, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, backgroundColor: 'rgba(236,72,153,0.08)', borderWidth: 1, borderColor: 'rgba(236,72,153,0.3)' }}>
@@ -2464,12 +2470,12 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   : can(user, currentInternetAccount && defaultRechargeType({ expiration: currentInternetAccount.expiration }) === 'advance' ? 'internet.advance_renewal' : 'internet.recharge')
               ) ? null : (
                 <TouchableOpacity
-                  style={[{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f97316', paddingHorizontal: 16, paddingVertical: 10, borderRadius: 8 }, !currentInternetAccount && { opacity: 0.5 }]}
+                  style={[{ flexDirection: 'row', alignItems: 'center', gap: 8, backgroundColor: '#f97316', paddingHorizontal: isMobile ? 11 : 16, paddingVertical: isMobile ? 6 : 10, borderRadius: 8 }, !currentInternetAccount && { opacity: 0.5 }]}
                   onPress={() => currentInternetAccount && openInternetRecharge(currentInternetAccount, defaultRechargeType({ expiration: currentInternetAccount.expiration }) === 'advance')}
                   disabled={!currentInternetAccount}
                 >
-                  <Feather name={isAccountActive ? 'fast-forward' : 'refresh-cw'} size={14} color="#ffffff" />
-                  <Text style={{ fontSize: 13, fontWeight: '700', color: '#ffffff' }}>
+                  <Feather name={isAccountActive ? 'fast-forward' : 'refresh-cw'} size={isMobile ? 12 : 14} color="#ffffff" />
+                  <Text style={{ fontSize: isMobile ? 12 : 13, fontWeight: '700', color: '#ffffff' }}>
                     {currentInternetAccount?.open_recharge
                       ? `Recheck Recharge · ₹${Number(currentInternetAccount.open_recharge.amount || 0).toFixed(2)}`
                       : currentInternetAccount && defaultRechargeType({ expiration: currentInternetAccount.expiration }) === 'advance' ? 'Advance Renewal' : 'Recharge'}
@@ -2478,18 +2484,13 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               )}
             </View>
           )}
+          </View>
         </View>
 
         {/* TABS (vertical on PC, a horizontal scrollable strip on phones) + SELECTED TAB */}
         <View style={{ flexDirection: isMobile ? 'column' : 'row', gap: isMobile ? 12 : 16, alignItems: isMobile ? 'stretch' : 'flex-start' }}>
-          <ScrollView
-            horizontal={isMobile}
-            style={[styles.tabRail, isMobile ? { width: '100%' } : { width: 210, maxHeight: Math.max(260, (winHeight || 700) - 140) }]}
-            contentContainerStyle={isMobile ? { padding: 5, gap: 4, flexDirection: 'row' } : { padding: 6, gap: 4 }}
-            showsVerticalScrollIndicator={false}
-            showsHorizontalScrollIndicator={false}
-          >
-            {internetTabs.map((t) => {
+          {(() => {
+            const tabButtons = internetTabs.map((t) => {
               const on = internetTab === t.id;
               return (
                 <TouchableOpacity
@@ -2506,8 +2507,16 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   {t.id === 'online' && isOnline && !on ? <View style={styles.tabLiveDot} /> : null}
                 </TouchableOpacity>
               );
-            })}
-          </ScrollView>
+            });
+            // phones: a swipeable strip with arrows and a scroll bar; PC: the vertical rail
+            return isMobile ? (
+              <ScrollTabs style={[styles.tabRail, { width: '100%' }]} contentContainerStyle={{ padding: 5, gap: 4 }}>{tabButtons}</ScrollTabs>
+            ) : (
+              <ScrollView style={[styles.tabRail, { width: 210, maxHeight: Math.max(260, (winHeight || 700) - 140) }]} contentContainerStyle={{ padding: 6, gap: 4 }} showsVerticalScrollIndicator={false}>
+                {tabButtons}
+              </ScrollView>
+            );
+          })()}
 
           <View style={{ flex: 1, minWidth: 0, gap: 16 }}>
         {internetTab === 'online' && currentInternetAccount ? (

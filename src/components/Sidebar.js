@@ -6,7 +6,7 @@ import { isSuperAdmin } from './internet/shared';
 import { isStaffUser, tabAllowed, customersTabFor, inventoryHome } from '../services/staffAccess';
 
 // Networking group (super admin): NAS and IP Pools pages
-const NETWORKING_TABS = ['nas', 'ip_pools', 'auth_logs'];
+const NETWORKING_TABS = ['nas', 'ip_pools', 'nms', 'auth_logs'];
 
 // Inventory group: Inward Stock, Devices Stock, Vendors & Models
 const INVENTORY_TABS = [
@@ -52,6 +52,8 @@ export const Sidebar = ({ activeTab, onSelectTab, user, onLogout, isCollapsed, o
   const networkingSubs = [
     { id: 'nas', label: 'NAS', icon: 'server' },
     { id: 'ip_pools', label: 'IP Pools', icon: 'layers' },
+    // NMS: OLTs / switches, ONUs, alerts, netwatch (super admin)
+    ...(isSuper ? [{ id: 'nms', label: 'NMS', icon: 'cpu' }] : []),
     // Auth Logs: super admin (and super admin staff with "Auth logs by NAS") only
     ...(isSuper ? [{ id: 'auth_logs', label: 'Auth Logs', icon: 'log-in' }] : []),
   ].filter((sub) => tabAllowed(user, sub.id));

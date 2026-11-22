@@ -351,7 +351,23 @@ export const newClientRef = () =>
   `r${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
 const tenDigits = (m) => String(m || '').replace(/\D/g, '').slice(-10);
 
+// The server answers a "start" first and keeps working after the reply. When that early reply
+// arrives unreadable (HTTP 200 but not JSON: a proxy compressed / cut it), the job was still
+// started: report it as started, and the caller reads the real state from the status call.
+const startedIfGarbled = (res, message = 'Started — it runs on the server.') => (
+  res && res.status === 200 && res.data && res.data.raw !== undefined
+    ? { ...res, ok: true, data: { success: true, started: true, garbled: true, message } }
+    : res
+);
+
 export const OneBssApi = {
+  // ---- Networking › NMS (olt/nms_module.php, super admin) ----
+  nmsGet: async (op, params = {}) => {
+    const qs = Object.entries({ op, ...params }).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+    return get(`/olt/nms_module.php?${qs}`);
+  },
+  nmsPost: async (op, body = {}) => post('/olt/nms_module.php', { op, ...body }),
+
   // ------------------------------------------------------------------
   // Authentication
   // ------------------------------------------------------------------
@@ -862,7 +878,7 @@ export const OneBssApi = {
   syncIptvBulkCustomers: async (partnerId) => {
     const err = requireArg(partnerId, 'partner_id');
     if (err) return clientError(err);
-    return post(`/iptv_bulk_customer_sync.php?partner_id=${q(partnerId)}`);
+    return startedIfGarbled(await post(`/iptv_bulk_customer_sync.php?partner_id=${q(partnerId)}`), 'IPTV sync started — it runs on the server.');
   },
   // progress / last result of the whole-operator sync (it runs on the server after replying)
   // -> { running, progress: { done, total }, last: { summary, failures, finished_at, error? } }
@@ -884,7 +900,7 @@ export const OneBssApi = {
 
   // Partners › Bulk operations (super admin): the IPTV / OTT catalogs are the same for every
   // operator, so one call syncs them (the server picks an operator that has the credentials)
-  syncAllIptvPlans: async () => post('/iptv_plan_sync.php'),
+  syncAllIptvPlans: async () => startedIfGarbled(await post('/iptv_plan_sync.php'), 'Packages synced — the channel lists are being read on the server.'),
   // the channel lists are read after the reply: how that run is going
   getIptvPlanSyncStatus: async () => get('/iptv_plan_sync.php?status=1'),
   syncAllOttPlans: async () => post('/ott_plan_sync.php', {}),
@@ -899,7 +915,7 @@ export const OneBssApi = {
   // Partners page: sync every operator one after another (runs on the server). type 'internet' | 'iptv'
   partnersBulkSyncStatus: async (type) => get(`/partners_bulk_sync.php?type=${q(type)}`),
   // action: 'start' | 'stop' | 'resume'
-  partnersBulkSync: async (type, action = 'start') => post('/partners_bulk_sync.php', { type, action }),
+  partnersBulkSync: async (type, action = 'start') => startedIfGarbled(await post('/partners_bulk_sync.php', { type, action }), action === 'stop' ? 'Stopping…' : 'Sync started — it runs on the server.'),
 
   // IPTV sync for just these mobiles of an operator (max 50 per call) — used after a CSV import
   syncIptvMobiles: async (partnerId, mobiles) => post(`/iptv_bulk_customer_sync.php?partner_id=${q(partnerId)}`, { mobiles }),

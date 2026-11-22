@@ -6,6 +6,9 @@ import { OneBssApi } from '../../services/oneBssApi';
 import { Btn, Note } from '../internet/shared';
 import { RadiusKeyImportModal } from './RadiusKeyImportModal';
 
+// the lists in the panels keep a fixed height and scroll inside (the page itself stays put)
+const LIST_MAX = Platform.OS === 'web' ? 'calc(100vh - 320px)' : 520;
+
 // ---------------------------------------------------------------------------------------------
 // Partners › Bulk operations: every sync / import / setting that works on many partners at once,
 // on one page. Pick a card; its activity (progress, results, the settings table) shows right
@@ -14,20 +17,20 @@ import { RadiusKeyImportModal } from './RadiusKeyImportModal';
 
 // runs over the operators one by one on the server (partners_bulk_sync.php)
 const RUNS = {
-  internet: { title: 'Sync Internet customers', icon: 'wifi', color: '#059669', noun: 'customers',
+  internet: { title: 'Sync Internet customers', icon: 'wifi', color: '#3f8f6b', noun: 'customers',
     about: 'Every enabled operator\'s internet customers from RADIUS, one operator after another — the same as each partner\'s own "Sync Internet Users".' },
-  iptv: { title: 'Sync IPTV customers', icon: 'tv', color: '#7c3aed', noun: 'customers',
+  iptv: { title: 'Sync IPTV customers', icon: 'tv', color: '#6b5fa8', noun: 'customers',
     about: 'Every customer mobile of every enabled operator is checked with Pioneer, one operator after another. This can take a long time on a big network.' },
-  branches: { title: 'Sync Partner branches', icon: 'git-branch', color: '#0369a1', sa: true,
+  branches: { title: 'Sync Partner branches', icon: 'git-branch', color: '#4f5b93', sa: true,
     about: 'Each operator\'s RADIUS branches brought in line with RADIUS: new branches of its RADIUS partner are added, branches RADIUS no longer lists are removed (one always stays). A new branch of a RADIUS partner shared by several operators is only reported.' },
-  plans: { title: 'Sync Internet plans', icon: 'list', color: '#0284c7', sa: true,
+  plans: { title: 'Sync Internet plans', icon: 'list', color: '#b7774a', sa: true,
     about: 'Each operator\'s RADIUS packages into the plan catalog, one operator after another. Sync only — no plan is assigned to any operator; assign them in the partner\'s Internet Plans as before.' },
 };
 // the same catalog for every operator: one call
 const SINGLES = {
-  iptv_plans: { title: 'Sync IPTV plans', icon: 'tv', color: '#7c3aed', call: () => OneBssApi.syncAllIptvPlans(),
+  iptv_plans: { title: 'Sync IPTV plans', icon: 'tv', color: '#a35d7a', call: () => OneBssApi.syncAllIptvPlans(),
     about: 'Pioneer\'s packs and their channels into the IPTV catalog (the same for every operator). Sync only — nothing is assigned.' },
-  ott_plans: { title: 'Sync OTT plans', icon: 'play-circle', color: '#0ea5e9', call: () => OneBssApi.syncAllOttPlans(),
+  ott_plans: { title: 'Sync OTT plans', icon: 'play-circle', color: '#3d8597', call: () => OneBssApi.syncAllOttPlans(),
     about: 'OTTAggre\'s packages into the OTT catalog (the same for every operator). Sync only — nothing is assigned.' },
 };
 
@@ -43,6 +46,62 @@ const finishedCount = (c) => (c ? c.done + c.failed + c.skipped : 0);
 // ---------------------------------------------------------------------------------------------
 // one run's activity: progress + every operator's result, Start / Stop / Continue
 // ---------------------------------------------------------------------------------------------
+// the numbers of one operator's finished run, as small tags
+const Tag = ({ text, color, strong }) => (
+  <Text style={[s.tag, { color, borderColor: `${color}55` }, strong && { backgroundColor: `${color}14`, fontWeight: '800' }]}>{text}</Text>
+);
+const ItemDetail = ({ type, it }) => {
+  const [open, setOpen] = useState(false);
+  const sm = it.summary;
+  if (!sm || it.state === 'running') return null;
+  if (type === 'iptv') {
+    if (!sm.customers_found) return <Text style={s.small}>{it.message || 'No customers with a mobile number'}</Text>;
+    return (
+      <View style={s.tagRow}>
+        <Tag text={`${sm.customers_found || 0} checked`} color="#475569" />
+        <Tag text={`${sm.synced_ok || 0} in IPTV`} color="#16a34a" strong={sm.synced_ok > 0} />
+        <Tag text={`${sm.not_on_iptv || 0} not in IPTV`} color="#64748b" />
+        {sm.failed ? <Tag text={`${sm.failed} failed`} color="#dc2626" strong /> : null}
+        {sm.stbs_added ? <Tag text={`${sm.stbs_added} STB(s) added`} color="#7c3aed" /> : null}
+        {sm.customers_created ? <Tag text={`${sm.customers_created} new customer(s)`} color="#0284c7" /> : null}
+      </View>
+    );
+  }
+  if (type !== 'internet') return null;
+  const rows = sm.failed_rows || [];
+  const notSaved = (sm.rows_failed || 0) + (sm.accounts_update_failed || 0);
+  return (
+    <View>
+      <View style={s.tagRow}>
+        {sm.radius_rows != null ? <Tag text={`${sm.radius_rows} in RADIUS`} color="#475569" /> : null}
+        <Tag text={`${sm.accounts_added || 0} added`} color="#16a34a" strong={sm.accounts_added > 0} />
+        <Tag text={`${sm.accounts_updated || 0} updated`} color="#0284c7" />
+        {sm.customers_created ? <Tag text={`${sm.customers_created} new customer(s)`} color="#7c3aed" /> : null}
+        {sm.rows_skipped_no_mobile ? <Tag text={`${sm.rows_skipped_no_mobile} without mobile`} color="#d97706" /> : null}
+        {notSaved ? <Tag text={`${notSaved} not saved`} color="#dc2626" strong /> : null}
+        {rows.length ? (
+          <TouchableOpacity onPress={() => setOpen(!open)} style={{ flexDirection: 'row', alignItems: 'center', gap: 3 }}>
+            <Text style={[s.small, { color: '#1d4ed8', fontWeight: '700' }]}>{open ? 'Hide' : 'Show'} accounts ({rows.length})</Text>
+            <Feather name={open ? 'chevron-up' : 'chevron-down'} size={13} color="#1d4ed8" />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+      {open ? (
+        <View style={s.failList}>
+          {rows.map((f, i) => (
+            <Text key={`${f.acc_id}-${i}`} style={s.failRow} numberOfLines={3}>
+              <Text style={{ fontWeight: '700', color: '#0f172a' }}>{f.username || '—'}</Text>
+              <Text style={{ color: '#64748b' }}>{`  acc ${f.acc_id || '—'}  ·  `}</Text>
+              <Text style={{ color: f.error === 'No mobile number in RADIUS' ? '#b45309' : '#b91c1c' }}>{f.error}</Text>
+            </Text>
+          ))}
+          {notSaved + (sm.rows_skipped_no_mobile || 0) > rows.length ? <Text style={[s.small, { marginTop: 4 }]}>First {rows.length} shown — the rest are in internet_customer_sync.log</Text> : null}
+        </View>
+      ) : null}
+    </View>
+  );
+};
+
 const RunActivity = ({ type, st, busy, onAct, scopeLabel }) => {
   const meta = RUNS[type];
   const counts = st?.counts;
@@ -51,7 +110,9 @@ const RunActivity = ({ type, st, busy, onAct, scopeLabel }) => {
   const pct = total ? Math.round((finished / total) * 100) : 0;
   const leftover = counts ? counts.pending + counts.running : 0;
   const [filter, setFilter] = useState('');
-  const items = (st?.items || []).filter((it) => !filter || it.state === filter);
+  const isNoIptv = (it) => type === 'iptv' && it.state === 'done' && !!it.summary?.no_iptv;
+  const noIptvCount = (st?.items || []).filter(isNoIptv).length;
+  const items = (st?.items || []).filter((it) => !filter || (filter === 'noiptv' ? isNoIptv(it) : it.state === filter));
   return (
     <View>
       <Text style={s.about}>{meta.about}{scopeLabel ? ` (${scopeLabel})` : ''} It runs on the server: you can leave this page and come back.</Text>
@@ -80,18 +141,32 @@ const RunActivity = ({ type, st, busy, onAct, scopeLabel }) => {
                 <Text style={[s.chipText, { color: STATE[k].color }]}>{counts[k]} {STATE[k].text.toLowerCase()}</Text>
               </TouchableOpacity>
             ) : null))}
+            {noIptvCount ? (
+              <TouchableOpacity onPress={() => setFilter(filter === 'noiptv' ? '' : 'noiptv')} style={[s.chip, { borderColor: '#d97706' }, filter === 'noiptv' && { backgroundColor: '#d9770618' }]}>
+                <Feather name="tv" size={11} color="#d97706" />
+                <Text style={[s.chipText, { color: '#d97706' }]}>{noIptvCount} no customer in IPTV</Text>
+              </TouchableOpacity>
+            ) : null}
             {filter ? <Text style={s.small}>· showing only these (tap again for all)</Text> : null}
           </View>
-          <View style={s.list}>
+          <ScrollView style={[s.list, { maxHeight: LIST_MAX, minHeight: Math.min(items.length, 4) * 56 }]} nestedScrollEnabled showsVerticalScrollIndicator>
             {items.map((it) => {
               const sm = STATE[it.state] || STATE.pending;
               return (
                 <View key={it.partner_id} style={s.item}>
                   {it.state === 'running' ? <ActivityIndicator size="small" color={sm.color} /> : <Feather name={sm.icon} size={15} color={sm.color} />}
                   <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={s.itemName} numberOfLines={1}>{it.name} <Text style={s.small}>#{it.partner_id}</Text></Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <Text style={s.itemName} numberOfLines={1}>{it.name} <Text style={s.small}>#{it.partner_id}</Text></Text>
+                      {isNoIptv(it) ? <Text style={s.noIptv}>No customer in IPTV</Text> : null}
+                    </View>
                     {it.state === 'running' && it.progress ? (
                       <Text style={s.small}>{it.progress.done}/{it.progress.total} {meta.noun || 'items'}…</Text>
+                    ) : it.summary && (type === 'iptv' || type === 'internet') ? (
+                      <>
+                        <ItemDetail type={type} it={it} />
+                        {it.summary.failures?.length ? <Text style={[s.small, { color: '#b91c1c', marginTop: 3 }]} numberOfLines={2}>{it.summary.failures[0].mobile}: {it.summary.failures[0].message}</Text> : null}
+                      </>
                     ) : it.message ? (
                       <Text style={[s.small, it.state === 'failed' && { color: '#b91c1c' }]} numberOfLines={3}>{it.message}</Text>
                     ) : null}
@@ -100,7 +175,7 @@ const RunActivity = ({ type, st, busy, onAct, scopeLabel }) => {
                 </View>
               );
             })}
-          </View>
+          </ScrollView>
         </View>
       ) : (
         <Text style={[s.small, { marginTop: 14 }]}>Not run yet.</Text>
@@ -175,13 +250,13 @@ const Toggle = ({ on, partial, onPress, disabled, color = '#16a34a' }) => (
 
 // the four settings, each its own card / table
 const SETTINGS = {
-  set_kyc: { key: 'kyc', title: 'KYC methods', icon: 'shield', color: '#7c3aed', opsOnly: true,
+  set_kyc: { key: 'kyc', title: 'KYC methods', icon: 'shield', color: '#8a5a9e', opsOnly: true,
     about: 'Which Aadhaar verification methods each operator can use. Click a method on a row to add / remove it, or tick operators and add / remove a method for all of them.' },
-  set_pg: { key: 'pg', title: 'Payment gateways', icon: 'credit-card', color: '#0284c7', opsOnly: true,
+  set_pg: { key: 'pg', title: 'Payment gateways', icon: 'credit-card', color: '#46689c', opsOnly: true,
     about: 'Gateways per wallet, the same as the partner\'s Payment Gateways: a one-wallet operator has one row of gateways, a split-wallet operator one row each for its Internet, IPTV and OTT wallets. Click a gateway to switch it, or tick operators and switch one gateway on one wallet for all of them (operators without that wallet are skipped).' },
-  set_aadhaar: { key: 'aadhaar', title: 'Aadhaar for recharge', icon: 'user-check', color: '#16a34a', opsOnly: true,
+  set_aadhaar: { key: 'aadhaar', title: 'Aadhaar for recharge', icon: 'user-check', color: '#4c8a5a', opsOnly: true,
     about: 'Whether an operator\'s customers must be Aadhaar verified before a recharge.' },
-  set_profile: { key: 'profile', title: 'One-time details edit', icon: 'edit-3', color: '#0f766e', opsOnly: false,
+  set_profile: { key: 'profile', title: 'One-time details edit', icon: 'edit-3', color: '#3e7c78', opsOnly: false,
     about: 'Open a one-time edit for a partner: on next login they can update their name, company, mobile, email and region once; saving closes it again.' },
 };
 const WALLET_LABEL = { Single: 'Wallet', Internet: 'Internet', IPTV: 'IPTV', OTT: 'OTT' };
@@ -367,6 +442,7 @@ const PartnerSettings = ({ isMobile, mode }) => {
             <View style={[s.cPartner, isMobile && { flexBasis: 0, flexGrow: 1 }]}><Text style={s.th}>{meta.opsOnly ? 'Operator' : 'Partner'}{isMobile ? ` · ${colLabel}` : ''}</Text></View>
             {!isMobile ? <View style={s.cSetting}><Text style={s.th}>{colLabel}</Text></View> : null}
           </View>
+          <ScrollView style={{ maxHeight: LIST_MAX }} nestedScrollEnabled showsVerticalScrollIndicator>
           {view.map((p) => {
             const id = p.partner_id;
             return (
@@ -384,6 +460,7 @@ const PartnerSettings = ({ isMobile, mode }) => {
             );
           })}
           {!view.length ? <Text style={[s.small, { padding: 16 }]}>No partners match.</Text> : null}
+          </ScrollView>
         </View>
       </ScrollView>
       <View style={[s.rowBetween, { marginTop: 10 }]}>
@@ -401,9 +478,12 @@ const PartnerSettings = ({ isMobile, mode }) => {
 // ---------------------------------------------------------------------------------------------
 // the page
 // ---------------------------------------------------------------------------------------------
-export const PartnersBulkPage = ({ isMobile, isSuperAdmin, canEdit, onBack }) => {
-  const runTypes = Object.keys(RUNS).filter((t) => !RUNS[t].sa || (isSuperAdmin && canEdit));
-  const [active, setActive] = useState(runTypes[0]);
+// allowed(cardId): staff see only the buttons their role has (Staff roles › Partner Bulk Operations)
+export const PartnersBulkPage = ({ isMobile, isSuperAdmin, allowed = () => true, onBack }) => {
+  const runTypes = Object.keys(RUNS).filter((t) => (!RUNS[t].sa || isSuperAdmin) && allowed(t));
+  const firstAllowed = ['internet', 'iptv', 'branches', 'plans', 'iptv_plans', 'ott_plans', 'set_kyc', 'set_pg', 'set_aadhaar', 'set_profile', 'keys']
+    .find((id) => (RUNS[id] ? runTypes.includes(id) : isSuperAdmin && allowed(id)));
+  const [active, setActive] = useState(firstAllowed);
   const [status, setStatus] = useState({});
   const [busy, setBusy] = useState(false);
   const [single, setSingle] = useState({}); // id -> { ok, message, at }
@@ -438,9 +518,14 @@ export const PartnersBulkPage = ({ isMobile, isSuperAdmin, canEdit, onBack }) =>
 
   const act = async (type, action) => {
     setBusy(true);
+    // the run is on the server within a moment: show it even while the reply is still on its way
+    const early = action !== 'stop' ? setTimeout(() => load(type), 2500) : null;
     const res = await OneBssApi.partnersBulkSync(type, action);
+    if (early) clearTimeout(early);
     setBusy(false);
     if (res.data && res.data.items) setStatus((x) => ({ ...x, [type]: res.data }));
+    load(type); // show the run right away (also when the reply said nothing useful)
+    if (res.data?.already_running) { toast.info(res.data.message || 'This sync is already running.'); return; }
     if (!res.ok || res.data?.success === false) { toast.error(res.data?.message || 'Could not start'); return; }
     toast.success(res.data?.message || 'Done');
     setTimeout(() => load(type), 1500);
@@ -464,6 +549,7 @@ export const PartnersBulkPage = ({ isMobile, isSuperAdmin, canEdit, onBack }) =>
     const res = await SINGLES[id].call();
     setSingleBusy('');
     if (id === 'iptv_plans' && res.data?.channels) setIptvChannels(res.data.channels);
+    if (id === 'iptv_plans') setTimeout(pollChannels, 1500);
     const ok = res.ok && res.data?.success !== false;
     const d = res.data || {};
     const msg = d.message || (ok ? 'Synced' : 'Sync failed');
@@ -474,19 +560,20 @@ export const PartnersBulkPage = ({ isMobile, isSuperAdmin, canEdit, onBack }) =>
 
   const cards = [
     { group: 'Sync customers & setup', items: runTypes.map((t) => ({ id: t, ...RUNS[t] })) },
-    ...(isSuperAdmin && canEdit ? [
-      { group: 'Sync plan catalogs', items: Object.entries(SINGLES).map(([id, m]) => ({ id, ...m })) },
-      { group: 'Partner settings', items: Object.entries(SETTINGS).map(([id, m]) => ({ id, ...m })) },
-      { group: 'Imports', items: [
-        { id: 'keys', title: 'Import RADIUS keys', icon: 'key', color: '#0f766e', about: 'CSV / Excel: Internet Partner ID + API Key.' },
+    ...(isSuperAdmin ? [
+      { group: 'Sync plan catalogs', items: [
+        ...(runTypes.includes('plans') ? [{ id: 'plans', ...RUNS.plans }] : []),
+        ...Object.entries(SINGLES).filter(([id]) => allowed(id)).map(([id, m]) => ({ id, ...m })),
       ] },
+      { group: 'Partner settings', items: Object.entries(SETTINGS).filter(([id]) => allowed(id)).map(([id, m]) => ({ id, ...m })) },
+      { group: 'Imports', items: allowed('keys') ? [
+        { id: 'keys', title: 'Import RADIUS keys', icon: 'key', color: '#9a7344', about: 'CSV / Excel: Internet Partner ID + API Key.' },
+      ] : [] },
     ] : []),
-  ];
-  // RUNS plans sits in the first group; keep "plans" next to the catalogs for the super admin
-  if (cards[1]) {
-    cards[0].items = cards[0].items.filter((c) => c.id !== 'plans');
-    if (runTypes.includes('plans')) cards[1].items = [{ id: 'plans', ...RUNS.plans }, ...cards[1].items];
-  }
+  ].filter((g) => g.items.length);
+  // "Sync Internet plans" sits with the plan catalogs
+  cards.forEach((g) => { if (g.group === 'Sync customers & setup') g.items = g.items.filter((c) => c.id !== 'plans'); });
+  const shown = cards.filter((g) => g.items.length);
 
   const cardBadge = (id) => {
     if (RUNS[id]) {
@@ -501,22 +588,26 @@ export const PartnersBulkPage = ({ isMobile, isSuperAdmin, canEdit, onBack }) =>
     return null;
   };
 
-  const meta = RUNS[active] || SINGLES[active] || cards.flatMap((g) => g.items).find((c) => c.id === active);
+  const visibleIds = shown.flatMap((g) => g.items.map((c) => c.id));
+  const meta = visibleIds.includes(active) ? (RUNS[active] || SINGLES[active] || shown.flatMap((g) => g.items).find((c) => c.id === active)) : null;
 
   return (
     <View style={{ gap: 14 }}>
       <View style={s.head}>
+        {onBack ? (
         <TouchableOpacity onPress={onBack} style={s.back} accessibilityLabel="Back to partners">
           <Feather name="arrow-left" size={16} color="#0f172a" />
           {!isMobile ? <Text style={s.backText}>Partners</Text> : null}
         </TouchableOpacity>
+        ) : null}
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={s.title}>Bulk operations</Text>
           <Text style={s.small} numberOfLines={2}>Syncs, imports and settings for {isSuperAdmin ? 'all partners' : 'all partners under you'}.</Text>
         </View>
       </View>
 
-      {cards.map((g) => (
+      {!shown.length ? <View style={{ marginTop: 16 }}><Note tone="info" text="Your staff role has no Bulk Operations buttons. Ask your admin (Staff & Roles › Partner Bulk Operations)." /></View> : null}
+      {shown.map((g) => (
         <View key={g.group}>
           <Text style={s.group}>{g.group.toUpperCase()}</Text>
           <View style={s.grid}>
@@ -524,8 +615,14 @@ export const PartnersBulkPage = ({ isMobile, isSuperAdmin, canEdit, onBack }) =>
               const b = cardBadge(c.id);
               const on = active === c.id;
               return (
-                <TouchableOpacity key={c.id} onPress={() => pick(c.id)} style={[s.card, isMobile && { flexBasis: '100%' }, on && { borderColor: c.color, backgroundColor: `${c.color}0d` }]}>
-                  <View style={[s.cardIcon, { backgroundColor: `${c.color}18` }]}><Feather name={c.icon} size={17} color={c.color} /></View>
+                <TouchableOpacity
+                  key={c.id}
+                  onPress={() => pick(c.id)}
+                  style={[s.card, isMobile && { flexBasis: '100%' },
+                    { borderLeftColor: c.color },
+                    on && { borderColor: `${c.color}80`, borderLeftColor: c.color, backgroundColor: `${c.color}0a` }]}
+                >
+                  <View style={[s.cardIcon, { backgroundColor: `${c.color}${on ? '1f' : '14'}` }]}><Feather name={c.icon} size={17} color={c.color} /></View>
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <Text style={s.cardTitle} numberOfLines={1}>{c.title}</Text>
                     {b ? (
@@ -551,7 +648,7 @@ export const PartnersBulkPage = ({ isMobile, isSuperAdmin, canEdit, onBack }) =>
             <Text style={s.panelTitle}>{meta.title}</Text>
           </View>
           {RUNS[active] ? (
-            <RunActivity type={active} st={status[active]} busy={busy} onAct={(a) => act(active, a)} scopeLabel={isSuperAdmin ? '' : 'operators under you'} />
+            <RunActivity key={active} type={active} st={status[active]} busy={busy} onAct={(a) => act(active, a)} scopeLabel={isSuperAdmin ? '' : 'operators under you'} />
           ) : SINGLES[active] ? (
             <SingleActivity id={active} last={single[active]} busy={singleBusy === active} onRun={() => runSingle(active)} channels={iptvChannels} />
           ) : active === 'keys' ? (
@@ -572,7 +669,7 @@ const s = StyleSheet.create({
   title: { fontSize: 18, fontWeight: '800', color: '#0f172a' },
   group: { fontSize: 11, fontWeight: '800', color: '#64748b', letterSpacing: 0.5, marginBottom: 8 },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  card: { flexBasis: 250, flexGrow: 1, maxWidth: 420, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 12, borderWidth: 1.5, borderColor: '#e2e8f0', backgroundColor: '#ffffff' },
+  card: { flexBasis: 250, flexGrow: 1, maxWidth: 420, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 10, borderWidth: 1, borderLeftWidth: 3, borderColor: '#e2e8f0', backgroundColor: '#ffffff' },
   cardIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   cardTitle: { fontSize: 13.5, fontWeight: '700', color: '#0f172a' },
   panel: { backgroundColor: '#ffffff', borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0', borderTopWidth: 3, padding: 16 },
@@ -608,6 +705,11 @@ const s = StyleSheet.create({
   cPg: { flexBasis: 280, flexGrow: 1.2, flexShrink: 0, minWidth: 0, paddingRight: 12 },
   cSw: { flexBasis: 150, flexGrow: 0.6, flexShrink: 0, minWidth: 0, paddingRight: 12 },
   cSetting: { flexBasis: 420, flexGrow: 3, flexShrink: 0, minWidth: 0, paddingRight: 12 },
+  tag: { fontSize: 10.5, fontWeight: '700', borderWidth: 1, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 2, overflow: 'hidden' },
+  tagRow: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 5, marginTop: 5 },
+  noIptv: { fontSize: 10.5, fontWeight: '800', color: '#b45309', backgroundColor: '#fef3c7', borderWidth: 1, borderColor: '#fcd34d', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 2, overflow: 'hidden' },
+  failList: { marginTop: 6, padding: 8, borderRadius: 8, backgroundColor: '#fef2f2', borderWidth: 1, borderColor: '#fee2e2', gap: 3 },
+  failRow: { fontSize: 11.5 },
   walletTag: { minWidth: 64, textAlign: 'center', fontSize: 10.5, fontWeight: '800', borderWidth: 1, borderRadius: 6, paddingHorizontal: 6, paddingVertical: 3, letterSpacing: 0.3 },
   chipCell: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
   opt: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 8, paddingVertical: 4, borderRadius: 14, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#ffffff' },

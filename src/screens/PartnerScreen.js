@@ -121,7 +121,7 @@ import { PartnerMoveModal } from '../components/partners/PartnerMoveModal';
 import { RadiusBranchesModal, radiusBranchCount } from '../components/partners/RadiusBranchesModal';
 import { PgGatewaysModal, pgGatewaysHint } from '../components/partners/PgGatewaysModal';
 import { ProviderWalletSyncPanel } from '../components/ProviderWalletSyncPanel';
-import { can, canAny } from '../services/staffAccess';
+import { can, canAny, canBulk, canAnyBulk } from '../services/staffAccess';
 import { SearchSelect } from '../components/internet/shared';
 import { toast } from 'react-toastify';
 
@@ -223,6 +223,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   // staff login: what its role allows on this page (a partner login: everything)
   const pAdd = can(user, 'partners.list', 'add');
   const pEdit = can(user, 'partners.list', 'edit');
+  // a staff role with Bulk Operations switches but not "Partners: view" sees only the bulk page
+  const bulkOnly = !can(user, 'partners.list', 'view') && canAnyBulk(user);
   const pWalletCredit = can(user, 'partners.wallet_credit');
   const pWalletDebit = can(user, 'partners.wallet_debit');
   const pWallet = pWalletCredit || pWalletDebit;
@@ -598,6 +600,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   };
 
   const fetchPartners = async () => {
+    if (bulkOnly) return; // staff with only Bulk Operations switches: no partner list to load
     setLoading(true);
     try {
       // search is filtered client-side below; the server filters by role and scope
@@ -4050,11 +4053,11 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   }
 
   // 7. MAIN PARTNERS TABLE SCREEN
-  if (showBulkPage && (isSuperAdminUser || isAdminUser)) {
+  if ((showBulkPage || bulkOnly) && (isSuperAdminUser || isAdminUser)) {
     return (
       <View style={{ flex: 1, backgroundColor: COLORS.bgPrimary }}>
         <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingHorizontal: isMobile ? 12 : 24, paddingVertical: isMobile ? 14 : 24, width: '100%' }]}>
-          <PartnersBulkPage isMobile={isMobile} isSuperAdmin={isSuperAdminUser} canEdit={pEdit} onBack={() => { openBulkPage(false); fetchPartners(); }} />
+          <PartnersBulkPage isMobile={isMobile} isSuperAdmin={isSuperAdminUser} allowed={(id) => canBulk(user, id)} onBack={bulkOnly ? null : () => { openBulkPage(false); fetchPartners(); }} />
         </ScrollView>
       </View>
     );
@@ -4090,7 +4093,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
             { flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap', flex: 1, justifyContent: 'flex-end' },
             isMobile && { width: '100%', flexGrow: 0, flexShrink: 0, flexBasis: 'auto', justifyContent: 'space-between', marginTop: 4 }
           ]}>
-            {isSuperAdminUser || isAdminUser ? (
+            {(isSuperAdminUser || isAdminUser) && canAnyBulk(user) ? (
               <TouchableOpacity
                 style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 8, borderWidth: 1, borderColor: '#0f766e', backgroundColor: '#ffffff', ...(isMobile ? { flex: 1 } : null) }}
                 onPress={() => openBulkPage(true)}

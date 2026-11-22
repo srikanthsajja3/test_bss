@@ -16,6 +16,23 @@ export const can = (user, key, action = 'allow') => {
 
 export const canAny = (user, pairs) => pairs.some(([k, a]) => can(user, k, a || 'allow'));
 
+// Partners › Bulk Operations: one switch per button (card id -> permission key)
+export const BULK_PERMS = {
+  internet: 'bulk.internet_customers',
+  iptv: 'bulk.iptv_customers',
+  branches: 'bulk.branches',
+  plans: 'bulk.internet_plans',
+  iptv_plans: 'bulk.iptv_plans',
+  ott_plans: 'bulk.ott_plans',
+  set_kyc: 'bulk.kyc',
+  set_pg: 'bulk.gateways',
+  set_aadhaar: 'bulk.aadhaar_recharge',
+  set_profile: 'bulk.profile_edit',
+  keys: 'bulk.radius_keys',
+};
+export const canBulk = (user, cardId) => !!BULK_PERMS[cardId] && can(user, BULK_PERMS[cardId]);
+export const canAnyBulk = (user) => Object.keys(BULK_PERMS).some((id) => canBulk(user, id));
+
 /**
  * 'search' for staff whose role has "Search By Username" (internet.search_only): a page with only
  * a search bar — this account's customers by full mobile / email / username or 3+ letters of the
@@ -36,19 +53,20 @@ const TAB_NEEDS = {
   subscribers: [['internet.customers', 'view'], ['iptv.customers', 'view'], ['ott.customers', 'view']], // the sidebar group
   iptv_customers: [['iptv.customers', 'view']],
   ott_customers: [['ott.customers', 'view']],
-  partners: [['partners.list', 'view'], ['partners.wallet_credit', 'allow'], ['partners.wallet_debit', 'allow'], ['partners.wallet_type', 'allow'], ['partners.plans', 'allow'], ['partners.branches', 'allow'], ['partners.kyc', 'allow'], ['partners.gateways', 'allow']],
+  partners: [...Object.values(BULK_PERMS).map((k) => [k, 'allow']), ['partners.list', 'view'], ['partners.wallet_credit', 'allow'], ['partners.wallet_debit', 'allow'], ['partners.wallet_type', 'allow'], ['partners.plans', 'allow'], ['partners.branches', 'allow'], ['partners.kyc', 'allow'], ['partners.gateways', 'allow']],
   customer_prices: [['prices.customer', 'view']],
   inventory: [['inventory.devices', 'view'], ['inventory.inward', 'view'], ['inventory.catalog', 'view']],
   inventory_inward: [['inventory.inward', 'view']],
   inventory_devices: [['inventory.devices', 'view']],
   inventory_catalog: [['inventory.catalog', 'view']],
   wallet: [['wallet.view', 'allow']],
-  networking: [['networking.nas', 'view'], ['networking.ip_pools', 'view'], ['networking.auth_logs', 'allow']], // Networking is in the super admin's menu only
+  networking: [['networking.nas', 'view'], ['networking.ip_pools', 'view'], ['networking.auth_logs', 'allow'], ['nms.dashboard', 'allow'], ['nms.devices', 'view'], ['nms.onus', 'view'], ['nms.alerts', 'view'], ['nms.events', 'view'], ['nms.netwatch', 'view']], // Networking is in the super admin's menu only
   auth_logs: [['networking.auth_logs', 'allow']],
   complaints: [['support.complaints', 'view']],
   backups: [['system.backups', 'view']],
   leads: [['support.leads', 'view']],
   nas: [['networking.nas', 'view']],
+  nms: [['nms.dashboard', 'allow'], ['nms.devices', 'view'], ['nms.onus', 'view'], ['nms.alerts', 'view'], ['nms.events', 'view'], ['nms.netwatch', 'view']],
   ip_pools: [['networking.ip_pools', 'view']],
   dhcp_devices: [['networking.dhcp', 'view']],
   iptv_renewals: [['iptv.renewals', 'view']],

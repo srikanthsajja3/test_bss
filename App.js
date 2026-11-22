@@ -18,6 +18,7 @@ import { IptvRenewalsScreen } from './src/screens/IptvRenewalsScreen';
 import { PayuPaymentsScreen } from './src/screens/PayuPaymentsScreen';
 import { WalletScreen } from './src/screens/WalletScreen';
 import { NasScreen } from './src/screens/NasScreen';
+import { NmsScreen } from './src/screens/NmsScreen';
 import { IpPoolsScreen } from './src/screens/IpPoolsScreen';
 import { AuthLogsScreen } from './src/screens/AuthLogsScreen';
 import { ComplaintsScreen } from './src/screens/ComplaintsScreen';
@@ -90,7 +91,7 @@ const VALID_TABS = [
   'dashboard', 'partners', 'customers', 'iptv_customers', 'ott_customers',
   'customer_prices', 'inventory', 'inventory_devices', 'inventory_inward',
   'inventory_catalog', 'dhcp_devices', 'iptv_renewals', 'payu_payments',
-  'wallet', 'nas', 'ip_pools', 'auth_logs', 'complaints', 'leads',
+  'wallet', 'nas', 'ip_pools', 'nms', 'auth_logs', 'complaints', 'leads',
   'backups', 'staff', 'activity',
 ];
 
@@ -542,6 +543,12 @@ function MainApp() {
           return <DashboardScreen user={user} refreshSignal={globalRefreshKey} onNavigateToCustomers={handleNavigateToCustomers} onNavigateToPartners={handleNavigateToPartners} />;
         }
         return <IptvRenewalsScreen refreshSignal={globalRefreshKey} />;
+      case 'nms':
+        // Networking › NMS — super admin (and its staff) only
+        if (String(user?.role || '').toLowerCase().replace(/[\s_-]/g, '') !== 'superadmin') {
+          return <DashboardScreen user={user} refreshSignal={globalRefreshKey} onNavigateToCustomers={handleNavigateToCustomers} onNavigateToPartners={handleNavigateToPartners} />;
+        }
+        return <NmsScreen user={user} refreshSignal={globalRefreshKey} />;
       case 'nas':
       case 'ip_pools':
         // Networking — super admin only (the API answers 403 to everyone else)
@@ -622,6 +629,8 @@ function MainApp() {
         return { title: 'NAS' };
       case 'ip_pools':
         return { title: 'IP Pools' };
+      case 'nms':
+        return { title: 'NMS', subtitle: 'OLTs, switches, ONUs, alerts and monitors' };
       case 'complaints':
         return { title: 'Complaints', subtitle: 'Customer tickets — raise, assign, resolve and close' };
       case 'leads':
