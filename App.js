@@ -30,6 +30,15 @@ import { isStaffUser, tabAllowed, firstAllowedTab, inventoryHome } from './src/s
 import { ToastContainer, toast } from 'react-toastify';
 import { createPortal } from 'react-dom';
 
+// Web: text fields sit inside their own bordered boxes (search bars, forms), so the browser's
+// focus outline drew a second, black border inside them. The box shows the focus instead.
+if (Platform.OS === 'web' && typeof document !== 'undefined' && !document.getElementById('onebss-input-focus')) {
+  const css = document.createElement('style');
+  css.id = 'onebss-input-focus';
+  css.textContent = 'input:focus,textarea:focus,input:focus-visible,textarea:focus-visible{outline:none !important;box-shadow:none;}';
+  document.head.appendChild(css);
+}
+
 // react-native-web renders <Modal> in a portal on <body> (z-index 9999), while every RN View
 // is `position:relative; z-index:0` — a stacking context the toasts can't escape from inside
 // the app tree. So toasts were drawn BEHIND open modals. Render the toast container in its

@@ -14,7 +14,7 @@ import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 import { OneBssApi, decodeJwt, saveOriginalSession, switchSession } from '../services/oneBssApi';
 import { PartnersTable, LevelBadge, levelLabelOf } from '../components/partners/PartnersTable';
-import { PartnersBulkSync } from '../components/partners/PartnersBulkSync';
+import { PartnersBulkPage } from '../components/partners/PartnersBulkPage';
 import { CustomerPricesPage } from '../components/plans/CustomerPricesPage';
 import { PartnerDevices } from '../components/partners/PartnerDevices';
 import { OttPlansPage } from '../components/ott/OttPlansPage';
@@ -270,6 +270,20 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   }, [initialRoleFilter]);
   React.useEffect(() => { setParentFilter(''); }, [selectedRole]);
   const [selectedPartner, setSelectedPartner] = useState(null);
+  // Partners › Bulk operations page (#partners?bulk=1): every sync / import / setting for many partners
+  const [showBulkPage, setShowBulkPage] = useState(() => typeof window !== 'undefined' && /[?&]bulk=1/.test(window.location.hash || ''));
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+    const onHash = () => setShowBulkPage(/[?&]bulk=1/.test(window.location.hash || ''));
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+  const openBulkPage = (on) => {
+    setShowBulkPage(on);
+    if (typeof window !== 'undefined') {
+      try { window.history.replaceState(null, '', on ? '#partners?bulk=1' : '#partners'); } catch (e) { /* ignore */ }
+    }
+  };
   const [partner, setPartner] = useState(null);
   const [loadingPartner, setLoadingPartner] = useState(false);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
@@ -1153,7 +1167,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     if (isSuperAdminUser) {
       const syncRes = await OneBssApi.syncInternetPlans(partner.partner_id);
       if (!syncRes.ok) {
-        toast.warn('Could not refresh plans from RADIUS — showing the last synced catalog.');
+        const why = String(syncRes.data?.message || '').replace(/^Could not reach the internet gateway:\s*/i, '');
+        toast.warn(`Could not refresh plans from RADIUS — showing the last synced catalog.${why ? `\n${why}` : ''}`, { autoClose: 9000 });
       }
     }
 
@@ -4035,6 +4050,16 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   }
 
   // 7. MAIN PARTNERS TABLE SCREEN
+  if (showBulkPage && (isSuperAdminUser || isAdminUser)) {
+    return (
+      <View style={{ flex: 1, backgroundColor: COLORS.bgPrimary }}>
+        <ScrollView style={styles.container} contentContainerStyle={[styles.content, { paddingHorizontal: isMobile ? 12 : 24, paddingVertical: isMobile ? 14 : 24, width: '100%' }]}>
+          <PartnersBulkPage isMobile={isMobile} isSuperAdmin={isSuperAdminUser} canEdit={pEdit} onBack={() => { openBulkPage(false); fetchPartners(); }} />
+        </ScrollView>
+      </View>
+    );
+  }
+
   return (
     <View style={{ flex: 1, backgroundColor: COLORS.bgPrimary }}>
       <ScrollView
@@ -4066,9 +4091,14 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
             isMobile && { width: '100%', flexGrow: 0, flexShrink: 0, flexBasis: 'auto', justifyContent: 'space-between', marginTop: 4 }
           ]}>
             {isSuperAdminUser || isAdminUser ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: isMobile ? '100%' : 'auto' }}>
-                <PartnersBulkSync isMobile={isMobile} scopeLabel={isSuperAdminUser ? '' : 'under you '} showBranches={isSuperAdminUser && pEdit} />
-              </View>
+              <TouchableOpacity
+                style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 9, borderRadius: 8, borderWidth: 1, borderColor: '#0f766e', backgroundColor: '#ffffff', ...(isMobile ? { flex: 1 } : null) }}
+                onPress={() => openBulkPage(true)}
+                accessibilityLabel="Bulk operations: syncs, imports and settings for all partners"
+              >
+                <Feather name="layers" size={14} color="#0f766e" />
+                <Text style={{ fontSize: 12, fontWeight: '700', color: '#0f766e' }} numberOfLines={1}>Bulk Operations</Text>
+              </TouchableOpacity>
             ) : null}
             {!readOnly && pAdd ? (
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, width: isMobile ? '100%' : 'auto' }}>

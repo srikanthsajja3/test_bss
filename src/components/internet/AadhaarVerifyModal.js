@@ -82,6 +82,11 @@ export const AadhaarVerifyModal = ({ visible, onClose, account, customerName, on
 
   const pendingPush = account?.kyc && !account?.kyc?.radius?.complete ? account.kyc : null;
 
+  // RADIUS first: the list sync does not bring the Aadhaar flag, so before any OTP ask RADIUS
+  // (internet_customer_detail_sync.php) whether this account is verified there already.
+  // null = not checked yet, 'checking', 'verified' (nothing to do), 'not_verified', 'unknown' (could not ask)
+  const [radiusCheck, setRadiusCheck] = useState(null);
+
   useEffect(() => {
     aliveRef.current = true;
     return () => {
@@ -108,6 +113,20 @@ export const AadhaarVerifyModal = ({ visible, onClose, account, customerName, on
     setPollStatus('');
     setProviders(null);
     setProviderError('');
+    setRadiusCheck(pendingPush ? 'not_verified' : 'checking');
+    if (!pendingPush && internetId) {
+      (async () => {
+        const res = await OneBssApi.syncInternetCustomerDetail(internetId);
+        if (!aliveRef.current) return;
+        if (res.ok && res.data?.success && res.data.aadhar_verified === true) {
+          setRadiusCheck('verified');
+          toast.success(`${account?.username || 'This account'} is already Aadhaar verified on RADIUS — marked as verified.`);
+          if (onVerified) onVerified({ account_verified: true, source: 'radius', kyc: null });
+        } else {
+          setRadiusCheck(res.ok && res.data?.success ? 'not_verified' : 'unknown');
+        }
+      })();
+    }
     (async () => {
       const res = await OneBssApi.getKycProviderMapping(account?.partner_id);
       if (!aliveRef.current) return;
@@ -309,7 +328,9 @@ export const AadhaarVerifyModal = ({ visible, onClose, account, customerName, on
       busy={busy}
       maxWidth={540}
       footer={
-        result ? (
+        radiusCheck === 'verified' ? (
+          <Btn label="Done" onPress={onClose} />
+        ) : result ? (
           <>
             {kyc && !kyc.radius?.complete ? <Btn label="Retry sending to RADIUS" kind="ghost" icon="refresh-cw" onPress={retryPush} loading={pushing} /> : null}
             <Btn label="Done" onPress={onClose} disabled={pushing} />
@@ -328,7 +349,20 @@ export const AadhaarVerifyModal = ({ visible, onClose, account, customerName, on
         </View>
       </View>
 
-      {result ? (
+      {radiusCheck === 'checking' ? (
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 18 }}>
+          <ActivityIndicator size="small" color={BLUE} />
+          <Text style={{ fontSize: 13, color: '#334155', flex: 1 }}>Checking with RADIUS whether this account is already Aadhaar verified…</Text>
+        </View>
+      ) : radiusCheck === 'verified' ? (
+        <View style={[s.resultHead, s.resultOk]}>
+          <Feather name="check-circle" size={22} color="#059669" />
+          <View style={{ flex: 1, minWidth: 0 }}>
+            <Text style={[s.resultTitle, { color: '#065f46' }]}>Already Aadhaar verified</Text>
+            <Text style={{ fontSize: 12, color: '#065f46', marginTop: 2 }}>RADIUS has this account as Aadhaar verified, so no OTP is needed. It is now marked as verified here too.</Text>
+          </View>
+        </View>
+      ) : result ? (
         <>
           <View style={[s.resultHead, result.account_verified ? s.resultOk : s.resultWarn]}>
             {cust.photo_url && !photoFailed ? <Image source={{ uri: cust.photo_url }} style={s.photo} onError={() => setPhotoFailed(true)} /> : (
@@ -371,6 +405,10 @@ export const AadhaarVerifyModal = ({ visible, onClose, account, customerName, on
                 <Btn label="Send to RADIUS again" icon="upload-cloud" onPress={retryPush} loading={pushing} />
               </View>
             </View>
+          ) : null}
+
+          {radiusCheck === 'unknown' ? (
+            <View style={{ marginBottom: 12 }}><Note tone="warn" text="Could not ask RADIUS whether this account is already verified — you can still verify it here." /></View>
           ) : null}
 
           {providers === null ? (

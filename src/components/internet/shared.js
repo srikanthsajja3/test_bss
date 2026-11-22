@@ -86,16 +86,21 @@ export const iptvLabel = (a) => {
 // Customer photo with graceful fallback to initials / icon
 // height: give a portrait box (Aadhaar photos are ~4:5) so the face isn't cropped at the top
 export const CustomerPhoto = ({ uri, size = 56, height, radius = 14, initials = '', dark = true }) => {
-  const [failed, setFailed] = useState(false);
   const src = fixDocUrl(uri);
+  // failed is remembered per photo: a new photo gets a fresh try
+  const [failedSrc, setFailedSrc] = useState(null);
+  const failed = !!src && failedSrc === src;
   const box = { width: size, height: height || size, borderRadius: radius };
   if (src && !failed) {
     return (
       <Image
+        // a new key per photo: the browser would otherwise keep showing the PREVIOUS photo until
+        // the new one has loaded (switching between accounts verified by different people)
+        key={src}
         source={{ uri: src }}
         style={[box, { backgroundColor: '#e2e8f0' }]}
         resizeMode="cover"
-        onError={() => setFailed(true)}
+        onError={() => setFailedSrc(src)}
       />
     );
   }

@@ -288,9 +288,10 @@ export const ColDateRange = ({ value, onChange, placeholder = 'Select date' }) =
  * The gap to the next box is a margin on the inner view: padding on the cell itself would
  * change how the row shares out its width, so the boxes would drift away from the headers.
  */
-export const FilterCell = ({ flex, minWidth, children }) => (
-  <View style={{ flex, minWidth, justifyContent: 'center' }}>
-    <View style={{ marginRight: 10 }}>{children}</View>
+// style: a table column's own style (same box as its header and rows); else flex + minWidth
+export const FilterCell = ({ flex, minWidth, style, children }) => (
+  <View style={style ? [style, { overflow: 'visible' }] : { flex, minWidth, justifyContent: 'center' }}>
+    <View style={style ? null : { marginRight: 10 }}>{children}</View>
   </View>
 );
 

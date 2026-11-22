@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Platform } from '
 import { Feather } from '@expo/vector-icons';
 import { toast } from 'react-toastify';
 import { OneBssApi } from '../../services/oneBssApi';
+import { downloadCsv } from '../../utils/sampleCsv';
 import { ModalShell, Btn, Note, SearchSelect } from '../internet/shared';
 
 /**
@@ -206,7 +207,7 @@ export const xlsxToGrid = async (buf) => {
   return compact.filter((r) => r.length);
 };
 
-const pickFile = () => new Promise((resolve) => {
+export const pickFile = () => new Promise((resolve) => {
   if (Platform.OS !== 'web' || typeof document === 'undefined') { resolve(null); return; }
   const input = document.createElement('input');
   input.type = 'file';
@@ -283,6 +284,16 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
     applyGrid(f.name, f.grid, byCid);
   };
   const ready = !!(file && file.rows && file.rows.length);
+
+  // the columns this screen reads (Pioneer customer export), with two made-up rows
+  const downloadSample = () => {
+    const header = ['Id', 'Status', 'Stb Number', 'Name', 'Mobile', 'Caf Number', 'Last Renewal', 'Operator Name', 'Branch', 'Installation Address', 'Email', 'Date Added', ...(byCid ? ['IPTV Partner ID'] : [])];
+    const rows = [
+      ['100001', 'Active', 'a1b2c3d4e5f60718', 'Sample Customer One', '9000000001', '', '2026-11-01 10:30:00', 'Sample Operator', 'SAMPLE_BRANCH', 'D No 1-2, Main Road, Sample Town', 'one@example.com', '2026-01-15 09:00:00', ...(byCid ? ['4144'] : [])],
+      ['100002', 'Expired', 'f1e2d3c4b5a69788', 'Sample Customer Two', '9000000002', '', '2026-10-05 18:00:00', 'Sample Operator', 'SAMPLE_BRANCH', 'D No 3-4, Market Street, Sample Town', '', '2025-12-20 11:15:00', ...(byCid ? ['4144'] : [])],
+    ];
+    downloadCsv(byCid ? 'iptv_import_sample_with_partner_id.csv' : 'iptv_import_sample.csv', header, rows);
+  };
 
   // runs the rows through iptv_import.php in chunks
   const sendRows = async (dryRun) => {
@@ -397,7 +408,13 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
         {stage === 'pick' || stage === 'checked' ? (
           <>
             <View>
-              <Text style={s.label}>1. Excel / CSV file</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                <Text style={s.label}>1. Excel / CSV file</Text>
+                <TouchableOpacity style={s.sampleBtn} onPress={downloadSample} accessibilityLabel="Download a sample file">
+                  <Feather name="download" size={12} color="#7c3aed" />
+                  <Text style={s.sampleText}>Sample file</Text>
+                </TouchableOpacity>
+              </View>
               <TouchableOpacity style={s.fileBox} onPress={choose} disabled={busy}>
                 <Feather name={file ? 'file-text' : 'upload-cloud'} size={20} color="#7c3aed" />
                 <View style={{ flex: 1 }}>
@@ -486,6 +503,8 @@ export const IptvImportModal = ({ visible, user, operators = [], onClose, onDone
 
 const s = StyleSheet.create({
   label: { fontSize: 12, fontWeight: '700', color: '#475569', marginBottom: 6 },
+  sampleBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 9, paddingVertical: 4, borderRadius: 6, borderWidth: 1, borderColor: '#c4b5fd', backgroundColor: '#ffffff', marginBottom: 6 },
+  sampleText: { fontSize: 11.5, fontWeight: '700', color: '#7c3aed' },
   fileBox: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14, borderRadius: 10, borderWidth: 1.5, borderStyle: 'dashed', borderColor: '#c4b5fd', backgroundColor: '#faf5ff' },
   fileName: { fontSize: 14, fontWeight: '700', color: '#0f172a' },
   fileSub: { fontSize: 12, color: '#64748b', marginTop: 2 },

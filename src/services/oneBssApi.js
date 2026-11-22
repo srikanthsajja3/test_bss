@@ -882,6 +882,20 @@ export const OneBssApi = {
     return { ok: false, status: 0, data: { success: false, message: 'Still running on the server — check again later.' } };
   },
 
+  // Partners › Bulk operations (super admin): the IPTV / OTT catalogs are the same for every
+  // operator, so one call syncs them (the server picks an operator that has the credentials)
+  syncAllIptvPlans: async () => post('/iptv_plan_sync.php'),
+  // the channel lists are read after the reply: how that run is going
+  getIptvPlanSyncStatus: async () => get('/iptv_plan_sync.php?status=1'),
+  syncAllOttPlans: async () => post('/ott_plan_sync.php', {}),
+  // every partner's settings in one table; save(action, partnerIds, extra) for one or many
+  getPartnerBulkSettings: async () => get('/partner_bulk_settings.php'),
+  savePartnerBulkSettings: async (action, partnerIds, extra = {}) =>
+    post('/partner_bulk_settings.php', { action, partner_ids: (partnerIds || []).map(toNum), ...extra }),
+
+  // super admin: RADIUS API keys from a CSV, by RADIUS partner id. rows [{line, internet_partner_id, api_key}]
+  importRadiusKeys: async (rows, dryRun = true) => post('/radius_token_import.php', { rows, dry_run: !!dryRun }),
+
   // Partners page: sync every operator one after another (runs on the server). type 'internet' | 'iptv'
   partnersBulkSyncStatus: async (type) => get(`/partners_bulk_sync.php?type=${q(type)}`),
   // action: 'start' | 'stop' | 'resume'

@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { View, Text, StyleSheet, TextInput, TouchableOpacity, ScrollView, ActivityIndicator, useWindowDimensions } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
+import { ListPager } from '../components/ListPager';
 import { OneBssApi } from '../services/oneBssApi';
 import { formatApiDate } from '../components/CustomerAccountsOverview';
 import { ColSearch, ColSelect, ColDateRange, FilterCell, dateRangeParams } from '../components/ColumnFilters';
@@ -34,6 +35,7 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
   const [debounced, setDebounced] = useState('');
   const [status, setStatus] = useState('all');
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(PAGE);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [counts, setCounts] = useState({});
@@ -42,10 +44,10 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
   const seq = useRef(0);
 
   // Filter row under the header. Sent to customers_list.php, so it filters every page.
-  const EMPTY = { subId: '', name: '', mobile: '', operator: '', pkg: '', expiry: null };
+  const EMPTY = { subId: '', name: '', mobile: '', partner: '', operator: '', pkg: '', expiry: null };
   const [cf, setCf] = useState(EMPTY);
-  const [cfText, setCfText] = useState({ subId: '', name: '', mobile: '' });
-  const [facets, setFacets] = useState({ plans: [], operators: [] });
+  const [cfText, setCfText] = useState({ subId: '', name: '', mobile: '', partner: '' });
+  const [facets, setFacets] = useState({ plans: [], operators: [], partners: [] });
   const setCol = (k, v) => setCf((f) => ({ ...f, [k]: v }));
   const hasActiveColSearch = useMemo(
     () => Object.values(cf).some((v) => (v && typeof v === 'object' ? !!v.preset : String(v ?? '').trim() !== '')) || status !== 'all',
@@ -53,23 +55,23 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
   );
   const resetColSearch = () => {
     setCf(EMPTY);
-    setCfText({ subId: '', name: '', mobile: '' });
+    setCfText({ subId: '', name: '', mobile: '', partner: '' });
     setStatus('all');
   };
   useEffect(() => {
-    const t = setTimeout(() => setCfText({ subId: cf.subId.trim(), name: cf.name.trim(), mobile: cf.mobile.trim() }), 400);
+    const t = setTimeout(() => setCfText({ subId: cf.subId.trim(), name: cf.name.trim(), mobile: cf.mobile.trim(), partner: cf.partner.trim() }), 400);
     return () => clearTimeout(t);
-  }, [cf.subId, cf.name, cf.mobile]);
+  }, [cf.subId, cf.name, cf.mobile, cf.partner]);
   const colQuery = {
     partner_id: cf.operator || undefined,
-    f_subid: cfText.subId, f_name: cfText.name, f_mobile: cfText.mobile, f_plan: cf.pkg,
+    f_subid: cfText.subId, f_name: cfText.name, f_mobile: cfText.mobile, f_partner: cf.partner || undefined, f_plan: cf.pkg,
     ...dateRangeParams(cf.expiry),
   };
   const colKey = JSON.stringify(colQuery);
   useEffect(() => {
     let live = true;
     OneBssApi.getListFacets('ott', cf.operator)
-      .then((res) => { if (live && res?.ok && res.data?.success) setFacets({ plans: res.data.plans || [], operators: res.data.operators || [] }); })
+      .then((res) => { if (live && res?.ok && res.data?.success) setFacets({ plans: res.data.plans || [], operators: res.data.operators || [], partners: res.data.partners || [] }); })
       .catch(() => {});
     return () => { live = false; };
   }, [cf.operator, refreshSignal]);
@@ -78,12 +80,12 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
     const t = setTimeout(() => setDebounced(search.trim()), 350);
     return () => clearTimeout(t);
   }, [search]);
-  useEffect(() => setPage(1), [debounced, status, colKey]);
+  useEffect(() => setPage(1), [debounced, status, colKey, pageSize]);
 
   const load = async () => {
     const my = ++seq.current;
     setLoading(true);
-    const res = await OneBssApi.getCustomersList(page, PAGE, 'ott', debounced, { status, ...colQuery });
+    const res = await OneBssApi.getCustomersList(page, pageSize, 'ott', debounced, { status, ...colQuery });
     if (my !== seq.current) return;
     setLoading(false);
     if (!res.ok) {
@@ -98,7 +100,7 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
   };
   useEffect(() => {
     load();
-  }, [page, debounced, status, colKey, refreshSignal]);
+  }, [page, pageSize, debounced, status, colKey, refreshSignal]);
 
   const open = (row) => {
     if (!row.cust_id) return;
@@ -107,7 +109,7 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
 
   const filteredRows = rows; // the server already applied every filter
 
-  const pages = Math.max(1, Math.ceil(total / PAGE));
+  const pages = Math.max(1, Math.ceil(total / pageSize));
   const table = (
     <View style={{ flex: 1 }}>
       {/* Table Header */}
@@ -117,6 +119,7 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
         <Text style={[styles.th, { flex: 1.6, minWidth: 140 }]}>Full Name</Text>
         <Text style={[styles.th, { flex: 1.2, minWidth: 110 }]}>Mobile</Text>
         {!isOperator ? <Text style={[styles.th, { flex: 1.4, minWidth: 120 }]}>Operator</Text> : null}
+        {!isOperator ? <Text style={[styles.th, { flex: 1, minWidth: 110 }]}>Partner</Text> : null}
         <Text style={[styles.th, { flex: 1.6, minWidth: 140 }]}>Package</Text>
         <Text style={[styles.th, { flex: 1.5, minWidth: 140 }]}>Expiry</Text>
       </View>
@@ -138,6 +141,11 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
         {!isOperator ? (
           <FilterCell flex={1.4} minWidth={120}>
             <ColSelect value={cf.operator} options={facets.operators} onChange={(v) => setCol('operator', v ? String(v) : '')} placeholder="Operator" allLabel="All operators" />
+          </FilterCell>
+        ) : null}
+        {!isOperator ? (
+          <FilterCell flex={1} minWidth={110}>
+            <ColSelect value={cf.partner} options={facets.partners} onChange={(v) => setCol('partner', v ? String(v) : '')} placeholder="Partner" allLabel="All partners" searchable />
           </FilterCell>
         ) : null}
         <FilterCell flex={1.6} minWidth={140}>
@@ -179,7 +187,8 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
               </View>
               <Text style={[styles.td, { flex: 1.6, minWidth: 140 }]} numberOfLines={1}>{r.full_name || '—'}</Text>
               <Text style={[styles.td, { flex: 1.2, minWidth: 110 }]}>{r.mobile || '—'}</Text>
-              {!isOperator ? <Text style={[styles.td, { flex: 1.4, minWidth: 120 }]} numberOfLines={1}>{r.partner_name || '—'}</Text> : null}
+              {!isOperator ? <Text style={[styles.td, { flex: 1.4, minWidth: 120 }]} numberOfLines={1}>{r.company_name || r.partner_name || '—'}</Text> : null}
+              {!isOperator ? <Text style={[styles.td, { flex: 1, minWidth: 110, color: '#475569' }]} numberOfLines={1}>{r.partner_username || '—'}</Text> : null}
               <View style={{ flex: 1.6, minWidth: 140 }}>
                 <Text style={[styles.td, { fontWeight: '700' }]} numberOfLines={1}>{r.package_name || '—'}</Text>
                 {r.subplan_name ? <Text style={styles.sub}>{r.subplan_name}</Text> : null}
@@ -220,22 +229,19 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
       </View>
 
       <View style={[styles.card, { padding: 0, marginTop: 14 }]}>
-        <View style={styles.pager}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            {loading ? <ActivityIndicator size="small" color={OTT} /> : null}
-            <Text style={styles.sub}>{total} OTT subscriber{total === 1 ? '' : 's'}</Text>
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <TouchableOpacity style={[styles.pageBtn, page <= 1 && { opacity: 0.4 }]} disabled={page <= 1} onPress={() => setPage((p) => p - 1)}>
-              <Text style={styles.pageText}>Previous</Text>
-            </TouchableOpacity>
-            <Text style={[styles.pageText, { fontWeight: '700' }]}>Page {page} of {pages}</Text>
-            <TouchableOpacity style={[styles.pageBtn, page >= pages && { opacity: 0.4 }]} disabled={page >= pages} onPress={() => setPage((p) => p + 1)}>
-              <Text style={styles.pageText}>Next</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: isMobile ? 880 : '100%', flexGrow: 1 }}>
+        <ListPager
+          isMobile={isMobile}
+          loading={loading}
+          total={total}
+          shown={rows.length}
+          page={page}
+          pages={pages}
+          pageSize={pageSize}
+          onPage={setPage}
+          onPageSize={setPageSize}
+          noun={total === 1 ? 'OTT subscriber' : 'OTT subscribers'}
+        />
+        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: isMobile ? (isOperator ? 880 : 1000) : '100%', flexGrow: 1 }}>
           {table}
         </ScrollView>
       </View>

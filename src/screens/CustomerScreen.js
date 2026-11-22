@@ -19,6 +19,7 @@ import { OttRechargeModal } from '../components/ott/OttRechargeModal';
 import { AddOttModal } from '../components/ott/AddOttModal';
 import { CustomerAccountsOverview, defaultRechargeType, formatApiDate, normaliseInternetAccount, normaliseIptvAccount } from '../components/CustomerAccountsOverview';
 import { CustomerLocationModal } from '../components/CustomerLocationModal';
+import { ListPager } from '../components/ListPager';
 import { ColSearch, ColSelect, ColDateRange, FilterCell, TABLE_GUTTER, dateRangeParams } from '../components/ColumnFilters';
 import { CustomerDevicesModal } from '../components/CustomerDevicesModal';
 import { OnlineSessionPanel } from '../components/internet/OnlineSessionPanel';
@@ -353,6 +354,23 @@ const ACCOUNT_LEVEL_KEYS = [
   'internet_id', 'package_id', 'subplan_id', 'acc_id',
 ];
 
+// Columns of the subscribers table: ONE width per column, used by the header, the filter row and
+// every row (same box, same right padding, nothing spills over), so each value starts exactly
+// under its heading. basis = the column's width; extra screen width is shared out by grow.
+const col = (basis, grow) => ({ flexBasis: basis, flexGrow: grow, flexShrink: 0, minWidth: 0, paddingRight: 12, justifyContent: 'center', overflow: 'hidden' });
+const INT_COLS = {
+  check: { width: 34, flexShrink: 0, alignItems: 'center', justifyContent: 'center' },
+  username: col(130, 1.3), conn: col(105, 0.5), name: col(150, 1.6), mobile: col(140, 0.8),
+  aadhaar: col(125, 0.6), operator: col(150, 1.4), partner: col(125, 0.8), branch: col(140, 1.2), plan: col(140, 1.2),
+  expiry: col(175, 1), registered: col(115, 0.5), actions: col(150, 0.3),
+};
+const IPTV_COLS = {
+  stb: col(155, 1.3), status: col(110, 0.5), name: col(150, 1.6), mobile: col(140, 0.8),
+  operator: col(150, 1.4), partner: col(125, 0.8), branch: col(140, 1.2), plan: col(150, 1.3),
+  expiry: col(175, 1), registered: col(115, 0.5), actions: col(90, 0.3),
+};
+const tableMinWidth = (cols, skip = []) => Object.entries(cols).reduce((t, [k, c]) => t + (skip.includes(k) ? 0 : (c.flexBasis || c.width || 0)), 0) + 24;
+
 export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all', initialRange = '', initialSearch = '', onSwitchMode, onAutoCloseSidebar, refreshSignal = 0 }) => {
   const { width, height: winHeight } = useWindowDimensions();
   const isMobile = width < 768;
@@ -483,10 +501,10 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   const [selectedBranchFilter, setSelectedBranchFilter] = useState('');
 
   // Filter row under the table header. Sent to customers_list.php, so it filters every page.
-  const EMPTY_COL_FILTERS = { username: '', stb: '', name: '', mobile: '', conn: '', aadhaar: '', plan: '', expiry: null };
+  const EMPTY_COL_FILTERS = { username: '', stb: '', name: '', mobile: '', partner: '', conn: '', aadhaar: '', plan: '', branch: '', expiry: null };
   const [colFilters, setColFilters] = useState(EMPTY_COL_FILTERS);
-  const [debouncedColText, setDebouncedColText] = useState({ username: '', stb: '', name: '', mobile: '' });
-  const [listFacets, setListFacets] = useState({ plans: [], operators: [] });
+  const [debouncedColText, setDebouncedColText] = useState({ username: '', stb: '', name: '', mobile: '', partner: '' });
+  const [listFacets, setListFacets] = useState({ plans: [], operators: [], partners: [], branches: [] });
   const setColFilter = (key, value) => setColFilters((f) => ({ ...f, [key]: value }));
   const hasActiveColSearch = useMemo(
     () => Object.values(colFilters).some((v) => (v && typeof v === 'object' ? !!v.preset : String(v ?? '').trim() !== '')),
@@ -494,18 +512,19 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   );
   const resetColSearch = () => {
     setColFilters(EMPTY_COL_FILTERS);
-    setDebouncedColText({ username: '', stb: '', name: '', mobile: '' });
+    setDebouncedColText({ username: '', stb: '', name: '', mobile: '', partner: '' });
   };
   useEffect(() => {
     const t = setTimeout(() => setDebouncedColText({
       username: colFilters.username.trim(), stb: colFilters.stb.trim(), name: colFilters.name.trim(), mobile: colFilters.mobile.trim(),
+      partner: colFilters.partner.trim(),
     }), 400);
     return () => clearTimeout(t);
-  }, [colFilters.username, colFilters.stb, colFilters.name, colFilters.mobile]);
+  }, [colFilters.username, colFilters.stb, colFilters.name, colFilters.mobile, colFilters.partner]);
 
   const operatorFilterOptions = useMemo(() => {
     if (listFacets.operators.length) return listFacets.operators;
-    return operators.map((o) => ({ value: o.partner_id, label: o.partner_name || o.name || `#${o.partner_id}` }));
+    return operators.map((o) => ({ value: o.partner_id, label: o.company_name || o.partner_name || o.name || `#${o.partner_id}` }));
   }, [listFacets.operators, operators]);
 
   const selectedOpObj = useMemo(() => {
@@ -1998,15 +2017,15 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
   // Column filters as query params (empty ones are dropped by getCustomersList)
   const colQuery = viewMode === 'iptv'
-    ? { f_stb: debouncedColText.stb, f_name: debouncedColText.name, f_mobile: debouncedColText.mobile, f_plan: colFilters.plan, ...dateRangeParams(colFilters.expiry) }
+    ? { f_stb: debouncedColText.stb, f_name: debouncedColText.name, f_mobile: debouncedColText.mobile, f_partner: colFilters.partner, f_plan: colFilters.plan, f_branch: colFilters.branch, ...dateRangeParams(colFilters.expiry) }
     : {
-        f_username: debouncedColText.username, f_conn: colFilters.conn, f_name: debouncedColText.name, f_mobile: debouncedColText.mobile,
-        f_aadhaar: colFilters.aadhaar, f_plan: colFilters.plan, ...dateRangeParams(colFilters.expiry),
+        f_username: debouncedColText.username, f_conn: colFilters.conn, f_name: debouncedColText.name, f_mobile: debouncedColText.mobile, f_partner: colFilters.partner,
+        f_aadhaar: colFilters.aadhaar, f_plan: colFilters.plan, f_branch: colFilters.branch, ...dateRangeParams(colFilters.expiry),
       };
   const colQueryKey = JSON.stringify(colQuery);
 
   // plan ids differ between internet and IPTV
-  useEffect(() => { setColFilters((f) => (f.plan ? { ...f, plan: '' } : f)); }, [viewMode]);
+  useEffect(() => { setColFilters((f) => (f.plan || f.branch ? { ...f, plan: '', branch: '' } : f)); }, [viewMode]);
 
   // dropdown options for the filter row: plans / operators that have accounts of this type
   useEffect(() => {
@@ -2015,7 +2034,16 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
     OneBssApi.getListFacets(viewMode === 'iptv' ? 'iptv' : 'internet', selectedOperatorId)
       .then((res) => {
         if (!live || !res?.ok || !res.data?.success) return;
-        setListFacets({ plans: res.data.plans || [], operators: res.data.operators || [] });
+        const branches = res.data.branches || [];
+        const partners = res.data.partners || [];
+        setListFacets({ plans: res.data.plans || [], operators: res.data.operators || [], partners, branches });
+        // a branch / partner picked for another operator is not in this operator's list: clear it
+        setColFilters((f) => {
+          let n = f;
+          if (n.branch && !branches.some((b) => String(b.value) === String(n.branch))) n = { ...n, branch: '' };
+          if (n.partner && !partners.some((p) => String(p.value) === String(n.partner))) n = { ...n, partner: '' };
+          return n;
+        });
       })
       .catch(() => {});
     return () => { live = false; };
@@ -2269,6 +2297,30 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   }
 
   if (activeSubProfile) {
+    // ---- whose photo / name / documents: THIS internet account's own Aadhaar ----
+    // One mobile can have accounts of different people, each verified with its own Aadhaar
+    // (internet_account_kyc). The account page shows that account's verification; the customer's
+    // photo / documents only when no other account of the customer has its own.
+    const acctKyc = currentInternetAccount?.kyc || null;
+    const otherAccountKyc = (activeCustomer?.internet_accounts || []).some((a) => a !== currentInternetAccount && a?.kyc);
+    const useCustomerKyc = !acctKyc && !otherAccountKyc;
+    const accountPhoto = currentInternetAccount
+      ? (acctKyc?.photo_url || (useCustomerKyc ? activeCustomer?.profile_image : null))
+      : activeCustomer?.profile_image;
+    const accountPersonName = (currentInternetAccount && (acctKyc?.full_name || currentInternetAccount.account_name))
+      || activeSubProfile.full_name || activeSubProfile.name;
+    const accountDocsCustomer = !currentInternetAccount ? activeCustomer : {
+      ...(activeCustomer || {}),
+      aadhar_verified: isAadhaarVerified(currentInternetAccount),
+      verification_channel: acctKyc?.channel || (useCustomerKyc ? activeCustomer?.verification_channel : ''),
+      documents: acctKyc
+        ? [
+          acctKyc.photo_url ? { key: 'kyc_photo', label: 'Customer Photo (Aadhaar)', url: acctKyc.photo_url } : null,
+          acctKyc.xml_url ? { key: 'kyc_xml', label: 'Aadhaar XML', url: acctKyc.xml_url } : null,
+          acctKyc.pdf_url ? { key: 'kyc_pdf', label: 'Aadhaar PDF', url: acctKyc.pdf_url } : null,
+        ].filter(Boolean)
+        : useCustomerKyc ? (activeCustomer?.documents || []) : [],
+    };
     const isOnline = onlineOverride !== null && activeAccountSel?.kind === 'internet' ? onlineOverride : (activeSubProfile.online === 'ONLINE' || activeSubProfile.isOnline);
     const isAccountActive = (activeSubProfile.status || activeSubProfile.status_text || '').toLowerCase() === 'active';
     // admins (super distributor / distributor / sub distributor) only view customers
@@ -2322,7 +2374,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         <View style={{ backgroundColor: '#ffffff', borderRadius: 14, padding: 20, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)', marginBottom: 16, flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: isMobile ? 'flex-start' : 'center', gap: 16 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: isMobile ? 12 : 16, maxWidth: '100%' }}>
             {/* PROFILE AVATAR THUMBNAIL */}
-            <CustomerPhoto uri={activeCustomer?.profile_image} size={isMobile ? 52 : 64} height={isMobile ? 65 : 80} radius={12} dark={false} />
+            <CustomerPhoto uri={accountPhoto} size={isMobile ? 52 : 64} height={isMobile ? 65 : 80} radius={12} dark={false} />
 
             <View style={{ flexShrink: 1, minWidth: 0 }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
@@ -2483,7 +2535,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
         ) : internetTab === 'onu' && currentInternetAccount ? (
           <CustomerDevicesModal inline visible customer={{ ...currentInternetAccount, full_name: activeSubProfile?.name }} onClose={() => setInternetTab('basic')} />
         ) : internetTab === 'documents' && canSeeDocuments ? (
-          <DocumentsModal inline visible customer={activeCustomer} onClose={() => setInternetTab('basic')} />
+          <DocumentsModal inline visible customer={accountDocsCustomer} onClose={() => setInternetTab('basic')} />
         ) : (
           <>
 
@@ -2504,7 +2556,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
                 <Text style={{ fontSize: 12, color: '#64748b' }}>Customer</Text>
-                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>{activeSubProfile.full_name || activeSubProfile.name || '—'}</Text>
+                <Text style={{ fontSize: 13, fontWeight: '600', color: '#000000' }}>{accountPersonName || '—'}</Text>
               </View>
 
               <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -3073,74 +3125,40 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       {/* SERVICE DATA DISPLAY TABLE (search-only technicians: only after a search) */}
       <View style={[styles.card, searchOnly && !debouncedSearch && { display: 'none' }]}>
         <View style={{ width: '100%' }}>
-          {/* PAGINATION CONTROLS BAR (TOP) */}
-          <View style={{ flexDirection: isMobile ? 'column' : 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: COLORS.borderLight || '#e2e8f0', gap: 10, backgroundColor: COLORS.cardBg || '#ffffff' }}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-              {loadingData ? <ActivityIndicator size="small" color={COLORS.primary} /> : null}
-              <Text style={{ fontSize: 12, color: COLORS.textMuted || '#64748b' }}>
-                Showing {listTotal === 0 ? 0 : (currentPage - 1) * pageSize + 1} to {Math.min((currentPage - 1) * pageSize + paginatedCustomers.length, listTotal)} of {listTotal} {viewMode === 'iptv' ? 'set-top boxes' : 'subscribers'}
-                {debouncedSearch ? ` matching "${debouncedSearch}"` : ''}
-              </Text>
-            </View>
+          {/* PAGINATION BAR (TOP): phones get one line — per-page dropdown + page numbers */}
+          <ListPager
+            isMobile={isMobile}
+            loading={loadingData}
+            total={listTotal}
+            shown={paginatedCustomers.length}
+            page={currentPage}
+            pages={totalPages}
+            pageSize={pageSize}
+            onPage={setCurrentPage}
+            onPageSize={(n) => { setPageSize(n); setCurrentPage(1); }}
+            noun={viewMode === 'iptv' ? 'set-top boxes' : 'subscribers'}
+            extra={debouncedSearch ? ` matching "${debouncedSearch}"` : ''}
+          />
 
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-
-              {/* Items Per Page Selector */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={{ fontSize: 12, color: COLORS.textMuted || '#64748b' }}>Per page:</Text>
-                {[100, 250, 500, 1000].map((size) => (
-                  <TouchableOpacity
-                    key={size}
-                    style={[{ paddingHorizontal: 8, paddingVertical: 4, borderRadius: 4, borderWidth: 1, borderColor: COLORS.borderLight || '#e2e8f0' }, pageSize === size && { backgroundColor: COLORS.primary || '#3b82f6', borderColor: COLORS.primary || '#3b82f6' }]}
-                    onPress={() => { setPageSize(size); setCurrentPage(1); }}
-                  >
-                    <Text style={[{ fontSize: 11, fontWeight: '600', color: COLORS.textMuted || '#64748b' }, pageSize === size && { color: '#ffffff' }]}>{size}</Text>
-                  </TouchableOpacity>
-                ))}
-              </View>
-
-              {/* Previous & Next Buttons */}
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <TouchableOpacity
-                  style={[{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: COLORS.borderLight || '#e2e8f0', backgroundColor: COLORS.bgSecondary || '#f8fafc' }, currentPage === 1 && { opacity: 0.4 }]}
-                  onPress={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  disabled={currentPage === 1}
-                >
-                  <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMain || '#000000' }}>Previous</Text>
-                </TouchableOpacity>
-
-                <Text style={{ fontSize: 12, fontWeight: '700', color: COLORS.textMain || '#000000', paddingHorizontal: 4 }}>
-                  Page {currentPage} of {totalPages}
-                </Text>
-
-                <TouchableOpacity
-                  style={[{ paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: COLORS.borderLight || '#e2e8f0', backgroundColor: COLORS.bgSecondary || '#f8fafc' }, currentPage >= totalPages && { opacity: 0.4 }]}
-                  onPress={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                  disabled={currentPage >= totalPages}
-                >
-                  <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.textMain || '#000000' }}>Next</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: viewMode === 'iptv' ? 1040 : 1280, width: '100%' }}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: tableMinWidth(viewMode === 'iptv' ? IPTV_COLS : INT_COLS, [...(isOperatorRole ? ['operator', 'partner'] : []), ...(showRegisteredCol ? [] : ['registered'])]), width: '100%' }}>
           <View style={{ width: '100%' }}>
             {/* Table Header (on phones the table scrolls sideways) */}
             <View style={styles.tableHeader} dataSet={TABLE_GUTTER}>
               {viewMode === 'iptv' ? (
                 <>
-                  <Text style={[styles.th, { flex: 1.7, minWidth: 140 }]}>STB / Box No.</Text>
-                  <Text style={[styles.th, { flex: 1.1, minWidth: 115 }]}>Status</Text>
-                  <Text style={[styles.th, { flex: 1.7, minWidth: 130 }]}>Full Name</Text>
-                  <Text style={[styles.th, { flex: 1.4, minWidth: 120 }]}>Mobile</Text>
-                  {!isOperatorRole ? <Text style={[styles.th, { flex: 1.7, minWidth: 130 }]}>Operator / Branch</Text> : null}
-                  <Text style={[styles.th, { flex: 1.8, minWidth: 140 }]}>Package</Text>
+                  <View style={IPTV_COLS.stb}><Text style={styles.th} numberOfLines={1}>STB / Box No.</Text></View>
+                  <View style={IPTV_COLS.status}><Text style={styles.th} numberOfLines={1}>Status</Text></View>
+                  <View style={IPTV_COLS.name}><Text style={styles.th} numberOfLines={1}>Full Name</Text></View>
+                  <View style={IPTV_COLS.mobile}><Text style={styles.th} numberOfLines={1}>Mobile</Text></View>
+                  {!isOperatorRole ? <View style={IPTV_COLS.operator}><Text style={styles.th} numberOfLines={1}>Operator</Text></View> : null}
+                  {!isOperatorRole ? <View style={IPTV_COLS.partner}><Text style={styles.th} numberOfLines={1}>Partner</Text></View> : null}
+                  <View style={IPTV_COLS.branch}><Text style={styles.th} numberOfLines={1}>Branch</Text></View>
+                  <View style={IPTV_COLS.plan}><Text style={styles.th} numberOfLines={1}>Package</Text></View>
                 </>
               ) : (
                 <>
                   <TouchableOpacity
-                    style={{ width: 34, alignItems: 'center', justifyContent: 'center' }}
+                    style={INT_COLS.check}
                     title="Tick all on this page"
                     disabled={limitedStaff}
                     onPress={() => {
@@ -3162,17 +3180,19 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       return <Feather name={n && n === pageRows.length ? 'check-square' : n ? 'minus-square' : 'square'} size={16} color="#1d4ed8" />;
                     })()}
                   </TouchableOpacity>
-                  <Text style={[styles.th, { flex: 1.5, minWidth: 120 }]}>Username</Text>
-                  <Text style={[styles.th, { flex: 1.1, minWidth: 115 }]}>Connectivity</Text>
-                  <Text style={[styles.th, { flex: 1.8, minWidth: 140 }]}>Full Name</Text>
-                  <Text style={[styles.th, { flex: 1.4, minWidth: 120 }]}>Mobile</Text>
-                  <Text style={[styles.th, { flex: 1.3, minWidth: 120 }]}>Aadhaar</Text>
-                  {!isOperatorRole ? <Text style={[styles.th, { flex: 1.5, minWidth: 120 }]}>Operator</Text> : null}
-                  <Text style={[styles.th, { flex: 1.8, minWidth: 140 }]}>Plan</Text>
+                  <View style={INT_COLS.username}><Text style={styles.th} numberOfLines={1}>Username</Text></View>
+                  <View style={INT_COLS.conn}><Text style={styles.th} numberOfLines={1}>Connectivity</Text></View>
+                  <View style={INT_COLS.name}><Text style={styles.th} numberOfLines={1}>Full Name</Text></View>
+                  <View style={INT_COLS.mobile}><Text style={styles.th} numberOfLines={1}>Mobile</Text></View>
+                  <View style={INT_COLS.aadhaar}><Text style={styles.th} numberOfLines={1}>Aadhaar</Text></View>
+                  {!isOperatorRole ? <View style={INT_COLS.operator}><Text style={styles.th} numberOfLines={1}>Operator</Text></View> : null}
+                  {!isOperatorRole ? <View style={INT_COLS.partner}><Text style={styles.th} numberOfLines={1}>Partner</Text></View> : null}
+                  <View style={INT_COLS.branch}><Text style={styles.th} numberOfLines={1}>Branch</Text></View>
+                  <View style={INT_COLS.plan}><Text style={styles.th} numberOfLines={1}>Plan</Text></View>
                 </>
               )}
               <TouchableOpacity
-                style={[{ flex: viewMode === 'iptv' ? 2 : 2.2, minWidth: 140, flexDirection: 'row', alignItems: 'center', gap: 4 }, styles.th]}
+                style={[(viewMode === 'iptv' ? IPTV_COLS : INT_COLS).expiry, { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 4 }]}
                 onPress={() => {
                   if (sortField === 'expiration') {
                     setSortDirection((prev) => (prev === 'asc' ? 'desc' : 'asc'));
@@ -3189,20 +3209,18 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   color={sortField === 'expiration' ? COLORS.primary : COLORS.textMuted}
                 />
               </TouchableOpacity>
-              {showRegisteredCol ? <Text style={[styles.th, { flex: 1.3, minWidth: 110 }]}>Registered On</Text> : null}
-              <Text style={[styles.th, { flex: viewMode === 'iptv' ? 0.8 : 1.6, minWidth: viewMode === 'iptv' ? 80 : 150, textAlign: 'left' }]}>
-                Actions
-              </Text>
+              {showRegisteredCol ? <View style={(viewMode === 'iptv' ? IPTV_COLS : INT_COLS).registered}><Text style={styles.th} numberOfLines={1}>Registered On</Text></View> : null}
+              <View style={(viewMode === 'iptv' ? IPTV_COLS : INT_COLS).actions}><Text style={styles.th}>Actions</Text></View>
             </View>
 
             {/* Filter row: one control per column, filters the whole list on the server */}
             <View style={[styles.excelFilterRow, searchOnly && { display: 'none' }]} dataSet={TABLE_GUTTER}>
               {viewMode === 'iptv' ? (
                 <>
-                  <FilterCell flex={1.7} minWidth={140}>
+                  <FilterCell style={IPTV_COLS.stb}>
                     <ColSearch value={colFilters.stb} onChange={(v) => setColFilter('stb', v)} placeholder="STB / Box" />
                   </FilterCell>
-                  <FilterCell flex={1.1} minWidth={115}>
+                  <FilterCell style={IPTV_COLS.status}>
                     <ColSelect
                       value={activeFilter === 'all' ? '' : activeFilter}
                       options={IPTV_STATUS_OPTIONS}
@@ -3210,25 +3228,33 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       placeholder="Status"
                     />
                   </FilterCell>
-                  <FilterCell flex={1.7} minWidth={130}>
+                  <FilterCell style={IPTV_COLS.name}>
                     <ColSearch value={colFilters.name} onChange={(v) => setColFilter('name', v)} placeholder="Name" />
                   </FilterCell>
-                  <FilterCell flex={1.4} minWidth={120}>
+                  <FilterCell style={IPTV_COLS.mobile}>
                     <ColSearch value={colFilters.mobile} onChange={(v) => setColFilter('mobile', v.replace(/[^\d]/g, ''))} placeholder="Mobile" />
                   </FilterCell>
                   {!isOperatorRole ? (
-                    <FilterCell flex={1.7} minWidth={130}>
+                    <FilterCell style={IPTV_COLS.operator}>
                       <ColSelect value={selectedOperatorId} options={operatorFilterOptions} onChange={(v) => setSelectedOperatorId(v ? String(v) : '')} placeholder="Operator" allLabel="All operators" />
                     </FilterCell>
                   ) : null}
-                  <FilterCell flex={1.8} minWidth={140}>
+                  {!isOperatorRole ? (
+                    <FilterCell style={IPTV_COLS.partner}>
+                      <ColSelect value={colFilters.partner} options={listFacets.partners} onChange={(v) => setColFilter('partner', v ? String(v) : '')} placeholder="Partner" allLabel="All partners" searchable />
+                    </FilterCell>
+                  ) : null}
+                  <FilterCell style={IPTV_COLS.branch}>
+                    <ColSelect value={colFilters.branch} options={listFacets.branches} onChange={(v) => setColFilter('branch', v)} placeholder="Branch" allLabel="All branches" />
+                  </FilterCell>
+                  <FilterCell style={IPTV_COLS.plan}>
                     <ColSelect value={colFilters.plan} options={listFacets.plans} onChange={(v) => setColFilter('plan', v)} placeholder="Package" allLabel="All packages" />
                   </FilterCell>
-                  <FilterCell flex={2} minWidth={140}>
+                  <FilterCell style={IPTV_COLS.expiry}>
                     <ColDateRange value={colFilters.expiry} onChange={(v) => setColFilter('expiry', v)} placeholder="Expiry date" />
                   </FilterCell>
-                  {showRegisteredCol ? <View style={{ flex: 1.3, minWidth: 110 }} /> : null}
-                  <View style={{ flex: 0.8, minWidth: 80, justifyContent: 'center' }}>
+                  {showRegisteredCol ? <View style={IPTV_COLS.registered} /> : null}
+                  <View style={[IPTV_COLS.actions, { overflow: 'visible' }]}>
                     {hasActiveColSearch ? (
                       <TouchableOpacity style={styles.excelBtnReset} onPress={resetColSearch} title="Clear column filters">
                         <Feather name="x" size={11} color="#dc2626" style={{ marginRight: 3 }} />
@@ -3239,35 +3265,43 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 </>
               ) : (
                 <>
-                  <View style={{ width: 34 }} />
-                  <FilterCell flex={1.5} minWidth={120}>
+                  <View style={INT_COLS.check} />
+                  <FilterCell style={INT_COLS.username}>
                     <ColSearch value={colFilters.username} onChange={(v) => setColFilter('username', v)} placeholder="Username" />
                   </FilterCell>
-                  <FilterCell flex={1.1} minWidth={115}>
+                  <FilterCell style={INT_COLS.conn}>
                     <ColSelect value={colFilters.conn} options={CONN_OPTIONS} onChange={(v) => setColFilter('conn', v)} placeholder="All" />
                   </FilterCell>
-                  <FilterCell flex={1.8} minWidth={140}>
+                  <FilterCell style={INT_COLS.name}>
                     <ColSearch value={colFilters.name} onChange={(v) => setColFilter('name', v)} placeholder="Full name" />
                   </FilterCell>
-                  <FilterCell flex={1.4} minWidth={120}>
+                  <FilterCell style={INT_COLS.mobile}>
                     <ColSearch value={colFilters.mobile} onChange={(v) => setColFilter('mobile', v.replace(/[^\d]/g, ''))} placeholder="Mobile" />
                   </FilterCell>
-                  <FilterCell flex={1.3} minWidth={120}>
+                  <FilterCell style={INT_COLS.aadhaar}>
                     <ColSelect value={colFilters.aadhaar} options={AADHAAR_OPTIONS} onChange={(v) => setColFilter('aadhaar', v)} placeholder="All" />
                   </FilterCell>
                   {!isOperatorRole ? (
-                    <FilterCell flex={1.5} minWidth={120}>
+                    <FilterCell style={INT_COLS.operator}>
                       <ColSelect value={selectedOperatorId} options={operatorFilterOptions} onChange={(v) => setSelectedOperatorId(v ? String(v) : '')} placeholder="Operator" allLabel="All operators" />
                     </FilterCell>
                   ) : null}
-                  <FilterCell flex={1.8} minWidth={140}>
+                  {!isOperatorRole ? (
+                    <FilterCell style={INT_COLS.partner}>
+                      <ColSelect value={colFilters.partner} options={listFacets.partners} onChange={(v) => setColFilter('partner', v ? String(v) : '')} placeholder="Partner" allLabel="All partners" searchable />
+                    </FilterCell>
+                  ) : null}
+                  <FilterCell style={INT_COLS.branch}>
+                    <ColSelect value={colFilters.branch} options={listFacets.branches} onChange={(v) => setColFilter('branch', v)} placeholder="Branch" allLabel="All branches" />
+                  </FilterCell>
+                  <FilterCell style={INT_COLS.plan}>
                     <ColSelect value={colFilters.plan} options={listFacets.plans} onChange={(v) => setColFilter('plan', v)} placeholder="Plan" allLabel="All plans" />
                   </FilterCell>
-                  <FilterCell flex={2.2} minWidth={140}>
+                  <FilterCell style={INT_COLS.expiry}>
                     <ColDateRange value={colFilters.expiry} onChange={(v) => setColFilter('expiry', v)} placeholder="Expiry date" />
                   </FilterCell>
-                  {showRegisteredCol ? <View style={{ flex: 1.3, minWidth: 110 }} /> : null}
-                  <View style={{ flex: 1.6, minWidth: 150, justifyContent: 'center' }}>
+                  {showRegisteredCol ? <View style={INT_COLS.registered} /> : null}
+                  <View style={[INT_COLS.actions, { overflow: 'visible' }]}>
                     {hasActiveColSearch ? (
                       <TouchableOpacity style={styles.excelBtnReset} onPress={resetColSearch} title="Clear column filters">
                         <Feather name="x" size={11} color="#dc2626" style={{ marginRight: 3 }} />
@@ -3314,8 +3348,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   </View>
                 );
 
-                const mobileCell = (flex, minWidth = 120) => (
-                  <View style={{ flex, minWidth, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                const mobileCell = (colStyle) => (
+                  <View style={[colStyle, { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 6 }]}>
                     <TouchableOpacity
                       style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}
                       onPress={() => {
@@ -3348,8 +3382,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 );
 
                 const isAadhaarDone = checkIsAadhaarVerified(cust);
-                const aadhaarCell = (flex = 1.3, minWidth = 120) => (
-                  <View style={{ flex, minWidth }}>
+                const aadhaarCell = (colStyle) => (
+                  <View style={colStyle}>
                     {isAadhaarDone ? (
                       <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.3)', paddingHorizontal: 7, paddingVertical: 3, borderRadius: 6, alignSelf: 'flex-start', flexDirection: 'row', alignItems: 'center', gap: 4 }}>
                         <Feather name="check-circle" size={11} color="#10b981" />
@@ -3367,8 +3401,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   </View>
                 );
 
-                const expiryCell = (flex, minWidth = 140) => (
-                  <View style={{ flex, minWidth }}>
+                const expiryCell = (colStyle) => (
+                  <View style={colStyle}>
                     <Text style={styles.tdText}>{cust.expiration ? formatApiDate(cust.expiration) : '—'}</Text>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
                       {balInfo.status !== 'unknown' ? (
@@ -3397,7 +3431,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 );
 
                 const registeredCell = showRegisteredCol ? (
-                  <View style={{ flex: 1.3, minWidth: 110 }}>
+                  <View style={(viewMode === 'iptv' ? IPTV_COLS : INT_COLS).registered}>
                     <Text style={[styles.tdText, { color: '#0369a1', fontWeight: '600' }]}>
                       {cust.registered_on ? formatApiDate(cust.registered_on, false) : '—'}
                     </Text>
@@ -3410,9 +3444,9 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                   return (
                     <View key={rowKey} style={styles.tr}>
                       {/* STB / Box */}
-                      <View style={{ flex: 1.7, minWidth: 140 }}>
-                        <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
-                          <Text style={[styles.tdClickableUsername, { color: '#7c3aed', fontFamily: 'monospace' }]}>{stb}</Text>
+                      <View style={IPTV_COLS.stb}>
+                        <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)} style={{ alignSelf: 'flex-start', maxWidth: '100%' }}>
+                          <Text style={[styles.tdClickableUsername, { color: '#7c3aed', fontFamily: 'monospace' }]} numberOfLines={1}>{stb}</Text>
                         </TouchableOpacity>
                         {cust.pioneer_stb_id && cust.pioneer_stb_id !== stb ? (
                           <Text style={styles.tdSub}>Pioneer ID: {cust.pioneer_stb_id}</Text>
@@ -3420,36 +3454,46 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       </View>
 
                       {/* Status */}
-                      <View style={{ flex: 1.1, minWidth: 95 }}>{statusPill}</View>
+                      <View style={IPTV_COLS.status}>{statusPill}</View>
 
                       {/* Full Name */}
-                      <View style={{ flex: 1.7, minWidth: 130 }}>
-                        <Text style={styles.tdText}>{cust.full_name || '—'}</Text>
+                      <View style={IPTV_COLS.name}>
+                        <Text style={styles.tdText} numberOfLines={2}>{cust.full_name || '—'}</Text>
                       </View>
 
-                      {mobileCell(1.4, 120)}
+                      {mobileCell(IPTV_COLS.mobile)}
 
                       {/* Operator / Branch (not shown to operators — it is always them) */}
                       {!isOperatorRole ? (
-                        <View style={{ flex: 1.7, minWidth: 130 }}>
-                          <Text style={styles.tdText}>{cust.partner_name || '—'}</Text>
-                          {cust.branch_name ? <Text style={styles.tdSub}>{cust.branch_name}</Text> : null}
+                        <View style={IPTV_COLS.operator}>
+                          <Text style={styles.tdText} numberOfLines={2}>{cust.company_name || cust.partner_name || '—'}</Text>
+                        </View>
+                      ) : null}
+                      {/* Partner: the operator's login username */}
+                      {!isOperatorRole ? (
+                        <View style={IPTV_COLS.partner}>
+                          <Text style={[styles.tdText, { color: '#475569' }]} numberOfLines={1}>{cust.partner_username || '—'}</Text>
                         </View>
                       ) : null}
 
+                      {/* Branch (Pioneer) */}
+                      <View style={IPTV_COLS.branch}>
+                        <Text style={styles.tdText} numberOfLines={2}>{cust.branch_name || '—'}</Text>
+                      </View>
+
                       {/* Package + validity */}
-                      <View style={{ flex: 1.8, minWidth: 140 }}>
-                        <Text style={[styles.tdBold, { color: '#7c3aed' }]}>{cust.package_name || '—'}</Text>
+                      <View style={IPTV_COLS.plan}>
+                        <Text style={[styles.tdBold, { color: '#7c3aed' }]} numberOfLines={2}>{cust.package_name || '—'}</Text>
                         <Text style={styles.tdSub}>
                           {[cust.subplan_name, cust.auto_renew ? 'Auto-renew' : null].filter(Boolean).join(' · ') || ' '}
                         </Text>
                       </View>
 
-                      {expiryCell(2.0, 140)}
+                      {expiryCell(IPTV_COLS.expiry)}
                       {registeredCell}
 
                       {/* Actions: Map (STBs have no ONU, so no Devices button) */}
-                      <View style={{ flex: 0.8, minWidth: 80, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <View style={[IPTV_COLS.actions, { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 6 }]}>
                         <TouchableOpacity onPress={() => setSelectedLocationCustomer(cust)} style={styles.rowActionBtn} title="View & pin location">
                           <Feather name="map-pin" size={13} color="#2563eb" />
                           <Text style={styles.rowActionText}>Map</Text>
@@ -3470,13 +3514,14 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
                 return (
                   <View key={intRowKey} style={[styles.tr, bulkSel[cust.internet_id] && { backgroundColor: '#eff6ff' }]}>
-                    <TouchableOpacity style={{ width: 34, alignItems: 'center', justifyContent: 'center' }} disabled={limitedStaff} onPress={() => bulkPick(cust)}>
+                    <TouchableOpacity style={INT_COLS.check} disabled={limitedStaff} onPress={() => bulkPick(cust)}>
                       {limitedStaff ? null : <Feather name={bulkSel[cust.internet_id] ? 'check-square' : 'square'} size={16} color={bulkSel[cust.internet_id] ? '#1d4ed8' : '#94a3b8'} />}
                     </TouchableOpacity>
                     {/* Username */}
-                    <View style={{ flex: 1.5, minWidth: 120, gap: 3 }}>
-                      <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)}>
+                    <View style={INT_COLS.username}>
+                      <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)} style={{ alignSelf: 'flex-start', maxWidth: '100%' }}>
                         <Text
+                          numberOfLines={1}
                           style={[
                             styles.tdClickableUsername,
                             { color: usernameColor },
@@ -3489,7 +3534,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                     </View>
 
                     {/* Connectivity */}
-                    <View style={{ flex: 1.1, minWidth: 95 }}>
+                    <View style={INT_COLS.conn}>
                       <View style={[styles.connPill, { backgroundColor: cust.isOnline ? '#dcfce7' : '#f1f5f9' }]}>
                         <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: cust.isOnline ? '#16a34a' : '#94a3b8' }} />
                         <Text style={{ fontSize: 10, fontWeight: '700', color: cust.isOnline ? '#15803d' : '#64748b' }}>
@@ -3499,31 +3544,44 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                     </View>
 
                     {/* Full Name */}
-                    <View style={{ flex: 1.8, minWidth: 140 }}>
-                      <Text style={styles.tdText}>{cust.full_name || cust.name || '—'}</Text>
+                    <View style={INT_COLS.name}>
+                      <Text style={styles.tdText} numberOfLines={2}>{cust.full_name || cust.name || '—'}</Text>
                     </View>
 
-                    {mobileCell(1.4, 120)}
-                    {aadhaarCell(1.3, 120)}
+                    {mobileCell(INT_COLS.mobile)}
+                    {aadhaarCell(INT_COLS.aadhaar)}
 
                     {/* Operator (not shown to operators — it is always them) */}
                     {!isOperatorRole ? (
-                      <View style={{ flex: 1.5, minWidth: 120 }}>
-                        <Text style={styles.tdText}>{cust.partner_name || '—'}</Text>
+                      <View style={INT_COLS.operator}>
+                        {/* the operator's company name */}
+                        <Text style={styles.tdText} numberOfLines={2}>{cust.company_name || cust.partner_name || '—'}</Text>
                       </View>
                     ) : null}
 
-                    {/* Plan: package + sub plan */}
-                    <View style={{ flex: 1.8, minWidth: 140 }}>
-                      <Text style={styles.tdBold}>{cust.package_name || '—'}</Text>
-                      {cust.subplan_name ? <Text style={styles.tdSub}>{cust.subplan_name}</Text> : null}
+                    {/* Partner: the operator's login username */}
+                    {!isOperatorRole ? (
+                      <View style={INT_COLS.partner}>
+                        <Text style={[styles.tdText, { color: '#475569' }]} numberOfLines={1}>{cust.partner_username || '—'}</Text>
+                      </View>
+                    ) : null}
+
+                    {/* Branch (RADIUS) */}
+                    <View style={INT_COLS.branch}>
+                      <Text style={styles.tdText} numberOfLines={2}>{cust.branch_name || (cust.branch_id ? `Branch #${cust.branch_id}` : '—')}</Text>
                     </View>
 
-                    {expiryCell(2.2, 140)}
+                    {/* Plan: package + sub plan */}
+                    <View style={INT_COLS.plan}>
+                      <Text style={styles.tdBold} numberOfLines={2}>{cust.package_name || '—'}</Text>
+                      {cust.subplan_name ? <Text style={styles.tdSub} numberOfLines={1}>{cust.subplan_name}</Text> : null}
+                    </View>
+
+                    {expiryCell(INT_COLS.expiry)}
                     {registeredCell}
 
                     {/* Actions: Map & ONU device */}
-                    <View style={{ flex: 1.6, minWidth: 150, flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <View style={[INT_COLS.actions, { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-start', gap: 6 }]}>
                       <TouchableOpacity style={styles.rowActionBtn} onPress={() => setSelectedLocationCustomer(cust)} title="View & pin location">
                         <Feather name="map-pin" size={13} color="#2563eb" />
                         <Text style={styles.rowActionText}>Map</Text>
