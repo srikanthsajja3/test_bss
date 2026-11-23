@@ -37,6 +37,10 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0, initialRange = '
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
   const isOperator = String(user?.role || user?.account_role || '').toLowerCase() === 'operator';
+  const [layoutMode, setLayoutMode] = useState(isMobile ? 'cards' : 'table');
+  useEffect(() => {
+    if (isMobile) setLayoutMode('cards');
+  }, [isMobile]);
   const [range, setRange] = useState(RANGE_LABEL[initialRange] ? initialRange : '');
   useEffect(() => { setRange(RANGE_LABEL[initialRange] ? initialRange : ''); }, [initialRange]);
   const [search, setSearch] = useState('');
@@ -233,33 +237,151 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0, initialRange = '
             <TouchableOpacity onPress={() => setRange('')} accessibilityLabel="Show all OTT subscribers"><Feather name="x" size={14} color="#64748b" /></TouchableOpacity>
           </View>
         ) : null}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }}>
-          {CHIPS.map((c) => (
-            <TouchableOpacity key={c.id} style={[styles.chip, status === c.id && styles.chipOn]} onPress={() => setStatus(c.id)}>
-              <Text style={[styles.chipText, status === c.id && { color: '#ffffff' }]}>
-                {c.label} ({c.id === 'all' ? counts.total ?? 0 : counts[c.id] ?? 0})
-              </Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginTop: 10 }}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }}>
+            {CHIPS.map((c) => (
+              <TouchableOpacity key={c.id} style={[styles.chip, status === c.id && styles.chipOn]} onPress={() => setStatus(c.id)}>
+                <Text style={[styles.chipText, status === c.id && { color: '#ffffff' }]}>
+                  {c.label} ({c.id === 'all' ? counts.total ?? 0 : counts[c.id] ?? 0})
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          {/* Table / Cards View Mode Toggle */}
+          <View style={styles.viewModeToggleRow}>
+            <TouchableOpacity
+              style={[styles.viewModeBtn, layoutMode === 'table' && styles.viewModeBtnActive]}
+              onPress={() => setLayoutMode('table')}
+              title="Table view"
+            >
+              <Feather name="list" size={13} color={layoutMode === 'table' ? '#0f172a' : '#64748b'} />
+              {!isMobile && (
+                <Text style={[styles.viewModeBtnText, layoutMode === 'table' && styles.viewModeBtnTextActive]}>Table</Text>
+              )}
             </TouchableOpacity>
-          ))}
-        </ScrollView>
+            <TouchableOpacity
+              style={[styles.viewModeBtn, layoutMode === 'cards' && styles.viewModeBtnActive]}
+              onPress={() => setLayoutMode('cards')}
+              title="Cards view"
+            >
+              <Feather name="grid" size={13} color={layoutMode === 'cards' ? '#0f172a' : '#64748b'} />
+              {!isMobile && (
+                <Text style={[styles.viewModeBtnText, layoutMode === 'cards' && styles.viewModeBtnTextActive]}>Cards</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
       </View>
 
-      <View style={[styles.card, { padding: 0, marginTop: 14 }]}>
-        <ListPager
-          isMobile={isMobile}
-          loading={loading}
-          total={total}
-          shown={rows.length}
-          page={page}
-          pages={pages}
-          pageSize={pageSize}
-          onPage={setPage}
-          onPageSize={setPageSize}
-          noun={total === 1 ? 'OTT subscriber' : 'OTT subscribers'}
-        />
-        <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: isMobile ? (isOperator ? 880 : 1000) : '100%', flexGrow: 1 }}>
-          {table}
-        </ScrollView>
+      <View style={[
+        styles.card,
+        layoutMode === 'cards' ? { padding: 0, backgroundColor: 'transparent', borderWidth: 0, marginTop: 14 } : { padding: 0, marginTop: 14 }
+      ]}>
+        <View style={[layoutMode === 'cards' && { borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0', overflow: 'hidden', marginBottom: 12, backgroundColor: '#ffffff' }]}>
+          <ListPager
+            isMobile={isMobile}
+            loading={loading}
+            total={total}
+            shown={rows.length}
+            page={page}
+            pages={pages}
+            pageSize={pageSize}
+            onPage={setPage}
+            onPageSize={setPageSize}
+            noun={total === 1 ? 'OTT subscriber' : 'OTT subscribers'}
+          />
+        </View>
+
+        {layoutMode === 'cards' ? (
+          <View style={{ width: '100%', gap: 12 }}>
+            {error ? (
+              <View style={{ padding: 30, alignItems: 'center' }}>
+                <Text style={[styles.empty, { color: '#b91c1c' }]}>{error}</Text>
+              </View>
+            ) : filteredRows.length === 0 ? (
+              <View style={{ padding: 30, alignItems: 'center' }}>
+                {loading ? <ActivityIndicator size="small" color={OTT} /> : <Text style={styles.empty}>No OTT subscribers match.</Text>}
+              </View>
+            ) : (
+              filteredRows.map((r) => {
+                const b = BADGE[r.status_key] || BADGE.disabled;
+                return (
+                  <View key={r.ott_id} style={styles.ottCard}>
+                    {/* Header: ID + Full Name + Status Pill */}
+                    <View style={styles.ottCardHead}>
+                      <TouchableOpacity onPress={() => open(r)} disabled={!r.cust_id} style={{ flex: 1, minWidth: 0 }}>
+                        <Text style={styles.ottCardId} numberOfLines={1}>{r.subscriber_id}</Text>
+                        <Text style={styles.ottCardName} numberOfLines={1}>{r.full_name || '—'}</Text>
+                      </TouchableOpacity>
+                      <View style={[styles.pill, { backgroundColor: b.bg }]}>
+                        <Text style={[styles.pillText, { color: b.fg }]}>
+                          {r.status_key === 'disabled' ? 'DEACTIVATED' : r.status_key === 'new' ? 'NEW' : String(r.status || '').toUpperCase()}
+                        </Text>
+                      </View>
+                    </View>
+
+                    {/* Details: Plan, Expiry, Mobile, Operator */}
+                    <View style={styles.ottCardBody}>
+                      <View style={styles.ottCardRow}>
+                        <View style={styles.ottCardIconLbl}>
+                          <Feather name="package" size={13} color="#64748b" />
+                          <Text style={styles.ottCardLbl}>Package / Plan:</Text>
+                        </View>
+                        <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap' }}>
+                          <Text style={[styles.ottCardVal, { color: OTT }]} numberOfLines={1}>{r.package_name || '—'}</Text>
+                          {r.subplan_name ? <Text style={{ fontSize: 11.5, color: '#64748b' }}>({r.subplan_name})</Text> : null}
+                        </View>
+                      </View>
+
+                      <View style={styles.ottCardRow}>
+                        <View style={styles.ottCardIconLbl}>
+                          <Feather name="calendar" size={13} color="#64748b" />
+                          <Text style={styles.ottCardLbl}>Expires:</Text>
+                        </View>
+                        <Text style={styles.ottCardVal}>{r.expiration ? formatApiDate(r.expiration) : '—'}</Text>
+                      </View>
+
+                      <View style={styles.ottCardRow}>
+                        <View style={styles.ottCardIconLbl}>
+                          <Feather name="phone" size={13} color="#64748b" />
+                          <Text style={styles.ottCardLbl}>Mobile:</Text>
+                        </View>
+                        <Text style={[styles.ottCardVal, { color: '#0651d4', fontWeight: '700' }]}>{r.mobile || '—'}</Text>
+                      </View>
+
+                      {!isOperator && (r.company_name || r.partner_name || r.partner_username) ? (
+                        <View style={styles.ottCardRow}>
+                          <View style={styles.ottCardIconLbl}>
+                            <Feather name="briefcase" size={13} color="#64748b" />
+                            <Text style={styles.ottCardLbl}>Operator / Partner:</Text>
+                          </View>
+                          <Text style={[styles.ottCardVal, { color: '#475569' }]} numberOfLines={1}>
+                            {[r.company_name || r.partner_name, r.partner_username].filter(Boolean).join(' · ')}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+
+                    {/* Action Button */}
+                    {r.cust_id ? (
+                      <View style={styles.ottCardActions}>
+                        <TouchableOpacity style={styles.ottCardBtn} onPress={() => open(r)}>
+                          <Feather name="eye" size={13} color="#2563eb" />
+                          <Text style={styles.ottCardBtnText}>View Customer Account</Text>
+                        </TouchableOpacity>
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })
+            )}
+          </View>
+        ) : (
+          <ScrollView horizontal showsHorizontalScrollIndicator contentContainerStyle={{ minWidth: isMobile ? (isOperator ? 880 : 1000) : '100%', flexGrow: 1 }}>
+            {table}
+          </ScrollView>
+        )}
       </View>
     </ScrollView>
   );
@@ -371,5 +493,115 @@ const styles = StyleSheet.create({
   },
   btnResetCol: {
     padding: 4,
+  },
+
+  // View Mode Toggle & OTT Card Styles
+  viewModeToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f1f5f9',
+    borderRadius: 8,
+    padding: 2,
+    gap: 2,
+  },
+  viewModeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  viewModeBtnActive: {
+    backgroundColor: '#ffffff',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+  },
+  viewModeBtnText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  viewModeBtnTextActive: {
+    color: '#0f172a',
+    fontWeight: '700',
+  },
+  ottCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    padding: 16,
+    gap: 12,
+    width: '100%',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
+  },
+  ottCardHead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+    paddingBottom: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f5f9',
+  },
+  ottCardId: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: OTT,
+    letterSpacing: 0.2,
+  },
+  ottCardName: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#334155',
+    marginTop: 2,
+  },
+  ottCardBody: {
+    gap: 9,
+  },
+  ottCardRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  ottCardIconLbl: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    flexShrink: 0,
+  },
+  ottCardLbl: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  ottCardVal: {
+    fontSize: 12.5,
+    fontWeight: '600',
+    color: '#0f172a',
+  },
+  ottCardActions: {
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+  },
+  ottCardBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(37,99,235,0.3)',
+    backgroundColor: 'rgba(37,99,235,0.06)',
+    width: '100%',
+  },
+  ottCardBtnText: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#2563eb',
   },
 });

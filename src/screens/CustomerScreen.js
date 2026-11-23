@@ -3176,22 +3176,28 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       </View>
 
       {/* SERVICE DATA DISPLAY TABLE (search-only technicians: only after a search) */}
-      <View style={[styles.card, searchOnly && !debouncedSearch && { display: 'none' }]}>
+      <View style={[
+        styles.card,
+        layoutMode === 'cards' && { backgroundColor: 'transparent', borderWidth: 0, padding: 0, boxShadow: 'none' },
+        searchOnly && !debouncedSearch && { display: 'none' }
+      ]}>
         <View style={{ width: '100%' }}>
           {/* PAGINATION BAR (TOP): phones get one line — per-page dropdown + page numbers */}
-          <ListPager
-            isMobile={isMobile}
-            loading={loadingData}
-            total={listTotal}
-            shown={paginatedCustomers.length}
-            page={currentPage}
-            pages={totalPages}
-            pageSize={pageSize}
-            onPage={setCurrentPage}
-            onPageSize={(n) => { setPageSize(n); setCurrentPage(1); }}
-            noun={viewMode === 'iptv' ? 'set-top boxes' : 'subscribers'}
-            extra={debouncedSearch ? ` matching "${debouncedSearch}"` : ''}
-          />
+          <View style={[layoutMode === 'cards' && { borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0', overflow: 'hidden', marginBottom: 12, backgroundColor: '#ffffff' }]}>
+            <ListPager
+              isMobile={isMobile}
+              loading={loadingData}
+              total={listTotal}
+              shown={paginatedCustomers.length}
+              page={currentPage}
+              pages={totalPages}
+              pageSize={pageSize}
+              onPage={setCurrentPage}
+              onPageSize={(n) => { setPageSize(n); setCurrentPage(1); }}
+              noun={viewMode === 'iptv' ? 'set-top boxes' : 'subscribers'}
+              extra={debouncedSearch ? ` matching "${debouncedSearch}"` : ''}
+            />
+          </View>
 
         {layoutMode === 'cards' ? (
           <View style={styles.subCardsContainer}>
@@ -3215,7 +3221,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                 )}
               </View>
             ) : (
-              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+              <View style={{ width: '100%', gap: 12 }}>
                 {paginatedCustomers.map((cust, idx) => {
                   const badge = STATUS_BADGE[cust.status_key] || STATUS_BADGE.other;
                   const balInfo = calculateBalanceDays(cust.expiration || cust.expiryDate);
@@ -3239,92 +3245,109 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                       key={cardKey}
                       style={[
                         styles.subCard,
-                        { flex: 1, minWidth: isMobile ? '100%' : 330, maxWidth: isMobile ? '100%' : 'calc(50% - 6px)' },
-                        isSelected && { borderColor: '#93c5fd', backgroundColor: '#f0f9ff' },
+                        isSelected && { borderColor: '#93c5fd', backgroundColor: '#f8fbff' },
                       ]}
                     >
                       {/* Top Row: Checkbox + Title / Full Name + Status Badge */}
                       <View style={styles.subCardHead}>
-                        {!isIptv && !limitedStaff && (
-                          <TouchableOpacity onPress={() => bulkPick(cust)} style={{ marginRight: 4, marginTop: 2 }}>
-                            <Feather name={isSelected ? 'check-square' : 'square'} size={18} color={isSelected ? '#1d4ed8' : '#94a3b8'} />
-                          </TouchableOpacity>
-                        )}
-                        <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)} style={{ flex: 1, minWidth: 0 }}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                            <Text
-                              numberOfLines={1}
-                              style={[
-                                styles.subCardUsername,
-                                { color: isIptv ? '#7c3aed' : usernameColor },
-                                cust.status_key === 'disabled' && { textDecorationLine: 'line-through' },
-                              ]}
-                            >
-                              {title}
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flex: 1, minWidth: 0 }}>
+                          {!isIptv && !limitedStaff && (
+                            <TouchableOpacity onPress={() => bulkPick(cust)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }} style={{ marginRight: 2 }}>
+                              <Feather name={isSelected ? 'check-square' : 'square'} size={18} color={isSelected ? '#1d4ed8' : '#94a3b8'} />
+                            </TouchableOpacity>
+                          )}
+                          <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)} style={{ flex: 1, minWidth: 0 }}>
+                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                              <Text
+                                numberOfLines={1}
+                                style={[
+                                  styles.subCardUsername,
+                                  { color: isIptv ? '#7c3aed' : usernameColor },
+                                  cust.status_key === 'disabled' && { textDecorationLine: 'line-through' },
+                                ]}
+                              >
+                                {title}
+                              </Text>
+                              {!isIptv && (
+                                <View style={[styles.connPill, { backgroundColor: cust.isOnline ? '#dcfce7' : '#f1f5f9' }]}>
+                                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: cust.isOnline ? '#16a34a' : '#94a3b8' }} />
+                                  <Text style={{ fontSize: 9.5, fontWeight: '700', color: cust.isOnline ? '#15803d' : '#64748b' }}>
+                                    {cust.isOnline ? 'ONLINE' : 'OFFLINE'}
+                                  </Text>
+                                </View>
+                              )}
+                            </View>
+                            <Text style={styles.subCardFullName} numberOfLines={1}>
+                              {cust.full_name || cust.name || '—'}
                             </Text>
-                            {!isIptv && (
-                              <View style={[styles.connPill, { backgroundColor: cust.isOnline ? '#dcfce7' : '#f1f5f9' }]}>
-                                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: cust.isOnline ? '#16a34a' : '#94a3b8' }} />
-                                <Text style={{ fontSize: 9.5, fontWeight: '700', color: cust.isOnline ? '#15803d' : '#64748b' }}>
-                                  {cust.isOnline ? 'ONLINE' : 'OFFLINE'}
-                                </Text>
-                              </View>
-                            )}
-                          </View>
-                          <Text style={styles.subCardFullName} numberOfLines={1}>
-                            {cust.full_name || cust.name || '—'}
-                          </Text>
-                        </TouchableOpacity>
+                          </TouchableOpacity>
+                        </View>
 
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: badge.bg }}>
+                        <View style={[styles.statusTag, { backgroundColor: badge.bg }]}>
                           <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: badge.dot }} />
-                          <Text style={{ fontSize: 10, fontWeight: '700', color: badge.fg }}>
+                          <Text style={[styles.statusTagText, { color: badge.fg }]}>
                             {(badge.label === '—' ? (cust.status_text || '—') : badge.label).toUpperCase()}
                           </Text>
                         </View>
                       </View>
 
-                      {/* Stats Grid: Plan & Expiry */}
-                      <View style={styles.subCardStatsRow}>
-                        <View style={styles.subCardStatBox}>
-                          <Text style={styles.subCardStatLbl}>PLAN / PACKAGE</Text>
-                          <Text style={[styles.subCardStatVal, isIptv && { color: '#7c3aed' }]} numberOfLines={1}>
-                            {cust.package_name || '—'}
-                          </Text>
-                          <Text style={styles.subCardStatSub} numberOfLines={1}>
-                            {[cust.subplan_name, cust.auto_renew ? 'Auto-renew' : null].filter(Boolean).join(' · ') || '—'}
-                          </Text>
+                      {/* Content Rows: Clean & Spacious */}
+                      <View style={styles.subCardBody}>
+                        {/* Plan Row */}
+                        <View style={styles.subCardRow}>
+                          <View style={styles.subCardIconLabel}>
+                            <Feather name="package" size={13} color="#64748b" />
+                            <Text style={styles.subCardLabel}>Package / Plan:</Text>
+                          </View>
+                          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 6 }}>
+                            <Text style={[styles.subCardValBold, isIptv && { color: '#7c3aed' }]} numberOfLines={1}>
+                              {cust.package_name || '—'}
+                            </Text>
+                            {cust.subplan_name ? (
+                              <Text style={styles.subCardSubText}>({cust.subplan_name})</Text>
+                            ) : null}
+                            {cust.auto_renew ? (
+                              <View style={styles.autoRenewBadge}>
+                                <Text style={styles.autoRenewBadgeText}>Auto-renew</Text>
+                              </View>
+                            ) : null}
+                          </View>
                         </View>
 
-                        <View style={styles.subCardStatBox}>
-                          <Text style={styles.subCardStatLbl}>EXPIRY</Text>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
-                            <Text style={styles.subCardStatVal} numberOfLines={1}>
+                        {/* Expiry Row: Never truncated! */}
+                        <View style={styles.subCardRow}>
+                          <View style={styles.subCardIconLabel}>
+                            <Feather name="calendar" size={13} color="#64748b" />
+                            <Text style={styles.subCardLabel}>Expires:</Text>
+                          </View>
+                          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 6 }}>
+                            <Text style={styles.subCardValText}>
                               {cust.expiration ? formatApiDate(cust.expiration) : '—'}
                             </Text>
+                            {balInfo.status !== 'unknown' ? (
+                              <View style={[styles.balTag, { backgroundColor: balInfo.status === 'active' ? '#dcfce7' : (balInfo.status === 'warning' ? '#fef3c7' : '#ffe4e6') }]}>
+                                <Text style={[styles.balTagText, { color: balInfo.status === 'active' ? '#15803d' : (balInfo.status === 'warning' ? '#b45309' : '#be123c') }]}>
+                                  {balInfo.text}
+                                </Text>
+                              </View>
+                            ) : null}
                             <TouchableOpacity
                               onPress={() => openWhatsApp(cust)}
-                              style={{ padding: 2 }}
+                              style={styles.waBtn}
                               title="Send WhatsApp Reminder"
                             >
                               <FontAwesome name="whatsapp" size={13} color="#25D366" />
                             </TouchableOpacity>
                           </View>
-                          {balInfo.status !== 'unknown' ? (
-                            <Text style={[styles.subCardStatSub, { fontWeight: '700', color: balInfo.status === 'active' ? '#15803d' : (balInfo.status === 'warning' ? '#b45309' : '#be123c') }]} numberOfLines={1}>
-                              {balInfo.text}
-                            </Text>
-                          ) : (
-                            <Text style={styles.subCardStatSub}>—</Text>
-                          )}
                         </View>
-                      </View>
 
-                      {/* Meta Details: Mobile, Aadhaar, Operator, Branch */}
-                      <View style={styles.subCardMeta}>
-                        <View style={styles.subCardMetaRow}>
-                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
-                            <Feather name="phone" size={12} color="#64748b" />
+                        {/* Mobile & Aadhaar Row */}
+                        <View style={styles.subCardRow}>
+                          <View style={styles.subCardIconLabel}>
+                            <Feather name="phone" size={13} color="#64748b" />
+                            <Text style={styles.subCardLabel}>Mobile:</Text>
+                          </View>
+                          <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', gap: 8 }}>
                             <TouchableOpacity
                               onPress={() => {
                                 if (cust.mobile) {
@@ -3334,7 +3357,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                                 }
                               }}
                             >
-                              <Text style={{ fontSize: 12, color: '#0651d4', fontWeight: '600' }}>{cust.mobile || '—'}</Text>
+                              <Text style={styles.mobileLinkText}>{cust.mobile || '—'}</Text>
                             </TouchableOpacity>
                             {cust.mobile ? (
                               <TouchableOpacity
@@ -3346,54 +3369,54 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                                   }
                                 }}
                                 style={{ padding: 2 }}
-                                title="Copy Mobile Number"
+                                title="Copy Mobile"
                               >
-                                <Feather name="copy" size={11} color={COLORS.primary || '#3b82f6'} />
+                                <Feather name="copy" size={11} color="#3b82f6" />
                               </TouchableOpacity>
                             ) : null}
+                            {!isIptv && (
+                              isAadhaarDone ? (
+                                <View style={styles.aadhaarVerifiedTag}>
+                                  <Feather name="check-circle" size={10} color="#10b981" />
+                                  <Text style={styles.aadhaarVerifiedText}>Aadhaar</Text>
+                                </View>
+                              ) : (
+                                <TouchableOpacity
+                                  style={styles.aadhaarUnverifiedTag}
+                                  onPress={() => setVerifyAadhaarCust(cust)}
+                                >
+                                  <Feather name="shield" size={10} color="#ef4444" />
+                                  <Text style={styles.aadhaarUnverifiedText}>Verify Aadhaar</Text>
+                                </TouchableOpacity>
+                              )
+                            )}
                           </View>
-
-                          {!isIptv && (
-                            isAadhaarDone ? (
-                              <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.3)', paddingHorizontal: 7, paddingVertical: 2.5, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                <Feather name="check-circle" size={11} color="#10b981" />
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#10b981' }}>Verified</Text>
-                              </View>
-                            ) : (
-                              <TouchableOpacity
-                                style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)', paddingHorizontal: 7, paddingVertical: 2.5, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 4 }}
-                                onPress={() => setVerifyAadhaarCust(cust)}
-                              >
-                                <Feather name="shield" size={11} color="#ef4444" />
-                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#ef4444' }}>Verify Aadhaar</Text>
-                              </TouchableOpacity>
-                            )
-                          )}
                         </View>
 
+                        {/* Operator & Branch Row (if present) */}
                         {(!isOperatorRole || cust.branch_name || cust.registered_on) && (
-                          <View style={styles.subCardMetaRow}>
-                            {!isOperatorRole ? (
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flex: 1 }}>
-                                <Feather name="briefcase" size={11} color="#94a3b8" />
-                                <Text style={{ fontSize: 11, color: '#475569' }} numberOfLines={1}>
+                          <View style={styles.subCardRow}>
+                            <View style={styles.subCardIconLabel}>
+                              <Feather name="briefcase" size={13} color="#64748b" />
+                              <Text style={styles.subCardLabel}>Operator / Branch:</Text>
+                            </View>
+                            <View style={{ flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 6 }}>
+                              {!isOperatorRole ? (
+                                <Text style={styles.operatorText} numberOfLines={1}>
                                   {cust.company_name || cust.partner_name || cust.partner_username || '—'}
                                 </Text>
-                              </View>
-                            ) : null}
-
-                            {cust.branch_name ? (
-                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
-                                <Feather name="git-branch" size={11} color="#94a3b8" />
-                                <Text style={{ fontSize: 11, color: '#64748b' }} numberOfLines={1}>{cust.branch_name}</Text>
-                              </View>
-                            ) : null}
-
-                            {cust.registered_on ? (
-                              <Text style={{ fontSize: 10.5, color: '#94a3b8' }}>
-                                Reg: {formatApiDate(cust.registered_on, false)}
-                              </Text>
-                            ) : null}
+                              ) : null}
+                              {cust.branch_name ? (
+                                <Text style={styles.branchText} numberOfLines={1}>
+                                  {cust.branch_name}
+                                </Text>
+                              ) : null}
+                              {cust.registered_on ? (
+                                <Text style={styles.regDateText}>
+                                  Reg: {formatApiDate(cust.registered_on, false)}
+                                </Text>
+                              ) : null}
+                            </View>
                           </View>
                         )}
                       </View>
@@ -3405,14 +3428,14 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
                           <Text style={styles.subCardBtnText}>View Account</Text>
                         </TouchableOpacity>
 
-                        <TouchableOpacity style={styles.subCardBtn} onPress={() => setSelectedLocationCustomer(cust)}>
+                        <TouchableOpacity style={[styles.subCardBtn, { minWidth: 80 }]} onPress={() => setSelectedLocationCustomer(cust)}>
                           <Feather name="map-pin" size={12} color="#2563eb" />
                           <Text style={styles.subCardBtnText}>Map</Text>
                         </TouchableOpacity>
 
                         {!isIptv && (
                           <TouchableOpacity
-                            style={[styles.subCardBtn, { borderColor: 'rgba(14, 165, 233, 0.3)', backgroundColor: 'rgba(14, 165, 233, 0.08)' }]}
+                            style={[styles.subCardBtn, styles.subCardBtnCyan]}
                             onPress={() => setSelectedDevicesCustomer({ ...cust, account_type: 'internet' })}
                           >
                             <Feather name="hard-drive" size={12} color="#0284c7" />
@@ -4332,7 +4355,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   subCardsContainer: {
-    padding: 14,
+    width: '100%',
+    padding: 0,
   },
   subCard: {
     backgroundColor: '#ffffff',
