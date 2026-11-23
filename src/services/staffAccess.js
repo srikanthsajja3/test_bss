@@ -20,6 +20,7 @@ export const canAny = (user, pairs) => pairs.some(([k, a]) => can(user, k, a || 
 export const BULK_PERMS = {
   internet: 'bulk.internet_customers',
   iptv: 'bulk.iptv_customers',
+  ott: 'bulk.ott_customers',
   branches: 'bulk.branches',
   plans: 'bulk.internet_plans',
   iptv_plans: 'bulk.iptv_plans',

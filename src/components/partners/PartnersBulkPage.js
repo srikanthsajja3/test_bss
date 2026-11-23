@@ -21,6 +21,8 @@ const RUNS = {
     about: 'Every enabled operator\'s internet customers from RADIUS, one operator after another — the same as each partner\'s own "Sync Internet Users".' },
   iptv: { title: 'Sync IPTV customers', icon: 'tv', color: '#6b5fa8', noun: 'customers',
     about: 'Every customer mobile of every enabled operator is checked with Pioneer, one operator after another. This can take a long time on a big network.' },
+  ott: { title: 'Sync OTT customers', icon: 'play-circle', color: '#3d7f99', noun: 'customers',
+    about: 'OTTAggre has no customer list, so every customer mobile of every OTT-enabled operator is looked up one by one, one operator after another — the same as each partner\'s own "Sync OTT Users". Operators without an OTTAggre franchise id are skipped.' },
   branches: { title: 'Sync Partner branches', icon: 'git-branch', color: '#4f5b93', sa: true,
     about: 'Each operator\'s RADIUS branches brought in line with RADIUS: new branches of its RADIUS partner are added, branches RADIUS no longer lists are removed (one always stays). A new branch of a RADIUS partner shared by several operators is only reported.' },
   plans: { title: 'Sync Internet plans', icon: 'list', color: '#b7774a', sa: true,
@@ -67,6 +69,18 @@ const ItemDetail = ({ type, it }) => {
       </View>
     );
   }
+  if (type === 'ott') {
+    if (!sm.customers_found) return <Text style={s.small}>{it.message || 'No customers with a mobile number'}</Text>;
+    return (
+      <View style={s.tagRow}>
+        <Tag text={`${sm.customers_found || 0} checked`} color="#475569" />
+        <Tag text={`${sm.synced_ok || 0} in OTT`} color="#16a34a" strong={sm.synced_ok > 0} />
+        <Tag text={`${sm.not_on_ott || 0} not in OTT`} color="#64748b" />
+        {sm.failed ? <Tag text={`${sm.failed} failed`} color="#dc2626" strong /> : null}
+        {sm.created ? <Tag text={`${sm.created} new OTT account(s)`} color="#0284c7" /> : null}
+      </View>
+    );
+  }
   if (type !== 'internet') return null;
   const rows = sm.failed_rows || [];
   const notSaved = (sm.rows_failed || 0) + (sm.accounts_update_failed || 0);
@@ -110,7 +124,9 @@ const RunActivity = ({ type, st, busy, onAct, scopeLabel }) => {
   const pct = total ? Math.round((finished / total) * 100) : 0;
   const leftover = counts ? counts.pending + counts.running : 0;
   const [filter, setFilter] = useState('');
-  const isNoIptv = (it) => type === 'iptv' && it.state === 'done' && !!it.summary?.no_iptv;
+  // "No customer in IPTV / OTT": every customer of the operator checked, none has the service
+  const svc = type === 'ott' ? 'OTT' : 'IPTV';
+  const isNoIptv = (it) => it.state === 'done' && ((type === 'iptv' && !!it.summary?.no_iptv) || (type === 'ott' && !!it.summary?.no_ott));
   const noIptvCount = (st?.items || []).filter(isNoIptv).length;
   const items = (st?.items || []).filter((it) => !filter || (filter === 'noiptv' ? isNoIptv(it) : it.state === filter));
   return (
@@ -143,8 +159,8 @@ const RunActivity = ({ type, st, busy, onAct, scopeLabel }) => {
             ) : null))}
             {noIptvCount ? (
               <TouchableOpacity onPress={() => setFilter(filter === 'noiptv' ? '' : 'noiptv')} style={[s.chip, { borderColor: '#d97706' }, filter === 'noiptv' && { backgroundColor: '#d9770618' }]}>
-                <Feather name="tv" size={11} color="#d97706" />
-                <Text style={[s.chipText, { color: '#d97706' }]}>{noIptvCount} no customer in IPTV</Text>
+                <Feather name={type === 'ott' ? 'play-circle' : 'tv'} size={11} color="#d97706" />
+                <Text style={[s.chipText, { color: '#d97706' }]}>{noIptvCount} no customer in {svc}</Text>
               </TouchableOpacity>
             ) : null}
             {filter ? <Text style={s.small}>· showing only these (tap again for all)</Text> : null}
@@ -158,11 +174,11 @@ const RunActivity = ({ type, st, busy, onAct, scopeLabel }) => {
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <Text style={s.itemName} numberOfLines={1}>{it.name} <Text style={s.small}>#{it.partner_id}</Text></Text>
-                      {isNoIptv(it) ? <Text style={s.noIptv}>No customer in IPTV</Text> : null}
+                      {isNoIptv(it) ? <Text style={s.noIptv}>No customer in {svc}</Text> : null}
                     </View>
                     {it.state === 'running' && it.progress ? (
                       <Text style={s.small}>{it.progress.done}/{it.progress.total} {meta.noun || 'items'}…</Text>
-                    ) : it.summary && (type === 'iptv' || type === 'internet') ? (
+                    ) : it.summary && (type === 'iptv' || type === 'ott' || type === 'internet') ? (
                       <>
                         <ItemDetail type={type} it={it} />
                         {it.summary.failures?.length ? <Text style={[s.small, { color: '#b91c1c', marginTop: 3 }]} numberOfLines={2}>{it.summary.failures[0].mobile}: {it.summary.failures[0].message}</Text> : null}
@@ -481,7 +497,7 @@ const PartnerSettings = ({ isMobile, mode }) => {
 // allowed(cardId): staff see only the buttons their role has (Staff roles › Partner Bulk Operations)
 export const PartnersBulkPage = ({ isMobile, isSuperAdmin, allowed = () => true, onBack }) => {
   const runTypes = Object.keys(RUNS).filter((t) => (!RUNS[t].sa || isSuperAdmin) && allowed(t));
-  const firstAllowed = ['internet', 'iptv', 'branches', 'plans', 'iptv_plans', 'ott_plans', 'set_kyc', 'set_pg', 'set_aadhaar', 'set_profile', 'keys']
+  const firstAllowed = ['internet', 'iptv', 'ott', 'branches', 'plans', 'iptv_plans', 'ott_plans', 'set_kyc', 'set_pg', 'set_aadhaar', 'set_profile', 'keys']
     .find((id) => (RUNS[id] ? runTypes.includes(id) : isSuperAdmin && allowed(id)));
   const [active, setActive] = useState(firstAllowed);
   const [status, setStatus] = useState({});

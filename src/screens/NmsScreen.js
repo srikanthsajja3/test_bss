@@ -191,6 +191,28 @@ const LineChart = ({ series, height = 180, unit = '' }) => {
     </View>
   );
 };
+// one "last results" entry -> good / warn / bad / idle (true/false, 1/0, rtt in ms, null = lost,
+// "up"/"down", { ok }, { status }, { sent, lost }, { rtt } ...)
+const resultTone = (x) => {
+  if (x === null || x === undefined || x === false) return 'bad';
+  if (x === true) return 'good';
+  if (typeof x === 'number') return x > 0 ? 'good' : 'bad';
+  if (typeof x === 'string') {
+    if (/^(up|ok|true|success|alive)$/i.test(x)) return 'good';
+    if (/^(down|lost|timeout|false|fail|error)$/i.test(x)) return 'bad';
+    const n = parseFloat(x);
+    return Number.isFinite(n) ? (n > 0 ? 'good' : 'bad') : 'idle';
+  }
+  if (typeof x === 'object') {
+    for (const k of ['ok', 'up', 'success', 'alive']) if (k in x) return x[k] ? 'good' : 'bad';
+    if ('status' in x || 'state' in x) return statusTone(x.status ?? x.state) === 'good' ? 'good' : 'bad';
+    if ('sent' in x && 'lost' in x) { const se = Number(x.sent); const lo = Number(x.lost); if (!se) return 'idle'; return lo >= se ? 'bad' : lo > 0 ? 'warn' : 'good'; }
+    const rt = pick(x, 'rtt', 'rtt_ms', 'rtt_avg', 'ms');
+    return rt !== undefined ? (Number(rt) > 0 ? 'good' : 'bad') : 'idle';
+  }
+  return 'idle';
+};
+
 const toTime = (p) => {
   const t = pick(p, 't', 'ts', 'time', 'timestamp', 'at', 'created_at', 'checked_at', 'bucket');
   if (typeof t === 'number') return t < 2e10 ? t * 1000 : t;
@@ -484,14 +506,7 @@ const DevicePage = ({ user, device, onClose, onEdit, onChanged, isMobile }) => {
     if (url && isWeb) window.open(url, '_blank', 'noopener');
     else toast.error(res?.data?.message || 'Could not open the link');
   };
-  const saveDesc = async () => {
-    setBusy('desc');
-    const r = edit.kind === 'port'
-      ? await call('port_description', { id, port: edit.key, description: edit.text }, { post: true })
-      : await call('onu_description', { id: edit.key, description: edit.text }, { post: true });
-    setBusy('');
-    if (r) { toast.success(r.message); setEdit(null); loadList(); }
-  };
+
   const showPortHistory = async (p) => {
     const pid = pick(p, 'port_id', 'id');
     if (!pid) return;
@@ -504,7 +519,6 @@ const DevicePage = ({ user, device, onClose, onEdit, onChanged, isMobile }) => {
   const tabs = [['info', 'Info'], ['ports', 'Ports'], ...(isOlt ? [['onus', 'ONUs']] : []), ['macs', 'MAC table'],
   ];
   const canEditDev = can(user, 'nms.devices', 'edit');
-  const canOnuEdit = can(user, 'nms.onus', 'edit');
 
   return (
     <View style={{ gap: 12 }}>
@@ -578,10 +592,7 @@ const DevicePage = ({ user, device, onClose, onEdit, onChanged, isMobile }) => {
                   { key: 'if', title: 'Interface', keys: ['interface', 'onu_interface'], w: 120 },
                   { key: 'status', title: 'Status', w: 110, render: (o) => <Pill text={pick(o, 'status', 'onu_status')} /> },
                   { key: 'name', title: 'Name / description', w: 190, render: (o) => (
-                    <TouchableOpacity disabled={!canOnuEdit || !pick(o, 'onu_id', 'id')} onPress={() => setEdit({ kind: 'onu', key: pick(o, 'onu_id', 'id'), label: pick(o, 'interface', 'onu_interface') || '', text: pick(o, 'description', 'name', 'onu_name') || '' })} style={{ flexDirection: 'row', gap: 5, alignItems: 'center' }}>
-                      <Text style={s.td} numberOfLines={2}>{show(pick(o, 'description', 'name', 'onu_name'))}</Text>
-                      {canOnuEdit ? <Feather name="edit-2" size={11} color="#94a3b8" /> : null}
-                    </TouchableOpacity>
+                    <Text style={s.td} numberOfLines={2}>{show(pick(o, 'description', 'name', 'onu_name'))}</Text>
                   ) },
                   { key: 'serial', title: 'Serial / MAC', keys: ['serial', 'onu_serial', 'onu_mac', 'mac'], w: 150 },
                   { key: 'rx', title: 'RX', w: 105, render: (o) => <Power rx v={findPower(o, 'rx')} /> },
@@ -617,21 +628,62 @@ const DevicePage = ({ user, device, onClose, onEdit, onChanged, isMobile }) => {
         ) : null}
 
       </View>
-      <DescriptionModal edit={edit} setEdit={setEdit} onSave={saveDesc} busy={busy === 'desc'} />
+      <DescriptionModal visible={!!edit} initial={edit?.text}
+        title={edit ? `Port ${edit.key} — description` : ''}
+        onSubmit={edit ? descSubmit('port_description', { id, port: edit.key }) : async () => ({ ok: false })}
+        onClose={(saved) => { setEdit(null); if (saved) loadList(); }} />
     </View>
   );
 };
 
 // edit a port / ONU description (saved on the NMS and on the device)
-const DescriptionModal = ({ edit, setEdit, onSave, busy, title }) => (
-  <ModalShell visible={!!edit} title={title || (edit ? `${edit.kind === 'port' ? `Port ${edit.key}` : `ONU ${edit.label || ''}`} — description` : '')} icon="edit-2" iconColor={ACCENT}
-    onClose={() => !busy && setEdit(null)} busy={busy} maxWidth={480}
-    footer={<><Btn label="Cancel" kind="ghost" onPress={() => setEdit(null)} disabled={busy} /><Btn label="Save" icon="check" onPress={onSave} loading={busy} /></>}>
-    <Text style={s.label}>Description</Text>
-    <TextInput value={edit ? edit.text : ''} onChangeText={(v) => setEdit((x) => ({ ...x, text: v }))} style={[s.input, { marginTop: 6 }]} maxLength={120} autoFocus />
-    <Text style={[s.hint, { marginTop: 6 }]}>Saved on the device too. Up to 120 characters.</Text>
-  </ModalShell>
-);
+// edit a port / ONU description. onSubmit(text, onDevice) -> { ok, message }.
+// When the device's model has no "description" command in the NMS, the NMS refuses to write it
+// on the OLT: the window shows why and offers "Save in NMS only" (on_device = false).
+const DescriptionModal = ({ visible, title, initial, onSubmit, onClose }) => {
+  const [text, setText] = useState('');
+  const [onDevice, setOnDevice] = useState(true);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { if (visible) { setText(initial || ''); setOnDevice(true); setErr(''); } }, [visible, initial]);
+  const save = async (dev) => {
+    setBusy(true); setErr('');
+    const res = await onSubmit(text, dev);
+    setBusy(false);
+    if (res.ok) { toast.success(res.message || 'Saved'); onClose(true); return; }
+    setErr(res.message || 'Could not save');
+  };
+  const deviceRefused = onDevice && /on_device|has no .*action|provisioning/i.test(err);
+  return (
+    <ModalShell visible={visible} title={title} icon="edit-2" iconColor={ACCENT} onClose={() => !busy && onClose(false)} busy={busy} maxWidth={500}
+      footer={(
+        <>
+          <Btn label="Cancel" kind="ghost" onPress={() => onClose(false)} disabled={busy} />
+          {deviceRefused ? <Btn label="Save in NMS only" icon="database" onPress={() => { setOnDevice(false); save(false); }} loading={busy} />
+            : <Btn label="Save" icon="check" onPress={() => save(onDevice)} loading={busy} />}
+        </>
+      )}>
+      <Text style={s.label}>Description</Text>
+      <TextInput value={text} onChangeText={setText} style={[s.input, { marginTop: 6 }]} maxLength={120} autoFocus />
+      <TouchableOpacity style={[s.check, { marginTop: 10 }]} onPress={() => { setOnDevice(!onDevice); setErr(''); }}>
+        <Feather name={onDevice ? 'check-square' : 'square'} size={16} color={onDevice ? ACCENT : '#94a3b8'} />
+        <Text style={s.td}>Also write it on the OLT / switch</Text>
+      </TouchableOpacity>
+      <Text style={[s.hint, { marginTop: 4 }]}>{onDevice ? 'Saved in the NMS and on the device.' : 'Saved in the NMS only (the device keeps its own name).'} Up to 120 characters.</Text>
+      {err ? (
+        <View style={{ marginTop: 10 }}>
+          <Note tone={deviceRefused ? 'warn' : 'error'} text={deviceRefused
+            ? `The NMS cannot write descriptions on this device: ${err}\n\nUse "Save in NMS only", or add the description action to this model in the NMS (Device models → Provisioning actions).`
+            : err} />
+        </View>
+      ) : null}
+    </ModalShell>
+  );
+};
+const descSubmit = (op, params) => async (text, onDevice) => {
+  const res = await OneBssApi.nmsPost(op, { ...params, description: text, on_device: onDevice });
+  return { ok: !!(res.ok && res.data?.success !== false), message: res.data?.message };
+};
 
 const Devices = ({ user, isMobile }) => {
   const call = useNms();
@@ -758,7 +810,6 @@ const OnuDetail = ({ user, onu, onClose }) => {
   const [hist, setHist] = useState(null);
   const [live, setLive] = useState(null);
   const [busy, setBusy] = useState('');
-  const [desc, setDesc] = useState(null);
   useEffect(() => { (async () => { const r = await call('onu', { id }); setInfo(r ? r.onu : onu); })(); }, [id, call]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { (async () => { setHist(null); const r = await call('onu_history', { id, hours }); setHist(r ? r.items || [] : []); })(); }, [id, hours, call]);
   const readLive = async () => {
@@ -767,12 +818,7 @@ const OnuDetail = ({ user, onu, onClose }) => {
     setBusy('');
     if (r) setLive(r.live || {});
   };
-  const saveDesc = async () => {
-    setBusy('desc');
-    const r = await call('onu_description', { id, description: desc }, { post: true });
-    setBusy('');
-    if (r) { toast.success(r.message); setDesc(null); const d = await call('onu', { id }, { quiet: true }); if (d) setInfo(d.onu); }
-  };
+
   const o = info || onu;
   // power: the live reading when there is one, else what the NMS has stored, else the last history point
   const lastHist = hist && hist.length ? hist[hist.length - 1] : null;
@@ -793,7 +839,6 @@ const OnuDetail = ({ user, onu, onClose }) => {
         </View>
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
           <Btn label="Read live power" icon="activity" onPress={readLive} loading={busy === 'live'} />
-          {can(user, 'nms.onus', 'edit') ? <Btn label="Edit description" icon="edit-2" kind="ghost" onPress={() => setDesc(String(pick(o, 'description', 'name', 'onu_name') || ''))} /> : null}
         </View>
         <View style={[s.card, { flexDirection: 'row', gap: 26, flexWrap: 'wrap', alignItems: 'flex-end' }]}>
           <View><Text style={s.kvLabel}>RX power</Text><View style={{ marginTop: 3 }}>{rx === null && !info ? <ActivityIndicator size="small" color={ACCENT} /> : <Power rx v={rx} />}</View></View>
@@ -805,8 +850,6 @@ const OnuDetail = ({ user, onu, onClose }) => {
           </View>
           {liveMsg ? <Text style={[s.muted, { color: '#b45309', flexBasis: '100%' }]}>{String(liveMsg)}</Text> : null}
         </View>
-        <DescriptionModal edit={desc === null ? null : { kind: 'onu', text: desc }} setEdit={(fn) => setDesc((cur) => { if (fn === null) return null; const v = typeof fn === 'function' ? fn({ text: cur }) : fn; return v ? v.text : null; })}
-          onSave={saveDesc} busy={busy === 'desc'} title={`ONU ${show(pick(o, 'interface', 'onu_interface', 'pon'))} — description`} />
         <View style={s.card}>
           <View style={s.rowBetween}>
             <Text style={s.cardTitle}>Optical power history</Text>
@@ -828,8 +871,100 @@ const OnuDetail = ({ user, onu, onClose }) => {
   );
 };
 
+// "By customer": pick a OneBSS internet account -> its router MAC from RADIUS -> the ONU it sits
+// behind (the same lookup as the account's "ONU Details") -> that ONU's window.
+const CustomerOnuPicker = ({ onOpen }) => {
+  const [text, setText] = useState('');
+  const [opts, setOpts] = useState(null);
+  const [searching, setSearching] = useState(false);
+  const [picked, setPicked] = useState(null);
+  const [res, setRes] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const seq = useRef(0);
+  useEffect(() => {
+    const t = text.trim();
+    if (picked && t === pickLabel(picked)) return undefined;
+    if (t.length < 2) { setOpts(null); return undefined; }
+    const my = ++seq.current;
+    const timer = setTimeout(async () => {
+      setSearching(true);
+      const r = await OneBssApi.getCustomersList(1, 15, 'internet', t);
+      if (my !== seq.current) return;
+      setSearching(false);
+      const list = r.ok ? (r.data?.data || r.data?.customers || []) : [];
+      setOpts(Array.isArray(list) ? list : []);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [text]); // eslint-disable-line react-hooks/exhaustive-deps
+  const lookup = async (acct, sync = false) => {
+    setBusy(true); setRes(null);
+    const r = await OneBssApi.getOnuDetails(acct.internet_id, sync);
+    setBusy(false);
+    setRes({ ok: r.ok && r.data?.success !== false, data: r.data || {} });
+  };
+  const choose = (acct) => { setPicked(acct); setText(pickLabel(acct)); setOpts(null); lookup(acct); };
+  const d = res?.data || {};
+  const onu = d.onu || {};
+  const onuId = pick(onu, 'id', 'onu_id');
+  return (
+    <View style={{ gap: 12 }}>
+      <View style={{ position: 'relative', zIndex: 20 }}>
+        <Search value={text} onChange={(v) => { setText(v); if (picked) { setPicked(null); setRes(null); } }} placeholder="Customer username, name, mobile or account ID" />
+        {searching ? <ActivityIndicator size="small" color={ACCENT} style={{ position: 'absolute', right: 40, top: 11 }} /> : null}
+        {opts ? (
+          <View style={s.dropdown}>
+            <ScrollView style={{ maxHeight: 320 }} nestedScrollEnabled keyboardShouldPersistTaps="handled">
+              {opts.length ? opts.map((c) => (
+                <TouchableOpacity key={c.internet_id} style={s.dropItem} onPress={() => choose(c)}>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={s.tdStrong} numberOfLines={1}>{c.username}{c.acc_id ? <Text style={s.muted}>  · acc {c.acc_id}</Text> : null}</Text>
+                    <Text style={s.muted} numberOfLines={1}>{[custName(c), c.mobile || c.cust_mobileno, c.company_name || c.partner_name].filter(Boolean).join(' · ')}</Text>
+                  </View>
+                  <Pill text={c.online === 1 || c.online === '1' || /online/i.test(String(c.connectivity || c.online_status || '')) ? 'online' : (c.status_text || c.status || 'offline')} />
+                </TouchableOpacity>
+              )) : <Text style={[s.muted, { padding: 12 }]}>No internet customer matches.</Text>}
+            </ScrollView>
+          </View>
+        ) : null}
+      </View>
+
+      {!picked ? <Note tone="info" text="Type a customer's username, name or mobile and pick the account: its router MAC is read from RADIUS and the NMS finds the OLT, PON and ONU it is behind." /> : null}
+      {busy ? <View style={[s.card, { flexDirection: 'row', gap: 10, alignItems: 'center' }]}><ActivityIndicator color={ACCENT} /><Text style={s.td}>Finding {picked?.username}'s ONU…</Text></View> : null}
+      {res && !busy ? (
+        res.ok && onuId ? (
+          <View style={[s.card, { gap: 10 }]}>
+            <View style={s.rowBetween}>
+              <View style={{ flexShrink: 1 }}>
+                <Text style={s.cardTitle}>{picked.username} · {show(pick(onu, 'interface', 'onu_interface'))}</Text>
+                <Text style={s.muted}>{[pick(d, 'olt.name', 'olt.ip'), pick(onu, 'name'), pick(onu, 'serial', 'onu_mac')].filter(Boolean).join(' · ')}</Text>
+              </View>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <Btn label="Open ONU" icon="radio" onPress={() => onOpen({ onu_id: onuId, interface: pick(onu, 'interface', 'onu_interface'), olt_name: pick(d, 'olt.name', 'olt.device_name'), ...onu })} />
+                <Btn label="Read again" kind="ghost" icon="refresh-cw" onPress={() => lookup(picked, true)} />
+              </View>
+            </View>
+            <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 22 }}>
+              <View><Text style={s.kvLabel}>Status</Text><View style={{ marginTop: 3 }}><Pill text={pick(onu, 'status') || (d.found ? 'found' : '')} /></View></View>
+              <View><Text style={s.kvLabel}>RX power</Text><View style={{ marginTop: 3 }}><Power rx v={findPower(d.optical || onu, 'rx')} /></View></View>
+              <View><Text style={s.kvLabel}>TX power</Text><View style={{ marginTop: 3 }}><Power v={findPower(d.optical || onu, 'tx')} /></View></View>
+              {pick(d, 'onu.customer_mac') ? <View><Text style={s.kvLabel}>Customer MAC</Text><Text style={[s.td, { marginTop: 3 }]}>{d.onu.customer_mac}{pick(d, 'onu.vlan') ? ` · VLAN ${d.onu.vlan}` : ''}</Text></View> : null}
+              {pick(d, 'switch.device_name', 'switch.port') ? <View><Text style={s.kvLabel}>Switch</Text><Text style={[s.td, { marginTop: 3 }]}>{[pick(d, 'switch.device_name', 'switch.device_ip'), pick(d, 'switch.port')].filter(Boolean).join(' · port ')}</Text></View> : null}
+              <View><Text style={s.kvLabel}>Last seen</Text><Text style={[s.td, { marginTop: 3 }, pick(d, 'freshness.stale') ? { color: '#b45309' } : null]}>{ago(pick(d, 'freshness.last_seen', 'optical.updated_at'))}</Text></View>
+            </View>
+          </View>
+        ) : (
+          <Note tone={res.ok ? 'warn' : 'error'} text={d.message || (res.ok ? `No ONU found for ${picked.username}${d.mac ? ` (router MAC ${d.mac})` : ''}.` : 'Could not look up the ONU.')} />
+        )
+      ) : null}
+    </View>
+  );
+};
+const custName = (c) => [c.cust_first_name || c.first_name, c.cust_last_name || c.last_name].filter(Boolean).join(' ') || c.customer_name || c.full_name || '';
+const pickLabel = (c) => `${c.username}${custName(c) ? ` — ${custName(c)}` : ''}`;
+
 const Onus = ({ user }) => {
   const call = useNms();
+  const [mode, setMode] = useState('onu');
   const [q, setQ] = useState('');
   const [rows, setRows] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -843,24 +978,36 @@ const Onus = ({ user }) => {
   };
   return (
     <View style={{ gap: 12 }}>
-      <View style={[s.toolbar]}>
-        <Search value={q} onChange={setQ} onSubmit={find} placeholder="Name, serial, ONU MAC, customer MAC or interface (EPON0/1:5)" style={{ flex: 1 }} />
-        <Btn label="Search" icon="search" onPress={find} loading={busy} />
+      <View style={s.segWrap}>
+        {[['onu', 'By ONU', 'radio'], ['customer', 'By customer', 'user']].map(([k, l, ic]) => (
+          <TouchableOpacity key={k} onPress={() => setMode(k)} style={[s.seg, mode === k && s.segOn]}>
+            <Feather name={ic} size={13} color={mode === k ? '#ffffff' : '#475569'} />
+            <Text style={[s.segText, mode === k && { color: '#ffffff' }]}>{l}</Text>
+          </TouchableOpacity>
+        ))}
       </View>
-      {rows === null ? <Note tone="info" text="Find an ONU on any OLT by its name, serial, MAC (ONU or customer router) or interface. Open it for power history and a live reading." /> : (
-        <View style={s.tableCard}>
-          <Text style={[s.muted, { padding: 10 }]}>{rows.length} ONU(s)</Text>
-          <Table maxHeight={LIST_MAX} rows={rows} onRow={setOpen} keyOf={(o, i) => pick(o, 'onu_id', 'id') || i}
-            cols={[
-              { key: 'if', title: 'Interface', keys: ['interface', 'onu_interface'], w: 130 },
-              { key: 'olt', title: 'OLT', keys: ['olt_name', 'device_name', 'olt_ip'], w: 160 },
-              { key: 'status', title: 'Status', w: 110, render: (o) => <Pill text={pick(o, 'status', 'onu_status')} /> },
-              { key: 'name', title: 'Name', keys: ['name', 'onu_name', 'description'], w: 180 },
-              { key: 'serial', title: 'Serial / MAC', keys: ['serial', 'onu_serial', 'onu_mac', 'mac'], w: 160 },
-              { key: 'rx', title: 'RX', w: 105, render: (o) => <Power rx v={findPower(o, 'rx')} /> },
-              { key: 'seen', title: 'Last seen', w: 110, render: (o) => <Text style={s.td}>{ago(pick(o, 'last_seen', 'updated_at'))}</Text> },
-            ]} />
-        </View>
+      {mode === 'customer' ? <CustomerOnuPicker onOpen={setOpen} /> : (
+        <>
+          <View style={[s.toolbar]}>
+            <Search value={q} onChange={setQ} onSubmit={find} placeholder="Name, serial, ONU MAC, customer MAC or interface (EPON0/1:5)" style={{ flex: 1 }} />
+            <Btn label="Search" icon="search" onPress={find} loading={busy} />
+          </View>
+          {rows === null ? <Note tone="info" text="Find an ONU on any OLT by its name, serial, MAC (ONU or customer router) or interface. Open it for power history and a live reading." /> : (
+            <View style={s.tableCard}>
+              <Text style={[s.muted, { padding: 10 }]}>{rows.length} ONU(s)</Text>
+              <Table maxHeight={LIST_MAX} rows={rows} onRow={setOpen} keyOf={(o, i) => pick(o, 'onu_id', 'id') || i}
+                cols={[
+                  { key: 'if', title: 'Interface', keys: ['interface', 'onu_interface'], w: 130 },
+                  { key: 'olt', title: 'OLT', keys: ['olt_name', 'device_name', 'olt_ip'], w: 160 },
+                  { key: 'status', title: 'Status', w: 110, render: (o) => <Pill text={pick(o, 'status', 'onu_status')} /> },
+                  { key: 'name', title: 'Name', keys: ['name', 'onu_name', 'description'], w: 180 },
+                  { key: 'serial', title: 'Serial / MAC', keys: ['serial', 'onu_serial', 'onu_mac', 'mac'], w: 160 },
+                  { key: 'rx', title: 'RX', w: 105, render: (o) => <Power rx v={findPower(o, 'rx')} /> },
+                  { key: 'seen', title: 'Last seen', w: 110, render: (o) => <Text style={s.td}>{ago(pick(o, 'last_seen', 'updated_at'))}</Text> },
+                ]} />
+            </View>
+          )}
+        </>
       )}
       {open ? <OnuDetail user={user} onu={open} onClose={() => setOpen(null)} /> : null}
     </View>
@@ -1030,6 +1177,167 @@ const NetwatchForm = ({ visible, host, onClose, onSaved }) => {
   );
 };
 
+// one monitor: graph + loss incidents + per-minute readings
+const NW_RANGES = [['1', 'Last hour'], ['6', 'Last 6 h'], ['24', 'Last 24 h'], ['72', 'Last 3 days'], ['168', 'Last 7 days']];
+const dur = (ms) => {
+  const m = Math.max(1, Math.round(ms / 60000));
+  return m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${Math.floor(m / 1440)} d ${Math.floor((m % 1440) / 60)} h`;
+};
+const NetwatchPage = ({ user, host, isMobile, onBack, onCheck, checking, onEdit }) => {
+  const call = useNms();
+  const id = pick(host, 'id', 'nid', 'netwatch_id');
+  const [hours, setHours] = useState('6');
+  const [items, setItems] = useState(null);
+  const [minutesPage, setMinutesPage] = useState(0);
+  const [onlyLoss, setOnlyLoss] = useState(false);
+  const load = useCallback(async () => {
+    setItems(null);
+    const r = await call('netwatch_history', { id, hours });
+    setItems(r ? r.items || [] : []);
+  }, [id, hours, call]);
+  useEffect(() => { load(); setMinutesPage(0); }, [load]);
+
+  // NMS buckets: { ts, sent, lost, rtt_avg, rtt_max } (older names kept as fallbacks)
+  const pts = useMemo(() => (items || []).map((p) => ({
+    t: toTime(p), avg: num(pick(p, 'rtt_avg', 'avg_rtt_ms', 'rtt_ms', 'rtt', 'value')), max: num(pick(p, 'rtt_max', 'max_rtt_ms')),
+    sent: num(pick(p, 'sent')), lost: num(pick(p, 'lost')),
+  })).filter((p) => p.t).sort((a, b) => a.t - b.t), [items]);
+  const sent = pts.reduce((a, p) => a + (p.sent || 0), 0);
+  const lost = pts.reduce((a, p) => a + (p.lost || 0), 0);
+  const avgs = pts.map((p) => p.avg).filter((v) => v !== null);
+  const avg = avgs.length ? avgs.reduce((a, v) => a + v, 0) / avgs.length : null;
+  const peak = pts.reduce((a, p) => Math.max(a, p.max ?? p.avg ?? 0), 0);
+  const downMin = pts.filter((p) => p.sent > 0 && p.lost >= p.sent).length;
+  const uptime = pts.length ? ((pts.length - downMin) / pts.length) * 100 : null;
+  // consecutive minutes with loss -> one incident
+  const incidents = useMemo(() => {
+    const out = [];
+    let cur = null;
+    const step = pts.length > 1 ? Math.min(...pts.slice(1).map((p, i) => p.t - pts[i].t).filter((d) => d > 0)) || 60000 : 60000;
+    pts.forEach((p) => {
+      const bad = (p.lost || 0) > 0;
+      if (bad && cur && p.t - cur.endT <= step * 1.5) {
+        cur.endT = p.t; cur.lost += p.lost; cur.sent += p.sent || 0; cur.minutes += 1; cur.down = cur.down || (p.sent > 0 && p.lost >= p.sent); cur.peak = Math.max(cur.peak, p.max ?? p.avg ?? 0);
+      } else if (bad) {
+        cur = { startT: p.t, endT: p.t, lost: p.lost, sent: p.sent || 0, minutes: 1, down: p.sent > 0 && p.lost >= p.sent, peak: p.max ?? p.avg ?? 0, step };
+        out.push(cur);
+      } else cur = null;
+    });
+    return out.reverse();
+  }, [pts]);
+  const MPAGE = 60;
+  const minutes = useMemo(() => [...pts].reverse().filter((p) => !onlyLoss || (p.lost || 0) > 0), [pts, onlyLoss]);
+  const mPages = Math.max(1, Math.ceil(minutes.length / MPAGE));
+  const status = pick(host, 'status', 'state');
+
+  return (
+    <View style={{ gap: 12 }}>
+      <TouchableOpacity onPress={onBack} style={s.backBtn}>
+        <Feather name="arrow-left" size={15} color="#0f172a" />
+        <Text style={s.backText}>Back to monitors</Text>
+      </TouchableOpacity>
+
+      <View style={[s.card, { gap: 12 }]}>
+        <View style={{ flexDirection: isMobile ? 'column' : 'row', alignItems: isMobile ? 'flex-start' : 'center', justifyContent: 'space-between', gap: 12 }}>
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12, flexShrink: 1 }}>
+            <View style={s.devIcon}><Feather name="activity" size={20} color={ACCENT} /></View>
+            <View style={{ flexShrink: 1 }}>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+                <Text style={s.pageTitle} numberOfLines={1}>{show(pick(host, 'name', 'host'))}</Text>
+                <Pill text={status} />
+              </View>
+              <Text style={s.muted} numberOfLines={2}>
+                {String(pick(host, 'kind') || 'icmp').toUpperCase()} · {pick(host, 'url', 'host')}{pick(host, 'port') ? `:${pick(host, 'port')}` : ''}
+                {pick(host, 'group_name', 'group') ? ` · ${pick(host, 'group_name', 'group')}` : ''} · {status ? `${String(status).toLowerCase()} since ${ago(pick(host, 'since', 'status_since', 'changed_at'))}` : ''}
+              </Text>
+            </View>
+          </View>
+          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+            <Btn label="Check now" icon="zap" onPress={onCheck} loading={checking} />
+            {can(user, 'nms.netwatch', 'edit') ? <Btn label="Edit" icon="edit-2" kind="ghost" onPress={onEdit} /> : null}
+          </View>
+        </View>
+      </View>
+
+      <View style={[s.card, { gap: 12 }]}>
+        <View style={s.rowBetween}>
+          <Text style={s.cardTitle}>Round trip</Text>
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+            {Select({ value: hours, onChange: setHours, options: NW_RANGES, width: 150 })}
+            <TouchableOpacity style={s.pg} onPress={load}><Feather name="refresh-cw" size={13} color="#0f172a" /></TouchableOpacity>
+          </View>
+        </View>
+        {items === null ? <ActivityIndicator color={ACCENT} style={{ padding: 20 }} /> : (
+          <>
+            <View style={s.tiles}>
+              {[
+                ['Average', avg !== null ? `${avg.toFixed(1)} ms` : '—'],
+                ['Peak', peak ? `${peak.toFixed(1)} ms` : '—'],
+                ['Packet loss', sent ? `${((lost / sent) * 100).toFixed(2)}%` : '—', lost ? 'warn' : null, sent ? `${fmtNum(lost)} of ${fmtNum(sent)} packets` : ''],
+                ['Uptime', uptime !== null ? `${uptime.toFixed(2)}%` : '—', downMin ? 'bad' : null, downMin ? `${fmtNum(downMin)} min fully down` : 'no full outage'],
+                ['Loss incidents', fmtNum(incidents.length), incidents.length ? 'warn' : null],
+              ].map(([k, v, tone, sub]) => (
+                <View key={k} style={[s.tile, isMobile && { flexBasis: '46%' }, tone && { borderColor: STATUS[tone].dot }]}>
+                  <Text style={[s.tileValue, { fontSize: 19 }, tone && { color: STATUS[tone].fg }]}>{v}</Text>
+                  <Text style={s.tileLabel}>{k}</Text>
+                  {sub ? <Text style={[s.muted, { marginTop: 2 }]}>{sub}</Text> : null}
+                </View>
+              ))}
+            </View>
+            <LineChart unit=" ms" height={220} series={[
+              { name: 'Average round trip', color: '#0f766e', points: pts.map((p) => ({ t: p.t, v: p.avg })) },
+              ...(pts.some((p) => p.max !== null) ? [{ name: 'Max round trip', color: '#cbd5e1', points: pts.map((p) => ({ t: p.t, v: p.max })) }] : []),
+            ]} />
+          </>
+        )}
+      </View>
+
+      {items ? (
+        <View style={s.tableCard}>
+          <View style={[s.rowBetween, { padding: 12 }]}>
+            <Text style={s.cardTitle}>Packet loss incidents</Text>
+            <Text style={s.muted}>back-to-back minutes with loss are one incident</Text>
+          </View>
+          <Table maxHeight={340} rows={incidents} keyOf={(x) => x.startT} empty="No packet loss in this period."
+            cols={[
+              { key: 'start', title: 'Started', w: 150, render: (x) => <Text style={s.td}>{fmtDate(x.startT)}</Text> },
+              { key: 'end', title: 'Ended', w: 150, render: (x) => <Text style={s.td}>{fmtDate(x.endT + x.step)}</Text> },
+              { key: 'dur', title: 'Duration', w: 110, render: (x) => <Text style={s.td}>{dur(x.endT + x.step - x.startT)}</Text> },
+              { key: 'kind', title: 'Type', w: 120, render: (x) => <Pill text={x.down ? 'down' : 'loss'} tone={x.down ? 'bad' : 'warn'} /> },
+              { key: 'lost', title: 'Packets lost', w: 130, render: (x) => <Text style={s.td}>{fmtNum(x.lost)} of {fmtNum(x.sent)} ({x.sent ? ((x.lost / x.sent) * 100).toFixed(0) : 0}%)</Text> },
+              { key: 'peak', title: 'Peak round trip', w: 130, render: (x) => <Text style={s.td}>{x.peak ? `${x.peak.toFixed(1)} ms` : '—'}</Text> },
+            ]} />
+        </View>
+      ) : null}
+
+      {items && pts.length ? (
+        <View style={s.tableCard}>
+          <View style={[s.rowBetween, { padding: 12 }]}>
+            <Text style={s.cardTitle}>Readings</Text>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <TouchableOpacity style={s.check} onPress={() => { setOnlyLoss(!onlyLoss); setMinutesPage(0); }}>
+                <Feather name={onlyLoss ? 'check-square' : 'square'} size={15} color={onlyLoss ? ACCENT : '#94a3b8'} />
+                <Text style={s.td}>Only with loss</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[s.pg, minutesPage <= 0 && { opacity: 0.4 }]} disabled={minutesPage <= 0} onPress={() => setMinutesPage(minutesPage - 1)}><Feather name="chevron-left" size={15} color="#0f172a" /></TouchableOpacity>
+              <Text style={s.td}>{minutesPage + 1} / {mPages}</Text>
+              <TouchableOpacity style={[s.pg, minutesPage + 1 >= mPages && { opacity: 0.4 }]} disabled={minutesPage + 1 >= mPages} onPress={() => setMinutesPage(minutesPage + 1)}><Feather name="chevron-right" size={15} color="#0f172a" /></TouchableOpacity>
+            </View>
+          </View>
+          <Table maxHeight={LIST_MAX} rows={minutes.slice(minutesPage * MPAGE, (minutesPage + 1) * MPAGE)} keyOf={(p) => p.t} empty="No readings with loss."
+            cols={[
+              { key: 'ts', title: 'Time', w: 150, render: (p) => <Text style={s.td}>{fmtDate(p.t)}</Text> },
+              { key: 'avg', title: 'Avg round trip', w: 120, render: (p) => <Text style={s.td}>{p.avg !== null ? `${p.avg.toFixed(1)} ms` : '—'}</Text> },
+              { key: 'max', title: 'Max round trip', w: 120, render: (p) => <Text style={[s.td, p.max > (avg || 0) * 2 && { color: '#b45309', fontWeight: '700' }]}>{p.max !== null ? `${p.max.toFixed(1)} ms` : '—'}</Text> },
+              { key: 'sent', title: 'Sent', keys: ['sent'], w: 70, render: (p) => <Text style={s.td}>{p.sent ?? '—'}</Text> },
+              { key: 'lost', title: 'Lost', w: 70, render: (p) => <Text style={[s.td, p.lost > 0 && { color: p.sent && p.lost >= p.sent ? '#b91c1c' : '#b45309', fontWeight: '700' }]}>{p.lost ?? '—'}</Text> },
+            ]} />
+        </View>
+      ) : null}
+    </View>
+  );
+};
+
 const Netwatch = ({ user, isMobile }) => {
   const call = useNms();
   const [f, setF] = useState({ status: '', group: '', q: '' });
@@ -1048,12 +1356,19 @@ const Netwatch = ({ user, isMobile }) => {
     setBusy('');
     if (r) { toast.success(`${pick(h, 'name', 'host')}: ${show(pick(r.result, 'status', 'state'))}${pick(r.result, 'rtt_ms', 'rtt') != null ? ` · ${pick(r.result, 'rtt_ms', 'rtt')} ms` : ''}`); load(); }
   };
-  const openHist = async (h) => {
-    setHist({ host: h, items: null });
-    const r = await call('netwatch_history', { id: nid(h), hours: 24 });
-    setHist({ host: h, items: r ? r.items || [] : [] });
-  };
+  const openHist = (h) => setHist(h);
   const groups = [...new Set((rows || []).map((h) => pick(h, 'group_name', 'group')).filter(Boolean))];
+  const formEl = <NetwatchForm visible={!!form} host={form && form !== 'new' ? form : null} onClose={() => setForm(null)} onSaved={() => { setForm(null); load(); }} />;
+  if (hist) {
+    // the monitor's own page; the row is refreshed from the list (every 30 s)
+    const fresh = (rows || []).find((h) => nid(h) === nid(hist)) || hist;
+    return (
+      <>
+        <NetwatchPage user={user} host={fresh} isMobile={isMobile} onBack={() => setHist(null)} onCheck={() => check(fresh)} checking={busy === `c${nid(fresh)}`} onEdit={() => setForm(fresh)} />
+        {formEl}
+      </>
+    );
+  }
   return (
     <View style={{ gap: 12 }}>
       <View style={[s.toolbar, isMobile && { flexDirection: 'column', alignItems: 'stretch' }]}>
@@ -1070,9 +1385,9 @@ const Netwatch = ({ user, isMobile }) => {
           <Table maxHeight={LIST_MAX} rows={rows} keyOf={(h, i) => nid(h) || i}
             cols={[
               { key: 'name', title: 'Monitor', w: 210, render: (h) => (
-                <View><Text style={s.tdStrong} numberOfLines={1}>{show(pick(h, 'name', 'host'))}</Text><Text style={s.muted} numberOfLines={1}>{String(pick(h, 'kind') || 'icmp').toUpperCase()} · {pick(h, 'url', 'host')}{pick(h, 'port') ? `:${pick(h, 'port')}` : ''}</Text></View>
+                <TouchableOpacity onPress={() => openHist(h)} accessibilityLabel="Open monitor"><Text style={[s.tdStrong, { color: '#1d4ed8' }]} numberOfLines={1}>{show(pick(h, 'name', 'host'))}</Text><Text style={s.muted} numberOfLines={1}>{String(pick(h, 'kind') || 'icmp').toUpperCase()} · {pick(h, 'url', 'host')}{pick(h, 'port') ? `:${pick(h, 'port')}` : ''}</Text></TouchableOpacity>
               ) },
-              { key: 'status', title: 'Status', w: 110, render: (h) => <Pill text={pick(h, 'status', 'state')} /> },
+              { key: 'status', title: 'Status', w: 110, render: (h) => <TouchableOpacity onPress={() => openHist(h)}><Pill text={pick(h, 'status', 'state')} /></TouchableOpacity> },
               { key: 'since', title: 'Since', w: 110, render: (h) => <Text style={s.td}>{ago(pick(h, 'since', 'status_since', 'changed_at'))}</Text> },
               { key: 'rtt', title: 'Round trip', w: 120, render: (h) => <Text style={s.td}>{pick(h, 'last_rtt_ms', 'rtt_ms', 'last_rtt') != null ? `${pick(h, 'last_rtt_ms', 'rtt_ms', 'last_rtt')} ms` : '—'}{pick(h, 'avg_rtt_ms', 'avg_rtt') != null ? ` (avg ${pick(h, 'avg_rtt_ms', 'avg_rtt')})` : ''}</Text> },
               { key: 'loss', title: 'Loss', w: 80, render: (h) => <Text style={s.td}>{pick(h, 'loss_pct', 'loss') != null ? `${pick(h, 'loss_pct', 'loss')}%` : '—'}</Text> },
@@ -1080,8 +1395,8 @@ const Netwatch = ({ user, isMobile }) => {
                 const r = pick(h, 'last', 'results', 'last_results', 'recent');
                 if (!Array.isArray(r) || !r.length) return <Text style={s.td}>—</Text>;
                 return <View style={{ flexDirection: 'row', gap: 1, flexWrap: 'wrap' }}>{r.slice(-30).map((x, i) => {
-                  const ok = typeof x === 'object' ? !!pick(x, 'ok', 'up', 'success') : (x === 1 || x === true || x === 'up');
-                  return <View key={i} style={{ width: 4, height: 14, borderRadius: 1, backgroundColor: ok ? '#10b981' : '#ef4444' }} />;
+                  const tone = resultTone(x);
+                  return <View key={i} style={{ width: 4, height: 14, borderRadius: 1, backgroundColor: tone === 'good' ? '#10b981' : tone === 'warn' ? '#f59e0b' : tone === 'bad' ? '#ef4444' : '#cbd5e1' }} />;
                 })}</View>;
               } },
               { key: 'group', title: 'Group', keys: ['group_name', 'group'], w: 110 },
@@ -1095,18 +1410,7 @@ const Netwatch = ({ user, isMobile }) => {
             ]} />
         )}
       </View>
-      {hist ? (
-        <View style={s.card}>
-          <View style={s.rowBetween}>
-            <Text style={s.cardTitle}>{show(pick(hist.host, 'name', 'host'))} · round trip, last 24 h</Text>
-            <TouchableOpacity onPress={() => setHist(null)}><Feather name="x" size={16} color="#64748b" /></TouchableOpacity>
-          </View>
-          {hist.items === null ? <ActivityIndicator color={ACCENT} /> : (
-            <LineChart unit=" ms" series={[{ name: 'Round trip (ms)', color: '#0f766e', points: hist.items.map((p) => ({ t: toTime(p), v: num(pick(p, 'rtt_ms', 'rtt', 'avg_rtt_ms', 'value')) })).filter((p) => p.t) }]} />
-          )}
-        </View>
-      ) : null}
-      <NetwatchForm visible={!!form} host={form && form !== 'new' ? form : null} onClose={() => setForm(null)} onSaved={() => { setForm(null); load(); }} />
+      {formEl}
     </View>
   );
 };
@@ -1210,6 +1514,12 @@ const s = StyleSheet.create({
   input: { height: 38, borderWidth: 1, borderColor: '#cbd5e1', borderRadius: 8, paddingHorizontal: 10, fontSize: 13, color: '#0f172a', backgroundColor: '#ffffff' },
   hint: { fontSize: 11, color: '#94a3b8' },
   check: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  segWrap: { flexDirection: 'row', gap: 6, alignSelf: 'flex-start' },
+  seg: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: '#cbd5e1', backgroundColor: '#ffffff' },
+  segOn: { backgroundColor: ACCENT, borderColor: ACCENT },
+  segText: { fontSize: 12.5, fontWeight: '700', color: '#475569' },
+  dropdown: { position: 'absolute', top: 42, left: 0, right: 0, backgroundColor: '#ffffff', borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0', shadowColor: '#0f172a', shadowOpacity: 0.12, shadowRadius: 14, shadowOffset: { width: 0, height: 6 }, elevation: 6 },
+  dropItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 9, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
 });
 
 export default NmsScreen;

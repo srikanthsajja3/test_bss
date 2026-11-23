@@ -898,6 +898,27 @@ export const OneBssApi = {
     return { ok: false, status: 0, data: { success: false, message: 'Still running on the server — check again later.' } };
   },
 
+  // OTT: every customer of one operator, looked up one by one (OTTAggre has no list API)
+  syncOttBulkCustomers: async (partnerId) => {
+    const err = requireArg(partnerId, 'partner_id');
+    if (err) return clientError(err);
+    return startedIfGarbled(await post(`/ott_bulk_customer_sync.php?partner_id=${q(partnerId)}`), 'OTT sync started — it runs on the server.');
+  },
+  ottBulkSyncStatus: async (partnerId) => get(`/ott_bulk_customer_sync.php?partner_id=${q(partnerId)}`),
+  waitOttBulkSync: async (partnerId, onProgress) => {
+    for (let i = 0; i < 1080; i += 1) {
+      await new Promise((r) => setTimeout(r, 10000));
+      const res = await get(`/ott_bulk_customer_sync.php?partner_id=${q(partnerId)}`);
+      if (!res.ok) {
+        if (res.status === 401 || res.status === 403) return res;
+        continue;
+      }
+      if (res.data.progress && onProgress) onProgress(res.data.progress);
+      if (!res.data.running) return res;
+    }
+    return { ok: false, status: 0, data: { success: false, message: 'Still running on the server — check again later.' } };
+  },
+
   // Partners › Bulk operations (super admin): the IPTV / OTT catalogs are the same for every
   // operator, so one call syncs them (the server picks an operator that has the credentials)
   syncAllIptvPlans: async () => startedIfGarbled(await post('/iptv_plan_sync.php'), 'Packages synced — the channel lists are being read on the server.'),

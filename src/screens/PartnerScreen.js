@@ -330,6 +330,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
   const [impersonatingId, setImpersonatingId] = useState(null);
   const [syncingIptvId, setSyncingIptvId] = useState(null);
   const [syncingInetId, setSyncingInetId] = useState(null);
+  const [syncingOttId, setSyncingOttId] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
   // Batch 2 Action States
@@ -487,6 +488,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
           }
           setIsCreateOpen(true);
         }
+        // a partner id typed into the address bar (Enter): open that partner now, not only after a reload
+        if (hasPartnerContext && restoreRef.current) restoreRef.current();
       }
     };
     if (typeof window !== 'undefined') {
@@ -669,6 +672,7 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
     }
   }, [partners]);
 
+  const restoreRef = React.useRef(null);
   // Reload / deep link: partners deeper than the main list are fetched by id, and the
   // drill-down trail (#...&trail=2,4) is rebuilt so Back keeps working level by level.
   const restoreFromHash = async () => {
@@ -746,6 +750,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       }
     }
   };
+
+  restoreRef.current = restoreFromHash; // the hashchange listener always calls the latest one
 
   const filteredPartners = partners.filter((p) => {
     const query = search.toLowerCase().trim();
@@ -1873,6 +1879,42 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
       toast.error('Sync failed: Network error');
     } finally {
       setSyncingIptvId((cur) => (cur === pId ? null : cur));
+    }
+  };
+
+  // OTT: OTTAggre has no customer list, so every customer mobile is looked up on the server
+  const handleSyncOttUsers = async (partner) => {
+    if (!partner) return;
+    const pId = partner.partner_id || partner.id;
+    setSyncingOttId(pId);
+    try {
+      const name = partner.partner_name || `Partner #${pId}`;
+      const res = await OneBssApi.syncOttBulkCustomers(pId);
+      const data = res.data || {};
+      if (data.already_running) {
+        toast.info(`An OTT sync for ${name} is already running — you'll see the result here when it ends.`);
+      } else if (data.success === false) {
+        toast.error(data.message || `OTT user sync failed for ${name}.`);
+        return;
+      } else {
+        toast.info(data.message || `OTT sync started for ${name}.`);
+      }
+      setSyncingOttId(null);
+      const done = await OneBssApi.waitOttBulkSync(pId);
+      const last = done.data?.last;
+      if (!done.ok || !last) {
+        toast.warn(done.data?.message || `Could not get the OTT sync result for ${name}.`);
+      } else if (last.error) {
+        toast.error(`OTT sync for ${name}: ${last.error}`);
+      } else {
+        const sm = last.summary || {};
+        const msg = `OTT sync finished for ${name}: ${sm.customers_found || 0} checked, ${sm.synced_ok || 0} in OTT (${sm.created || 0} new), ${sm.not_on_ott || 0} not in OTT${sm.failed ? `, ${sm.failed} failed` : ''}.`;
+        if (sm.failed) toast.warn(msg); else toast.success(msg);
+      }
+    } catch (e) {
+      toast.error('Sync failed: Network error');
+    } finally {
+      setSyncingOttId((cur) => (cur === pId ? null : cur));
     }
   };
 
@@ -3786,6 +3828,19 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
         <Text style={[styles.pdActionText, { color }]}>{label}</Text>
       </TouchableOpacity>
     );
+    // sync next to a section title; icon only on phones
+    const SyncBtn = ({ label, color, onPress, busy }) => (readOnly ? null : (
+      <TouchableOpacity
+        style={[styles.pdSyncBtn, { borderColor: `${color}55`, backgroundColor: `${color}12` }, isMobile && styles.pdSyncBtnIcon, busy && { opacity: 0.6 }]}
+        onPress={onPress}
+        disabled={busy}
+        accessibilityLabel={label}
+        title={label}
+      >
+        {busy ? <ActivityIndicator size="small" color={color} /> : <Feather name="refresh-cw" size={13} color={color} />}
+        {isMobile ? null : <Text style={[styles.pdSyncText, { color }]}>{label}</Text>}
+      </TouchableOpacity>
+    ));
     const StatStrip = ({ cards }) => (
       <View style={styles.pdStatRow}>
         {cards.map((c) => (
@@ -3815,8 +3870,8 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
 
           {/* HEADER: identity, status, wallet, account actions */}
           <View style={styles.heroCard}>
-            <View style={{ flexDirection: isMobile ? 'column' : 'row', gap: 16, alignItems: isMobile ? 'flex-start' : 'center' }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14, flex: 1, minWidth: 0 }}>
+            <View style={{ flexDirection: isMobile ? 'column' : 'row', gap: 16, alignItems: 'flex-start' }}>
+              <View style={{ flexDirection: 'row', alignItems: 'flex-start', gap: 14, flex: 1, minWidth: 0 }}>
                 <View style={styles.heroAvatar}>
                   <Text style={styles.heroAvatarText}>{(p.partner_name || 'P').charAt(0).toUpperCase()}</Text>
                 </View>
@@ -3936,25 +3991,22 @@ export const PartnerScreen = ({ onOpenCreate, initialCreateRole, user, initialRo
                 <View style={styles.pdSectionHead}>
                   <Feather name="wifi" size={16} color={COLORS.primary} />
                   <Text style={styles.pdSectionTitle}>Internet Subscribers</Text>
+                  <SyncBtn label="Sync Internet" color="#059669" onPress={() => handleSyncInternetUsers(p)} busy={syncingInetId === pid} />
                   {loadingPartner ? <ActivityIndicator size="small" color={COLORS.primary} /> : null}
                 </View>
                 <StatStrip cards={inetCards} />
                 <View style={[styles.pdSectionHead, { marginTop: 14 }]}>
                   <Feather name="tv" size={16} color="#8b5cf6" />
                   <Text style={styles.pdSectionTitle}>IPTV Subscribers</Text>
+                  <SyncBtn label="Sync IPTV" color="#7c3aed" onPress={() => handleSyncIptvUsers(p)} busy={syncingIptvId === pid} />
                 </View>
                 <StatStrip cards={iptvCards} />
                 <View style={[styles.pdSectionHead, { marginTop: 14 }]}>
                   <Feather name="play-circle" size={16} color="#0ea5e9" />
                   <Text style={styles.pdSectionTitle}>OTT Subscribers</Text>
+                  <SyncBtn label="Sync OTT" color="#0284c7" onPress={() => handleSyncOttUsers(p)} busy={syncingOttId === pid} />
                 </View>
                 <StatStrip cards={ottCards} />
-                {!readOnly ? (
-                  <View style={[styles.pdAccountRow, { marginTop: 14 }]}>
-                    <ActionBtn icon="refresh-cw" label="Sync Internet Users" color="#059669" onPress={() => handleSyncInternetUsers(p)} busy={syncingInetId === pid} />
-                    <ActionBtn icon="refresh-cw" label="Sync IPTV Users" color="#7c3aed" onPress={() => handleSyncIptvUsers(p)} busy={syncingIptvId === pid} />
-                  </View>
-                ) : null}
               </View>
 
               {/* PLANS & SETUP */}
@@ -4203,6 +4255,9 @@ const styles = StyleSheet.create({
   pdActionText: { fontSize: 12, fontWeight: '700' },
   pdSection: { backgroundColor: '#ffffff', borderRadius: 14, borderWidth: 1, borderColor: 'rgba(0,0,0,0.08)', padding: 16, marginBottom: 20 },
   pdSectionHead: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 10 },
+  pdSyncBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderRadius: 7, paddingHorizontal: 9, height: 26, marginLeft: 4 },
+  pdSyncBtnIcon: { width: 28, height: 28, paddingHorizontal: 0, justifyContent: 'center' },
+  pdSyncText: { fontSize: 11.5, fontWeight: '700' },
   pdSectionTitle: { fontSize: 15, fontWeight: '700', color: '#0f172a' },
   pdStatRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   pdStat: { flexGrow: 1, flexBasis: 100, paddingVertical: 10, paddingHorizontal: 12, borderRadius: 10, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0' },

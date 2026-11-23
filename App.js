@@ -6,6 +6,7 @@ import { COLORS } from './src/constants/theme';
 import { setApiConfig, onUnauthorized, isJwtExpired, clearStoredSession, OneBssApi } from './src/services/oneBssApi';
 import { Sidebar } from './src/components/Sidebar';
 import { Header } from './src/components/Header';
+import { usePullToRefresh } from './src/components/PullToRefresh';
 import { ProfileUpdatePrompt } from './src/components/partners/ProfileUpdatePrompt';
 import { DashboardScreen } from './src/screens/DashboardScreen';
 import { PartnerScreen } from './src/screens/PartnerScreen';
@@ -166,6 +167,7 @@ function MainApp() {
   const [customerInitialRange, setCustomerInitialRange] = useState(initialNav.range || ''); // expiry / registration range
   const [customerInitialSearch, setCustomerInitialSearch] = useState('');
   const [globalRefreshKey, setGlobalRefreshKey] = useState(0);
+  usePullToRefresh(true); // phones: pull down at the top of a page to reload it
   const [user, setUserState] = useState(getInitialUserState());
   const [partnerCreateRole, setPartnerCreateRole] = useState(null);
   const [partnerInitialRole, setPartnerInitialRole] = useState('');
