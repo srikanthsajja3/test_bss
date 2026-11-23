@@ -382,6 +382,10 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
 
   const isOperatorRole = String(user?.role || user?.account_role || '').toLowerCase() === 'operator';
   const [viewMode, setViewMode] = useState(isIptvMode ? 'iptv' : 'broadband');
+  const [layoutMode, setLayoutMode] = useState(isMobile ? 'cards' : 'table');
+  useEffect(() => {
+    if (isMobile) setLayoutMode('cards');
+  }, [isMobile]);
   const [activeFilter, setActiveFilter] = useState(() => normalizeListFilter(initialFilter, isIptvMode));
   const [activeRange, setActiveRange] = useState(() => (findDateRange(initialRange) ? initialRange : ''));
   const activeRangeInfo = findDateRange(activeRange);
@@ -3108,7 +3112,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           </Text>
         ) : null}
         {/* Bottom Filter Chips Line — counts come from the server and cover every account */}
-        <View style={[styles.bottomChipRowContainer, searchOnly && { display: 'none' }]}>
+        <View style={[styles.bottomChipRowContainer, searchOnly && { display: 'none' }, { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 }]}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipRow}>
             {(viewMode === 'iptv'
               ? [
@@ -3144,6 +3148,30 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
               );
             })}
           </ScrollView>
+
+          {/* Table / Cards View Mode Toggle */}
+          <View style={styles.viewModeToggleRow}>
+            <TouchableOpacity
+              style={[styles.viewModeBtn, layoutMode === 'table' && styles.viewModeBtnActive]}
+              onPress={() => setLayoutMode('table')}
+              title="Table view"
+            >
+              <Feather name="list" size={13} color={layoutMode === 'table' ? '#0f172a' : '#64748b'} />
+              {!isMobile && (
+                <Text style={[styles.viewModeBtnText, layoutMode === 'table' && styles.viewModeBtnTextActive]}>Table</Text>
+              )}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.viewModeBtn, layoutMode === 'cards' && styles.viewModeBtnActive]}
+              onPress={() => setLayoutMode('cards')}
+              title="Cards view"
+            >
+              <Feather name="grid" size={13} color={layoutMode === 'cards' ? '#0f172a' : '#64748b'} />
+              {!isMobile && (
+                <Text style={[styles.viewModeBtnText, layoutMode === 'cards' && styles.viewModeBtnTextActive]}>Cards</Text>
+              )}
+            </TouchableOpacity>
+          </View>
         </View>
       </View>
 
@@ -3165,6 +3193,240 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             extra={debouncedSearch ? ` matching "${debouncedSearch}"` : ''}
           />
 
+        {layoutMode === 'cards' ? (
+          <View style={styles.subCardsContainer}>
+            {listError && !loadingData ? (
+              <View style={{ padding: 30, alignItems: 'center', justifyContent: 'center' }}>
+                <Feather name="alert-circle" size={24} color="#dc2626" />
+                <Text style={{ marginTop: 8, fontSize: 13, color: '#dc2626' }}>{listError}</Text>
+                <TouchableOpacity onPress={loadCustomerDataFromApi} style={{ marginTop: 10 }}>
+                  <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.primary }}>Retry</Text>
+                </TouchableOpacity>
+              </View>
+            ) : paginatedCustomers.length === 0 ? (
+              <View style={{ padding: 30, alignItems: 'center', justifyContent: 'center' }}>
+                {loadingData ? (
+                  <ActivityIndicator size="small" color={COLORS.primary} />
+                ) : (
+                  <>
+                    <Feather name="info" size={24} color={COLORS.textMuted} />
+                    <Text style={{ marginTop: 8, fontSize: 13, color: COLORS.textMuted }}>No subscriber records matched your filter criteria.</Text>
+                  </>
+                )}
+              </View>
+            ) : (
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 12 }}>
+                {paginatedCustomers.map((cust, idx) => {
+                  const badge = STATUS_BADGE[cust.status_key] || STATUS_BADGE.other;
+                  const balInfo = calculateBalanceDays(cust.expiration || cust.expiryDate);
+                  const isAadhaarDone = checkIsAadhaarVerified(cust);
+                  const isIptv = viewMode === 'iptv';
+                  const title = isIptv
+                    ? (cust.stb_box || cust.pioneer_stb_id || `IPTV #${cust.iptv_id}`)
+                    : (cust.username || '—');
+                  const usernameColor = {
+                    active: '#16a34a',
+                    expired: '#dc2626',
+                    suspended: '#d97706',
+                    disabled: '#64748b',
+                    new: '#7c3aed',
+                  }[cust.status_key] || COLORS.primary;
+                  const cardKey = cust.id && !cust.id.includes('undefined') ? cust.id : `sub_card_${idx}_${cust.cust_id ?? idx}`;
+                  const isSelected = !isIptv && !!bulkSel[cust.internet_id];
+
+                  return (
+                    <View
+                      key={cardKey}
+                      style={[
+                        styles.subCard,
+                        { flex: 1, minWidth: isMobile ? '100%' : 330, maxWidth: isMobile ? '100%' : 'calc(50% - 6px)' },
+                        isSelected && { borderColor: '#93c5fd', backgroundColor: '#f0f9ff' },
+                      ]}
+                    >
+                      {/* Top Row: Checkbox + Title / Full Name + Status Badge */}
+                      <View style={styles.subCardHead}>
+                        {!isIptv && !limitedStaff && (
+                          <TouchableOpacity onPress={() => bulkPick(cust)} style={{ marginRight: 4, marginTop: 2 }}>
+                            <Feather name={isSelected ? 'check-square' : 'square'} size={18} color={isSelected ? '#1d4ed8' : '#94a3b8'} />
+                          </TouchableOpacity>
+                        )}
+                        <TouchableOpacity onPress={() => handleOpenSubscriberScreen(cust)} style={{ flex: 1, minWidth: 0 }}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                            <Text
+                              numberOfLines={1}
+                              style={[
+                                styles.subCardUsername,
+                                { color: isIptv ? '#7c3aed' : usernameColor },
+                                cust.status_key === 'disabled' && { textDecorationLine: 'line-through' },
+                              ]}
+                            >
+                              {title}
+                            </Text>
+                            {!isIptv && (
+                              <View style={[styles.connPill, { backgroundColor: cust.isOnline ? '#dcfce7' : '#f1f5f9' }]}>
+                                <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: cust.isOnline ? '#16a34a' : '#94a3b8' }} />
+                                <Text style={{ fontSize: 9.5, fontWeight: '700', color: cust.isOnline ? '#15803d' : '#64748b' }}>
+                                  {cust.isOnline ? 'ONLINE' : 'OFFLINE'}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
+                          <Text style={styles.subCardFullName} numberOfLines={1}>
+                            {cust.full_name || cust.name || '—'}
+                          </Text>
+                        </TouchableOpacity>
+
+                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 12, backgroundColor: badge.bg }}>
+                          <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: badge.dot }} />
+                          <Text style={{ fontSize: 10, fontWeight: '700', color: badge.fg }}>
+                            {(badge.label === '—' ? (cust.status_text || '—') : badge.label).toUpperCase()}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {/* Stats Grid: Plan & Expiry */}
+                      <View style={styles.subCardStatsRow}>
+                        <View style={styles.subCardStatBox}>
+                          <Text style={styles.subCardStatLbl}>PLAN / PACKAGE</Text>
+                          <Text style={[styles.subCardStatVal, isIptv && { color: '#7c3aed' }]} numberOfLines={1}>
+                            {cust.package_name || '—'}
+                          </Text>
+                          <Text style={styles.subCardStatSub} numberOfLines={1}>
+                            {[cust.subplan_name, cust.auto_renew ? 'Auto-renew' : null].filter(Boolean).join(' · ') || '—'}
+                          </Text>
+                        </View>
+
+                        <View style={styles.subCardStatBox}>
+                          <Text style={styles.subCardStatLbl}>EXPIRY</Text>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+                            <Text style={styles.subCardStatVal} numberOfLines={1}>
+                              {cust.expiration ? formatApiDate(cust.expiration) : '—'}
+                            </Text>
+                            <TouchableOpacity
+                              onPress={() => openWhatsApp(cust)}
+                              style={{ padding: 2 }}
+                              title="Send WhatsApp Reminder"
+                            >
+                              <FontAwesome name="whatsapp" size={13} color="#25D366" />
+                            </TouchableOpacity>
+                          </View>
+                          {balInfo.status !== 'unknown' ? (
+                            <Text style={[styles.subCardStatSub, { fontWeight: '700', color: balInfo.status === 'active' ? '#15803d' : (balInfo.status === 'warning' ? '#b45309' : '#be123c') }]} numberOfLines={1}>
+                              {balInfo.text}
+                            </Text>
+                          ) : (
+                            <Text style={styles.subCardStatSub}>—</Text>
+                          )}
+                        </View>
+                      </View>
+
+                      {/* Meta Details: Mobile, Aadhaar, Operator, Branch */}
+                      <View style={styles.subCardMeta}>
+                        <View style={styles.subCardMetaRow}>
+                          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1 }}>
+                            <Feather name="phone" size={12} color="#64748b" />
+                            <TouchableOpacity
+                              onPress={() => {
+                                if (cust.mobile) {
+                                  const num = String(cust.mobile).replace(/[^\d+]/g, '');
+                                  if (typeof window !== 'undefined') window.location.href = `tel:${num}`;
+                                  else Linking.openURL(`tel:${num}`);
+                                }
+                              }}
+                            >
+                              <Text style={{ fontSize: 12, color: '#0651d4', fontWeight: '600' }}>{cust.mobile || '—'}</Text>
+                            </TouchableOpacity>
+                            {cust.mobile ? (
+                              <TouchableOpacity
+                                onPress={() => {
+                                  const num = String(cust.mobile).replace(/[^\d+]/g, '');
+                                  if (typeof navigator !== 'undefined' && navigator.clipboard) {
+                                    navigator.clipboard.writeText(num);
+                                    toast.success('Mobile number copied to clipboard!');
+                                  }
+                                }}
+                                style={{ padding: 2 }}
+                                title="Copy Mobile Number"
+                              >
+                                <Feather name="copy" size={11} color={COLORS.primary || '#3b82f6'} />
+                              </TouchableOpacity>
+                            ) : null}
+                          </View>
+
+                          {!isIptv && (
+                            isAadhaarDone ? (
+                              <View style={{ backgroundColor: 'rgba(16, 185, 129, 0.12)', borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.3)', paddingHorizontal: 7, paddingVertical: 2.5, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <Feather name="check-circle" size={11} color="#10b981" />
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#10b981' }}>Verified</Text>
+                              </View>
+                            ) : (
+                              <TouchableOpacity
+                                style={{ backgroundColor: 'rgba(239, 68, 68, 0.1)', borderWidth: 1, borderColor: 'rgba(239, 68, 68, 0.3)', paddingHorizontal: 7, paddingVertical: 2.5, borderRadius: 6, flexDirection: 'row', alignItems: 'center', gap: 4 }}
+                                onPress={() => setVerifyAadhaarCust(cust)}
+                              >
+                                <Feather name="shield" size={11} color="#ef4444" />
+                                <Text style={{ fontSize: 10, fontWeight: '700', color: '#ef4444' }}>Verify Aadhaar</Text>
+                              </TouchableOpacity>
+                            )
+                          )}
+                        </View>
+
+                        {(!isOperatorRole || cust.branch_name || cust.registered_on) && (
+                          <View style={styles.subCardMetaRow}>
+                            {!isOperatorRole ? (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, flex: 1 }}>
+                                <Feather name="briefcase" size={11} color="#94a3b8" />
+                                <Text style={{ fontSize: 11, color: '#475569' }} numberOfLines={1}>
+                                  {cust.company_name || cust.partner_name || cust.partner_username || '—'}
+                                </Text>
+                              </View>
+                            ) : null}
+
+                            {cust.branch_name ? (
+                              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4 }}>
+                                <Feather name="git-branch" size={11} color="#94a3b8" />
+                                <Text style={{ fontSize: 11, color: '#64748b' }} numberOfLines={1}>{cust.branch_name}</Text>
+                              </View>
+                            ) : null}
+
+                            {cust.registered_on ? (
+                              <Text style={{ fontSize: 10.5, color: '#94a3b8' }}>
+                                Reg: {formatApiDate(cust.registered_on, false)}
+                              </Text>
+                            ) : null}
+                          </View>
+                        )}
+                      </View>
+
+                      {/* Action Buttons: View Account, Map, ONU */}
+                      <View style={styles.subCardActions}>
+                        <TouchableOpacity style={[styles.subCardBtn, { flex: 1 }]} onPress={() => handleOpenSubscriberScreen(cust)}>
+                          <Feather name="eye" size={12} color="#2563eb" />
+                          <Text style={styles.subCardBtnText}>View Account</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity style={styles.subCardBtn} onPress={() => setSelectedLocationCustomer(cust)}>
+                          <Feather name="map-pin" size={12} color="#2563eb" />
+                          <Text style={styles.subCardBtnText}>Map</Text>
+                        </TouchableOpacity>
+
+                        {!isIptv && (
+                          <TouchableOpacity
+                            style={[styles.subCardBtn, { borderColor: 'rgba(14, 165, 233, 0.3)', backgroundColor: 'rgba(14, 165, 233, 0.08)' }]}
+                            onPress={() => setSelectedDevicesCustomer({ ...cust, account_type: 'internet' })}
+                          >
+                            <Feather name="hard-drive" size={12} color="#0284c7" />
+                            <Text style={[styles.subCardBtnText, { color: '#0284c7' }]}>ONU</Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+          </View>
+        ) : (
         <ScrollView horizontal showsHorizontalScrollIndicator={true} contentContainerStyle={{ minWidth: tableMinWidth(viewMode === 'iptv' ? IPTV_COLS : INT_COLS, [...(isOperatorRole ? ['operator', 'partner'] : []), ...(showRegisteredCol ? [] : ['registered'])]), width: '100%' }}>
           <View style={{ width: '100%' }}>
             {/* Table Header (on phones the table scrolls sideways) */}
@@ -3627,6 +3889,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
             </ScrollView>
           </View>
         </ScrollView>
+        )}
       </View>
     </View>
       {accountActionModals}
@@ -4035,5 +4298,131 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
     color: COLORS.primary,
+  },
+
+  // Subscriber Cards & View Mode Toggle Styles
+  viewModeToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#f1f5f9',
+    borderRadius: 8,
+    padding: 2,
+    gap: 2,
+    marginLeft: 8,
+  },
+  viewModeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    borderRadius: 6,
+  },
+  viewModeBtnActive: {
+    backgroundColor: '#ffffff',
+    boxShadow: '0 1px 2px rgba(0,0,0,0.06)',
+  },
+  viewModeBtnText: {
+    fontSize: 11.5,
+    fontWeight: '600',
+    color: '#64748b',
+  },
+  viewModeBtnTextActive: {
+    color: '#0f172a',
+    fontWeight: '700',
+  },
+  subCardsContainer: {
+    padding: 14,
+  },
+  subCard: {
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#e2e8f0',
+    padding: 14,
+    gap: 10,
+    boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+  },
+  subCardHead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  subCardUsername: {
+    fontSize: 13.5,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  subCardFullName: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#334155',
+    marginTop: 2,
+  },
+  subCardStatsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  subCardStatBox: {
+    flex: 1,
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#f8fafc',
+    borderWidth: 1,
+    borderColor: '#f1f5f9',
+  },
+  subCardStatLbl: {
+    fontSize: 9.5,
+    fontWeight: '800',
+    color: '#64748b',
+    letterSpacing: 0.3,
+    marginBottom: 2,
+  },
+  subCardStatVal: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: '#0f172a',
+  },
+  subCardStatSub: {
+    fontSize: 10,
+    color: '#64748b',
+    marginTop: 2,
+  },
+  subCardMeta: {
+    gap: 6,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+  },
+  subCardMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  subCardActions: {
+    flexDirection: 'row',
+    gap: 6,
+    alignItems: 'center',
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f1f5f9',
+  },
+  subCardBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 7,
+    borderWidth: 1,
+    borderColor: 'rgba(37,99,235,0.3)',
+    backgroundColor: 'rgba(37,99,235,0.06)',
+  },
+  subCardBtnText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: '#2563eb',
   },
 });
