@@ -34,7 +34,7 @@ const gridToKeyRows = (grid) => {
  * matched by RADIUS partner id (radius_token_import.php). Check first (nothing saved), then
  * import. Keys are never shown — only their last 4 characters.
  */
-export const RadiusKeyImportModal = ({ visible, onClose, onDone, inline = false }) => {
+export const RadiusKeyImportModal = ({ visible, onClose, onDone, inline = false, compact = false }) => {
   const [file, setFile] = useState(null); // { name, rows }
   const [fileError, setFileError] = useState('');
   const [check, setCheck] = useState(null); // dry-run answer
@@ -109,7 +109,7 @@ export const RadiusKeyImportModal = ({ visible, onClose, onDone, inline = false 
     >
       {!shown ? (
         <>
-          <Note tone="info" text="Each row sets the API key of the operator whose RADIUS partner id matches. The RADIUS URL and everything else stay as they are. Check first: nothing is saved until you press Update." />
+          {!compact ? <Note tone="info" text="Each row sets the API key of the operator whose RADIUS partner id matches. The RADIUS URL and everything else stay as they are. Check first: nothing is saved until you press Update." /> : null}
           <View style={st.labelRow}>
             <Text style={st.label}>CSV / EXCEL FILE</Text>
             <TouchableOpacity style={st.sampleBtn} onPress={sample}>

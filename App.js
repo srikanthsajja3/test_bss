@@ -433,7 +433,7 @@ function MainApp() {
     setCustomerInitialSearch(search || '');
     // pass the search term through — setActiveTab resets it otherwise (dashboard search + Enter)
     if (filterKey === 'ott' || filterKey.startsWith('ott_')) {
-      setActiveTab('ott_customers');
+      setActiveTab('ott_customers', 'all', range);
       return;
     }
     if (filterKey.startsWith('iptv') || filterKey === 'iptv') {
@@ -501,7 +501,7 @@ function MainApp() {
       case 'iptv_customers':
         return <CustomerScreen key="iptv" refreshSignal={globalRefreshKey} user={user} isIptvMode={true} initialFilter={customerInitialFilter} initialRange={customerInitialRange} initialSearch={customerInitialSearch} onSwitchMode={(mode) => setActiveTab(mode)} onAutoCloseSidebar={() => setSidebarCollapsed(true)} />;
       case 'ott_customers':
-        return <OttSubscribersScreen user={user} refreshSignal={globalRefreshKey} />;
+        return <OttSubscribersScreen user={user} refreshSignal={globalRefreshKey} initialRange={customerInitialRange} />;
       case 'customer_prices':
         // operators: one customer price per package for all their customers
         return <CustomerPricesPage key={`cp_${globalRefreshKey}`} partnerId={user?.partner_id} partnerName={user?.partner_name} readOnly={String(user?.role || '').toLowerCase() !== 'operator'} />;

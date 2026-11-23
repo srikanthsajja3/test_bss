@@ -6,6 +6,7 @@ import { OneBssApi, setApiConfig } from '../services/oneBssApi';
 import { toast } from 'react-toastify';
 import { AddCustomerScreen } from './AddCustomerScreen';
 import { can } from '../services/staffAccess';
+import { StatsBoard } from '../components/dashboard/StatsBoard';
 
 export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartners, refreshSignal = 0 }) => {
   const { width } = useWindowDimensions();
@@ -642,59 +643,15 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
           </View>
         </View>
       ) : null}
-      {/* EXPIRY & REGISTRATION (customers_by_date.php) */}
-      <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-        <Text style={styles.sectionHeaderTitle}>Expiry & Registration</Text>
-        {dateSummary?.generated_at ? (
-          <Text style={{ fontSize: 11, color: COLORS.textMuted }}>As of {dateSummary.generated_at} IST</Text>
-        ) : null}
-      </View>
-      {dateSummaryError ? (
-        <Text style={{ fontSize: 12, color: COLORS.accentRose, marginBottom: 12 }}>{dateSummaryError}</Text>
-      ) : null}
-      <View style={[styles.dateGroupsRow, isMobile && { flexDirection: 'column' }]}>
-        {[
-          { type: 'internet', title: 'Internet', icon: <Feather name="wifi" size={18} color={COLORS.primary} /> },
-          { type: 'iptv', title: 'IPTV', icon: <MaterialIcons name="live-tv" size={18} color="#8b5cf6" /> },
-        ].map((grp) => (
-          <View key={grp.type} style={[styles.card, GLASS_CARD_INTERACTIVE, styles.dateGroupCard]}>
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-              {grp.icon}
-              <Text style={styles.cardTitle}>{grp.title}</Text>
-            </View>
-            {[
-              { kind: 'expiry', title: 'EXPIRY', keys: ['expiring_next_7_days', 'expires_today', 'expires_tomorrow', 'expired_yesterday', 'expired_last_7_days'] },
-              { kind: 'registered', title: 'REGISTRATION', keys: ['registered_today', 'registered_yesterday', 'registered_this_month', 'registered_last_month'] },
-            ].map((row) => (
-              <View key={row.kind} style={{ marginBottom: 10 }}>
-                <Text style={styles.dateRowTitle}>{row.title}</Text>
-                <View style={styles.dateBtnWrap}>
-                  {row.keys.map((key) => {
-                    const item = dateSummary?.[grp.type]?.[key];
-                    const count = item?.count;
-                    const isExpiry = row.kind === 'expiry';
-                    const tone = isExpiry
-                      ? (key.startsWith('expired') ? { fg: '#be123c', bg: '#fff1f2', border: '#fecdd3' } : { fg: '#b45309', bg: '#fffbeb', border: '#fde68a' })
-                      : { fg: '#0369a1', bg: '#f0f9ff', border: '#bae6fd' };
-                    return (
-                      <TouchableOpacity
-                        key={key}
-                        style={[styles.dateBtn, { backgroundColor: tone.bg, borderColor: tone.border }, !count && { opacity: 0.6 }]}
-                        onPress={() => onNavigateToCustomers && onNavigateToCustomers(grp.type === 'iptv' ? 'iptv_all' : 'all', key)}
-                      >
-                        <Text style={[styles.dateBtnLabel, { color: tone.fg }]}>{item?.label || key.replace(/_/g, ' ')}</Text>
-                        <View style={[styles.dateBtnCount, { borderColor: tone.border }]}>
-                          <Text style={[styles.dateBtnCountText, { color: tone.fg }]}>{dateSummary ? (count ?? 0) : '…'}</Text>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            ))}
-          </View>
-        ))}
-      </View>
+      {/* EXPIRY & REGISTRATION (customers_by_date.php) + complaints / leads */}
+      <StatsBoard
+        user={user}
+        summary={dateSummary}
+        summaryError={dateSummaryError}
+        onReloadSummary={loadDateSummary}
+        onNavigateToCustomers={onNavigateToCustomers}
+        refreshSignal={refreshSignal}
+      />
 
     </ScrollView>
   );

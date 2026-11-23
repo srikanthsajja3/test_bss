@@ -213,7 +213,10 @@ export const LeadsScreen = ({ user, refreshSignal }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
-  const [stage, setStage] = useState('');
+  // the dashboard opens #leads?stage=<stage>
+  const [stage, setStage] = useState(() => {
+    try { const m = String(window.location.hash || '').match(/[?&]stage=([^&]+)/); return m ? decodeURIComponent(m[1]) : ''; } catch (e) { return ''; }
+  });
   const [shown, setShown] = useState(PAGE);
   const [adding, setAdding] = useState(false);
 

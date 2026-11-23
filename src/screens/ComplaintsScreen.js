@@ -24,7 +24,10 @@ export const ComplaintsScreen = ({ user, refreshSignal }) => {
 
   const [ctx, setCtx] = useState(null);
   const [opId, setOpId] = useState('');
-  const [status, setStatus] = useState(0); // 0 = all
+  // 0 = all; the dashboard opens #complaints?status=1 etc.
+  const [status, setStatus] = useState(() => {
+    try { const m = String(window.location.hash || '').match(/[?&]status=(\d+)/); return m && [1, 3, 4, 5, 6].includes(Number(m[1])) ? Number(m[1]) : 0; } catch (e) { return 0; }
+  });
   const [page, setPage] = useState(0);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);

@@ -25,12 +25,20 @@ const PAGE = 100;
 
 /**
  * OTT subscribers (customers_list.php?type=ott). Clicking a subscriber opens the customer page.
- * Props: user, refreshSignal
+ * Props: user, refreshSignal, initialRange (a dashboard Expiry & Registration button, e.g. 'expires_today')
  */
-export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
+const RANGE_LABEL = {
+  expiring_next_7_days: 'Expires in next 7 days', expires_today: 'Expires today', expires_tomorrow: 'Expires tomorrow',
+  expired_yesterday: 'Expired since yesterday', expired_last_7_days: 'Expired in last 7 days',
+  registered_today: 'Registered today', registered_yesterday: 'Registered yesterday',
+  registered_this_month: 'Registered this month', registered_last_month: 'Registered last month',
+};
+export const OttSubscribersScreen = ({ user, refreshSignal = 0, initialRange = '' }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
   const isOperator = String(user?.role || user?.account_role || '').toLowerCase() === 'operator';
+  const [range, setRange] = useState(RANGE_LABEL[initialRange] ? initialRange : '');
+  useEffect(() => { setRange(RANGE_LABEL[initialRange] ? initialRange : ''); }, [initialRange]);
   const [search, setSearch] = useState('');
   const [debounced, setDebounced] = useState('');
   const [status, setStatus] = useState('all');
@@ -63,6 +71,7 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
     return () => clearTimeout(t);
   }, [cf.subId, cf.name, cf.mobile, cf.partner]);
   const colQuery = {
+    range: range || undefined,
     partner_id: cf.operator || undefined,
     f_subid: cfText.subId, f_name: cfText.name, f_mobile: cfText.mobile, f_partner: cf.partner || undefined, f_plan: cf.pkg,
     ...dateRangeParams(cf.expiry),
@@ -217,6 +226,13 @@ export const OttSubscribersScreen = ({ user, refreshSignal = 0 }) => {
             <TouchableOpacity onPress={() => setSearch('')}><Feather name="x" size={15} color="#94a3b8" /></TouchableOpacity>
           ) : null}
         </View>
+        {range ? (
+          <View style={styles.rangeChip}>
+            <Feather name="calendar" size={13} color={OTT} />
+            <Text style={styles.rangeChipText}>{RANGE_LABEL[range]}</Text>
+            <TouchableOpacity onPress={() => setRange('')} accessibilityLabel="Show all OTT subscribers"><Feather name="x" size={14} color="#64748b" /></TouchableOpacity>
+          </View>
+        ) : null}
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginTop: 10 }}>
           {CHIPS.map((c) => (
             <TouchableOpacity key={c.id} style={[styles.chip, status === c.id && styles.chipOn]} onPress={() => setStatus(c.id)}>
@@ -255,6 +271,8 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, minWidth: 0, fontSize: 13, color: COLORS.textMain, outlineStyle: 'none' },
   chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 999, backgroundColor: '#f1f5f9', marginRight: 6 },
   chipOn: { backgroundColor: OTT },
+  rangeChip: { flexDirection: 'row', alignItems: 'center', gap: 6, alignSelf: 'flex-start', marginTop: 10, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 999, backgroundColor: '#f0f9ff', borderWidth: 1, borderColor: '#bae6fd' },
+  rangeChipText: { fontSize: 12, fontWeight: '700', color: '#0369a1' },
   chipText: { fontSize: 12, fontWeight: '700', color: '#334155' },
   pager: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, justifyContent: 'space-between', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
   pageBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#f8fafc' },

@@ -1049,6 +1049,8 @@ export const OneBssApi = {
     if (status) qs.set('status', String(status));
     return get(`/support/complaints.php?${qs.toString()}`);
   },
+  // tickets per status (dashboard); the server pages through RADIUS and keeps the result 2 minutes
+  complaintsCounts: async (fresh = false, opId = '') => get(`/support/complaints.php?counts=1${fresh ? '&fresh=1' : ''}${opId ? `&operator_id=${q(opId)}` : ''}`),
   complaintTicket: async (opId, id) => get(`/support/complaints.php?id=${q(id)}${opId ? `&operator_id=${q(opId)}` : ''}`),
   customerComplaints: async (internetId) => get(`/support/complaints.php?internet_id=${q(internetId)}`),
   /** action: create | assign | resolve | close | reopen */

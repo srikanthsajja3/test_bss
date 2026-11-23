@@ -56,6 +56,9 @@ const calculateBalanceDays = (expiryDateStr) => {
       return { text: String(expiryDateStr), days: null, status: 'unknown' };
     }
 
+    // internet expiry has a time: one that ran out this morning is "Expired today", not "Expires today"
+    const exactMs = dateObj.getTime();
+    const hasTime = /\d{1,2}:\d{2}/.test(String(expiryDateStr)) && !/\s00:00(:00)?$/.test(String(expiryDateStr).trim());
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     dateObj.setHours(0, 0, 0, 0);
@@ -66,6 +69,7 @@ const calculateBalanceDays = (expiryDateStr) => {
     if (diffDays > 0) {
       return { text: `${diffDays} ${diffDays === 1 ? 'Day' : 'Days'} Left`, days: diffDays, status: 'active' };
     } else if (diffDays === 0) {
+      if (hasTime && exactMs <= Date.now()) return { text: 'Expired Today', days: 0, status: 'expired' };
       return { text: 'Expires Today', days: 0, status: 'warning' };
     } else {
       const absDays = Math.abs(diffDays);
@@ -812,6 +816,8 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   // per customer: { state: 'syncing' | 'done' | 'partial' | 'failed', at: Date, message }
   const [syncState, setSyncState] = useState({});
   const syncInFlight = React.useRef({});
+  // an account sync changed our data (branch, plan, expiry, Aadhaar...) -> reload the list when it shows again
+  const listStaleRef = React.useRef(false);
   const syncCustomerAccounts = async (custId, internetIds, mobile) => {
     if (custId === null || custId === undefined) return;
     const key = String(custId);
@@ -834,6 +840,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           tasks.push(
             Promise.allSettled(ids.map((id) => OneBssApi.syncInternetCustomerDetail(id))).then((results) => {
               const failed = results.filter((r) => r.status === 'rejected' || !r.value?.ok);
+              if (failed.length < results.length) listStaleRef.current = true;
               if (failed.length) {
                 const msg = failed[0].value?.data?.message || 'gateway unreachable';
                 problems.push(`Internet: ${failed.length} of ${ids.length} not synced (${msg})`);
@@ -1150,6 +1157,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
       if (user?.token) setApiConfig(undefined, user.token);
       const res = await OneBssApi.syncInternetCustomerDetail(numericId);
       const data = res.data || {};
+      if (res.ok) listStaleRef.current = true;
 
       if (!silent) {
         if (res.status === 403) {
@@ -2163,6 +2171,14 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
   };
 
   // Detail screen back -> account cards
+  // back on the list (button or browser back) after a sync changed something: reload it quietly
+  useEffect(() => {
+    if (activeCustomerId === null && listStaleRef.current) {
+      listStaleRef.current = false;
+      loadCustomerDataFromApi();
+    }
+  }, [activeCustomerId]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const handleCloseSubscriberScreen = () => {
     setActiveAccountSel(null);
     if (typeof window !== 'undefined' && activeCustomerId !== null) {
@@ -3076,7 +3092,7 @@ export const CustomerScreen = ({ user, isIptvMode = false, initialFilter = 'all'
           <View style={styles.rangeBanner}>
             <Feather name={activeRangeInfo.kind === 'expiry' ? 'clock' : 'user-plus'} size={14} color={activeRangeInfo.kind === 'expiry' ? '#b45309' : '#0369a1'} />
             <Text style={styles.rangeBannerText}>
-              {viewMode === 'iptv' ? 'IPTV' : 'Internet'} · {activeRangeInfo.label}
+              {viewMode === 'iptv' ? 'IPTV' : 'Internet'} · {viewMode !== 'iptv' && activeRange === 'expired_yesterday' ? 'Expired since yesterday' : activeRangeInfo.label}
               {!loadingData ? ` — ${counts.total ?? listTotal} ${viewMode === 'iptv' ? 'STB(s)' : 'account(s)'}` : ''}
             </Text>
             <TouchableOpacity onPress={handleClearRange} style={styles.rangeBannerClear} title="Show all accounts">

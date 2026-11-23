@@ -8,6 +8,8 @@ import { RadiusKeyImportModal } from './RadiusKeyImportModal';
 
 // the lists in the panels keep a fixed height and scroll inside (the page itself stays put)
 const LIST_MAX = Platform.OS === 'web' ? 'calc(100vh - 320px)' : 520;
+// desktop: the operations list keeps the window's height and scrolls inside
+const NAV_MAX = Platform.OS === 'web' ? 'calc(100vh - 190px)' : 560;
 
 // ---------------------------------------------------------------------------------------------
 // Partners › Bulk operations: every sync / import / setting that works on many partners at once,
@@ -116,7 +118,7 @@ const ItemDetail = ({ type, it }) => {
   );
 };
 
-const RunActivity = ({ type, st, busy, onAct, scopeLabel }) => {
+const RunActivity = ({ type, st, busy, onAct, scopeLabel, compact }) => {
   const meta = RUNS[type];
   const counts = st?.counts;
   const total = counts?.total || 0;
@@ -131,20 +133,9 @@ const RunActivity = ({ type, st, busy, onAct, scopeLabel }) => {
   const items = (st?.items || []).filter((it) => !filter || (filter === 'noiptv' ? isNoIptv(it) : it.state === filter));
   return (
     <View>
-      <Text style={s.about}>{meta.about}{scopeLabel ? ` (${scopeLabel})` : ''} It runs on the server: you can leave this page and come back.</Text>
-      <View style={s.actRow}>
-        {st?.running ? (
-          <Btn label="Stop" icon="square" kind="danger" onPress={() => onAct('stop')} loading={busy} />
-        ) : (
-          <>
-            <Btn label={st?.items?.length ? 'Run again from the start' : 'Start'} icon="refresh-cw" onPress={() => onAct('start')} loading={busy} />
-            {leftover > 0 ? <Btn label={`Continue (${leftover} left)`} icon="play" kind="ghost" onPress={() => onAct('resume')} loading={busy} /> : null}
-          </>
-        )}
-      </View>
-      {st?.interrupted ? <View style={{ marginTop: 10 }}><Note tone="warn" text="The server stopped this run before it finished. Continue goes on with the operators that are left." /></View> : null}
+      {st?.interrupted ? <View style={{ marginBottom: 4 }}><Note tone="warn" text="The server stopped this run before it finished. Continue goes on with the operators that are left." /></View> : null}
       {counts ? (
-        <View style={{ marginTop: 14 }}>
+        <View>
           <View style={s.rowBetween}>
             <Text style={s.big}>{st.running ? 'Running' : st.stopped ? 'Stopped' : st.interrupted ? 'Interrupted' : 'Last run'} · {finished}/{total} operators</Text>
             <Text style={s.small}>{st.running ? `started ${st.started_at || ''}` : st.finished_at ? `finished ${st.finished_at}` : ''}{st.started_by ? ` · by ${st.started_by}` : ''}</Text>
@@ -160,7 +151,7 @@ const RunActivity = ({ type, st, busy, onAct, scopeLabel }) => {
             {noIptvCount ? (
               <TouchableOpacity onPress={() => setFilter(filter === 'noiptv' ? '' : 'noiptv')} style={[s.chip, { borderColor: '#d97706' }, filter === 'noiptv' && { backgroundColor: '#d9770618' }]}>
                 <Feather name={type === 'ott' ? 'play-circle' : 'tv'} size={11} color="#d97706" />
-                <Text style={[s.chipText, { color: '#d97706' }]}>{noIptvCount} no customer in {svc}</Text>
+                <Text style={[s.chipText, { color: '#d97706' }]}>{noIptvCount} {noIptvCount === 1 ? 'operator' : 'operators'} with no {svc} customers</Text>
               </TouchableOpacity>
             ) : null}
             {filter ? <Text style={s.small}>· showing only these (tap again for all)</Text> : null}
@@ -174,7 +165,7 @@ const RunActivity = ({ type, st, busy, onAct, scopeLabel }) => {
                   <View style={{ flex: 1, minWidth: 0 }}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
                       <Text style={s.itemName} numberOfLines={1}>{it.name} <Text style={s.small}>#{it.partner_id}</Text></Text>
-                      {isNoIptv(it) ? <Text style={s.noIptv}>No customer in {svc}</Text> : null}
+                      {isNoIptv(it) ? <Text style={s.noIptv}>No {svc} customers</Text> : null}
                     </View>
                     {it.state === 'running' && it.progress ? (
                       <Text style={s.small}>{it.progress.done}/{it.progress.total} {meta.noun || 'items'}…</Text>
@@ -194,7 +185,7 @@ const RunActivity = ({ type, st, busy, onAct, scopeLabel }) => {
           </ScrollView>
         </View>
       ) : (
-        <Text style={[s.small, { marginTop: 14 }]}>Not run yet.</Text>
+        <Text style={s.small}>Not run yet.</Text>
       )}
     </View>
   );
@@ -223,17 +214,15 @@ const ChannelRun = ({ ch }) => {
         {ch.error ? ` · ${ch.error}` : ''}
         {` · started ${when(ch.started)}${ch.by ? ` by ${ch.by}` : ''}${ch.finished ? ` · finished ${when(ch.finished)}` : ''}`}
       </Text>
-      {running ? <Text style={[s.small, { marginTop: 4 }]}>Runs on the server — you can leave this page.</Text> : null}
     </View>
   );
 };
 
-const SingleActivity = ({ id, last, onRun, busy, channels }) => {
+const SingleActivity = ({ id, last, onRun, busy, channels, compact }) => {
   const meta = SINGLES[id];
   return (
     <View>
-      <Text style={s.about}>{meta.about}</Text>
-      <View style={s.actRow}><Btn label={last ? 'Sync again' : 'Sync now'} icon="refresh-cw" onPress={onRun} loading={busy} /></View>
+      {!busy && !last && !(id === 'iptv_plans' && channels) ? <Text style={s.small}>Not synced in this session yet.</Text> : null}
       {busy ? (
         <View style={[s.resultBox, { flexDirection: 'row', alignItems: 'center', gap: 10 }]}>
           <ActivityIndicator size="small" color={meta.color} />
@@ -403,7 +392,6 @@ const PartnerSettings = ({ isMobile, mode }) => {
 
   return (
     <View>
-      <Text style={s.about}>{meta.about}</Text>
       {notReady ? <View style={{ marginTop: 8 }}><Note tone="warn" text={notReady} /></View> : null}
 
       <View style={[s.toolbar, isMobile && { flexDirection: 'column', alignItems: 'stretch' }]}>
@@ -591,105 +579,195 @@ export const PartnersBulkPage = ({ isMobile, isSuperAdmin, allowed = () => true,
   cards.forEach((g) => { if (g.group === 'Sync customers & setup') g.items = g.items.filter((c) => c.id !== 'plans'); });
   const shown = cards.filter((g) => g.items.length);
 
-  const cardBadge = (id) => {
+  // "2026-11-22 23:07:58" -> "22 Nov, 23:07"
+  const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const fmtWhen = (t) => {
+    const m = String(t || '').match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/);
+    return m ? `${Number(m[3])} ${MON[Number(m[2]) - 1]}, ${m[4]}:${m[5]}` : String(t || '');
+  };
+  // the status line of an operation: tone = running | warn | ok | bad | idle
+  const statusOf = (id) => {
     if (RUNS[id]) {
       const st = status[id];
-      if (st?.running) return { text: `${finishedCount(st.counts)}/${st.counts?.total || 0}`, color: '#2563eb', spin: true };
-      if (st?.interrupted) return { text: 'Interrupted', color: '#b45309' };
-      if (st?.finished_at) return { text: `Last ${String(st.finished_at).slice(5, 16)}`, color: '#64748b' };
-      return null;
+      if (st?.running) {
+        const total = st.counts?.total || 0;
+        const done = finishedCount(st.counts);
+        return { tone: 'running', text: `Running · ${done}/${total}`, pct: total ? Math.round((done / total) * 100) : 0 };
+      }
+      if (st?.interrupted) return { tone: 'warn', text: 'Interrupted' };
+      if (st?.finished_at) return { tone: st.counts?.failed ? 'warn' : 'ok', text: `Last run ${fmtWhen(st.finished_at)}${st.counts?.failed ? ` · ${st.counts.failed} failed` : ''}` };
+      return { tone: 'idle', text: 'Not run yet' };
     }
-    if (singleBusy === id) return { text: 'Syncing', color: '#2563eb', spin: true };
-    if (single[id]) return { text: single[id].ok ? 'Done' : 'Failed', color: single[id].ok ? '#16a34a' : '#dc2626' };
-    return null;
+    if (singleBusy === id) return { tone: 'running', text: 'Syncing…' };
+    if (single[id]) return { tone: single[id].ok ? 'ok' : 'bad', text: `${single[id].ok ? 'Synced' : 'Failed'} at ${single[id].at}` };
+    if (SINGLES[id]) return { tone: 'idle', text: 'Sync on demand' };
+    return { tone: 'idle', text: id === 'keys' ? 'CSV / Excel import' : 'Settings for all partners' };
   };
+  const TONE = { running: '#2563eb', warn: '#b45309', ok: '#15803d', bad: '#b91c1c', idle: '#64748b' };
 
   const visibleIds = shown.flatMap((g) => g.items.map((c) => c.id));
   const meta = visibleIds.includes(active) ? (RUNS[active] || SINGLES[active] || shown.flatMap((g) => g.items).find((c) => c.id === active)) : null;
+  const runningCount = runTypes.filter((t) => status[t]?.running).length + (singleBusy ? 1 : 0);
+  // phones: the list first; an operation opens on its own screen
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const open = (id) => {
+    if (isMobile) {
+      setActive(id);
+      setMobileOpen(true);
+      if (typeof window !== 'undefined' && window.scrollTo) setTimeout(() => window.scrollTo(0, 0), 0);
+    } else setActive(id);
+  };
+  const showList = !isMobile || !mobileOpen;
+  const showDetail = !!meta && (!isMobile || mobileOpen);
 
-  return (
-    <View style={{ gap: 14 }}>
-      <View style={s.head}>
-        {onBack ? (
-        <TouchableOpacity onPress={onBack} style={s.back} accessibilityLabel="Back to partners">
-          <Feather name="arrow-left" size={16} color="#0f172a" />
-          {!isMobile ? <Text style={s.backText}>Partners</Text> : null}
-        </TouchableOpacity>
-        ) : null}
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={s.title}>Bulk operations</Text>
-          <Text style={s.small} numberOfLines={2}>Syncs, imports and settings for {isSuperAdmin ? 'all partners' : 'all partners under you'}.</Text>
-        </View>
+  const Status = ({ id, inline }) => {
+    const st = statusOf(id);
+    const c = TONE[st.tone];
+    return (
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: inline ? 0 : 2 }}>
+        {st.tone === 'running' ? <ActivityIndicator size="small" color={c} style={{ transform: [{ scale: 0.6 }], width: 12, height: 12 }} />
+          : <View style={[s.dot, { backgroundColor: st.tone === 'idle' ? '#cbd5e1' : c }]} />}
+        <Text style={[s.statusText, { color: c }, st.tone !== 'idle' && { fontWeight: '600' }]} numberOfLines={1}>{st.text}</Text>
       </View>
+    );
+  };
 
-      {!shown.length ? <View style={{ marginTop: 16 }}><Note tone="info" text="Your staff role has no Bulk Operations buttons. Ask your admin (Staff & Roles › Partner Bulk Operations)." /></View> : null}
-      {shown.map((g) => (
-        <View key={g.group}>
-          <Text style={s.group}>{g.group.toUpperCase()}</Text>
-          <View style={s.grid}>
-            {g.items.map((c) => {
-              const b = cardBadge(c.id);
-              const on = active === c.id;
-              return (
-                <TouchableOpacity
-                  key={c.id}
-                  onPress={() => pick(c.id)}
-                  style={[s.card, isMobile && { flexBasis: '100%' },
-                    { borderLeftColor: c.color },
-                    on && { borderColor: `${c.color}80`, borderLeftColor: c.color, backgroundColor: `${c.color}0a` }]}
-                >
-                  <View style={[s.cardIcon, { backgroundColor: `${c.color}${on ? '1f' : '14'}` }]}><Feather name={c.icon} size={17} color={c.color} /></View>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={s.cardTitle} numberOfLines={1}>{c.title}</Text>
-                    {b ? (
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 }}>
-                        {b.spin ? <ActivityIndicator size="small" color={b.color} style={{ transform: [{ scale: 0.7 }] }} /> : null}
-                        <Text style={[s.small, { color: b.color, fontWeight: '700' }]} numberOfLines={1}>{b.text}</Text>
-                      </View>
-                    ) : <Text style={s.small} numberOfLines={1}>{RUNS[c.id] ? 'Not run yet' : 'Open'}</Text>}
-                  </View>
-                  <Feather name={on ? 'chevron-down' : 'chevron-right'} size={16} color={on ? c.color : '#94a3b8'} />
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+  const nav = (
+    <View style={[s.nav, !isMobile && s.navDesk]}>
+      <ScrollView style={!isMobile ? { maxHeight: NAV_MAX } : null} contentContainerStyle={{ paddingVertical: 10, paddingHorizontal: 8 }} showsVerticalScrollIndicator nestedScrollEnabled>
+      {shown.map((g, gi) => (
+        <View key={g.group} style={gi ? s.navGroupGap : null}>
+          <Text style={s.group}>{g.group}</Text>
+          {g.items.map((c) => {
+            const on = !isMobile && active === c.id;
+            const st = statusOf(c.id);
+            return (
+              <TouchableOpacity key={c.id} onPress={() => open(c.id)} style={[s.navItem, on && s.navItemOn]} accessibilityRole="button">
+                {on ? <View style={[s.navAccent, { backgroundColor: c.color }]} /> : null}
+                <View style={[s.navIcon, { backgroundColor: `${c.color}14` }]}><Feather name={c.icon} size={15} color={c.color} /></View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={[s.navTitle, on && { color: '#0f172a' }]} numberOfLines={1}>{c.title}</Text>
+                  <Status id={c.id} />
+                  {st.tone === 'running' && st.pct != null ? (
+                    <View style={s.navBar}><View style={[s.navBarFill, { width: `${st.pct}%`, backgroundColor: c.color }]} /></View>
+                  ) : null}
+                </View>
+                <Feather name="chevron-right" size={15} color={on ? c.color : '#cbd5e1'} />
+              </TouchableOpacity>
+            );
+          })}
         </View>
       ))}
+      </ScrollView>
+    </View>
+  );
 
-      {/* the activity of the picked card, right below */}
-      {meta ? (
-        <View ref={panelRef} style={[s.panel, { borderTopColor: meta.color }]}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <Feather name={meta.icon} size={17} color={meta.color} />
-            <Text style={s.panelTitle}>{meta.title}</Text>
-          </View>
-          {RUNS[active] ? (
-            <RunActivity key={active} type={active} st={status[active]} busy={busy} onAct={(a) => act(active, a)} scopeLabel={isSuperAdmin ? '' : 'operators under you'} />
-          ) : SINGLES[active] ? (
-            <SingleActivity id={active} last={single[active]} busy={singleBusy === active} onRun={() => runSingle(active)} channels={iptvChannels} />
-          ) : active === 'keys' ? (
-            <RadiusKeyImportModal visible inline onClose={() => {}} />
-          ) : SETTINGS[active] ? (
-            <PartnerSettings key={active} isMobile={isMobile} mode={active} />
-          ) : null}
+  // Start / Stop / Sync beside the panel title
+  const runSt = RUNS[active] ? status[active] : null;
+  const leftover = runSt?.counts ? runSt.counts.pending + runSt.counts.running : 0;
+  const headerActions = RUNS[active] ? (
+    <View style={s.headActions}>
+      {runSt?.running ? (
+        <Btn label="Stop" icon="square" kind="danger" onPress={() => act(active, 'stop')} loading={busy} />
+      ) : (
+        <>
+          {leftover > 0 ? <Btn label={isMobile ? `Continue (${leftover})` : `Continue (${leftover} left)`} icon="play" kind="ghost" onPress={() => act(active, 'resume')} loading={busy} /> : null}
+          <Btn label={runSt?.items?.length ? (isMobile ? 'Run again' : 'Run again from the start') : 'Start'} icon="refresh-cw" onPress={() => act(active, 'start')} loading={busy} />
+        </>
+      )}
+    </View>
+  ) : SINGLES[active] ? (
+    <View style={s.headActions}>
+      <Btn label={single[active] ? 'Sync again' : 'Sync now'} icon="refresh-cw" onPress={() => runSingle(active)} loading={singleBusy === active} />
+    </View>
+  ) : null;
+
+  const detail = meta ? (
+    <View ref={panelRef} style={[s.panel, !isMobile && { flex: 1, minWidth: 0 }, isMobile && { padding: 14 }]}>
+      <View style={s.panelHead}>
+        <View style={[s.panelIcon, { backgroundColor: `${meta.color}14` }]}><Feather name={meta.icon} size={18} color={meta.color} /></View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={s.panelTitle} numberOfLines={isMobile ? 2 : 1}>{meta.title}</Text>
+          <Status id={active} />
         </View>
-      ) : null}
+        {headerActions}
+      </View>
+      <View style={s.panelBody}>
+        {RUNS[active] ? (
+          <RunActivity key={active} type={active} st={status[active]} busy={busy} onAct={(a) => act(active, a)} scopeLabel={isSuperAdmin ? '' : 'operators under you'} compact={isMobile} />
+        ) : SINGLES[active] ? (
+          <SingleActivity id={active} last={single[active]} busy={singleBusy === active} onRun={() => runSingle(active)} channels={iptvChannels} compact={isMobile} />
+        ) : active === 'keys' ? (
+          <RadiusKeyImportModal visible inline compact onClose={() => {}} />
+        ) : SETTINGS[active] ? (
+          <PartnerSettings key={active} isMobile={isMobile} mode={active} />
+        ) : null}
+      </View>
+    </View>
+  ) : null;
+
+  return (
+    <View style={{ gap: 16 }}>
+      <View style={s.head}>
+        {isMobile && mobileOpen ? (
+          <TouchableOpacity onPress={() => setMobileOpen(false)} style={s.back} accessibilityLabel="All operations">
+            <Feather name="arrow-left" size={16} color="#0f172a" />
+          </TouchableOpacity>
+        ) : onBack ? (
+          <TouchableOpacity onPress={onBack} style={s.back} accessibilityLabel="Back to partners">
+            <Feather name="arrow-left" size={16} color="#0f172a" />
+            {!isMobile ? <Text style={s.backText}>Partners</Text> : null}
+          </TouchableOpacity>
+        ) : null}
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={s.title} numberOfLines={1}>Bulk operations</Text>
+          {!isMobile ? <Text style={s.subtitle} numberOfLines={1}>Syncs, imports and settings for {isSuperAdmin ? 'all partners' : 'all partners under you'}</Text> : null}
+        </View>
+        {runningCount ? (
+          <View style={s.runPill}>
+            <ActivityIndicator size="small" color="#2563eb" style={{ transform: [{ scale: 0.6 }], width: 12, height: 12 }} />
+            <Text style={s.runPillText}>{runningCount} running</Text>
+          </View>
+        ) : null}
+      </View>
+
+      {!shown.length ? <Note tone="info" text="Your staff role has no Bulk Operations buttons. Ask your admin (Staff & Roles › Partner Bulk Operations)." /> : (
+        <View style={[!isMobile && { flexDirection: 'row', alignItems: 'flex-start', gap: 16 }]}>
+          {showList ? nav : null}
+          {showDetail ? detail : null}
+        </View>
+      )}
     </View>
   );
 };
 
 const s = StyleSheet.create({
   head: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  back: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#ffffff' },
+  back: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 12, height: 36, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#ffffff' },
   backText: { fontSize: 12.5, fontWeight: '700', color: '#0f172a' },
   title: { fontSize: 18, fontWeight: '800', color: '#0f172a' },
-  group: { fontSize: 11, fontWeight: '800', color: '#64748b', letterSpacing: 0.5, marginBottom: 8 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
-  card: { flexBasis: 250, flexGrow: 1, maxWidth: 420, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 12, borderRadius: 10, borderWidth: 1, borderLeftWidth: 3, borderColor: '#e2e8f0', backgroundColor: '#ffffff' },
-  cardIcon: { width: 36, height: 36, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
-  cardTitle: { fontSize: 13.5, fontWeight: '700', color: '#0f172a' },
-  panel: { backgroundColor: '#ffffff', borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0', borderTopWidth: 3, padding: 16 },
-  panelTitle: { fontSize: 15, fontWeight: '800', color: '#0f172a' },
+  subtitle: { fontSize: 12, color: '#64748b', marginTop: 1 },
+  runPill: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 14, backgroundColor: '#eff6ff', borderWidth: 1, borderColor: '#bfdbfe' },
+  runPillText: { fontSize: 11.5, fontWeight: '700', color: '#1d4ed8' },
+  nav: { backgroundColor: '#ffffff', borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0', overflow: 'hidden' },
+  navDesk: { width: 300, flexShrink: 0, ...(Platform.OS === 'web' ? { position: 'sticky', top: 0 } : null) },
+  navGroupGap: { marginTop: 8, paddingTop: 8, borderTopWidth: 1, borderTopColor: '#f1f5f9' },
+  group: { fontSize: 10.5, fontWeight: '800', color: '#94a3b8', letterSpacing: 0.6, textTransform: 'uppercase', paddingHorizontal: 8, marginBottom: 4, marginTop: 2 },
+  navItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 8, paddingVertical: 9, borderRadius: 8, position: 'relative' },
+  navItemOn: { backgroundColor: '#f1f5f9' },
+  navAccent: { position: 'absolute', left: 0, top: 8, bottom: 8, width: 3, borderRadius: 2 },
+  navIcon: { width: 32, height: 32, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  navTitle: { fontSize: 13, fontWeight: '700', color: '#1e293b' },
+  navBar: { height: 3, borderRadius: 2, backgroundColor: '#e2e8f0', marginTop: 5, overflow: 'hidden' },
+  navBarFill: { height: 3, borderRadius: 2 },
+  dot: { width: 6, height: 6, borderRadius: 3 },
+  statusText: { fontSize: 11.5, color: '#64748b' },
+  panel: { backgroundColor: '#ffffff', borderRadius: 12, borderWidth: 1, borderColor: '#e2e8f0', padding: 18 },
+  headActions: { flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0, marginLeft: 'auto' },
+  panelHead: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, paddingBottom: 14, marginBottom: 14, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  panelIcon: { width: 38, height: 38, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  panelTitle: { fontSize: 16, fontWeight: '800', color: '#0f172a' },
+  panelBody: {},
   about: { fontSize: 12.5, color: '#475569', lineHeight: 18 },
   actRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 12 },
   resultBox: { marginTop: 12, borderWidth: 1, borderColor: '#e2e8f0', borderRadius: 8, padding: 12 },
