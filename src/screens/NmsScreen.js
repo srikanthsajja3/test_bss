@@ -377,9 +377,22 @@ const Overview = ({ user, isMobile, onOpen }) => {
 const devId = (d) => pick(d, 'device_id', 'id');
 const devName = (d) => pick(d, 'device_name', 'name') || pick(d, 'device_ip', 'host') || `#${devId(d)}`;
 
+// "D-Link" / "DLINK", "Huawei" / "HUAWEI" are one vendor
+const vendorKey = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9]/g, '') || 'other';
+
 const DeviceForm = ({ visible, device, onClose, onSaved, operators }) => {
   const call = useNms();
   const editing = !!device;
+  // the NMS device models: only these work, so vendor -> model are picked from them
+  const [models, setModels] = useState(null); // null = loading, false = could not load
+  const [vendor, setVendor] = useState('');
+  useEffect(() => {
+    if (!visible) return undefined;
+    let live = true;
+    setModels(null);
+    call('models', {}, { quiet: true }).then((r) => { if (live) setModels(r && Array.isArray(r.models) ? r.models : false); });
+    return () => { live = false; };
+  }, [visible]); // eslint-disable-line react-hooks/exhaustive-deps
   const blank = { type: 'olt', protocol: 'telnet', enabled: true, auto_sync: false, sync_every_min: 0, timeout_s: 20, sync_now: true };
   const [f, setF] = useState(blank);
   const [busy, setBusy] = useState(false);
@@ -396,7 +409,41 @@ const DeviceForm = ({ visible, device, onClose, onSaved, operators }) => {
     } : blank);
   }, [visible, device]); // eslint-disable-line react-hooks/exhaustive-deps
   const set = (k) => (v) => setF((x) => ({ ...x, [k]: v }));
+  // vendors and models of the chosen type
+  const ofType = Array.isArray(models) ? models.filter((m) => !f.type || m.type === f.type) : [];
+  const vendors = [];
+  ofType.forEach((m) => {
+    const k = vendorKey(m.vendor);
+    const have = vendors.find((v) => v.key === k);
+    if (!have) vendors.push({ key: k, label: m.vendor });
+    else if (have.label === have.label.toUpperCase() && m.vendor !== m.vendor.toUpperCase()) have.label = m.vendor; // nicer spelling
+  });
+  vendors.sort((a, b) => (a.key === 'generic') - (b.key === 'generic') || a.label.localeCompare(b.label));
+  const vendorModels = ofType.filter((m) => vendorKey(m.vendor) === vendor)
+    .sort((a, b) => (b.verified - a.verified) || a.name.localeCompare(b.name));
+  const chosen = Array.isArray(models) ? models.find((m) => m.name === f.model) : null;
+  // editing: start on the device's vendor
+  useEffect(() => {
+    if (!Array.isArray(models)) return;
+    const m = models.find((x) => x.name === f.model);
+    setVendor(m ? vendorKey(m.vendor) : '');
+  }, [models]); // eslint-disable-line react-hooks/exhaustive-deps
+  const pickType = (t) => { setF((x) => ({ ...x, type: t, model: '' })); setVendor(''); };
+  const pickVendor = (v) => {
+    setVendor(v);
+    const list = ofType.filter((m) => vendorKey(m.vendor) === v);
+    setF((x) => ({ ...x, model: list.length === 1 ? list[0].name : '' }));
+  };
+  const pickModel = (name) => {
+    const m = (models || []).find((x) => x.name === name);
+    setF((x) => ({ ...x, model: name, pons: x.pons || (m && m.uses_pon ? m.pons : '') }));
+  };
+
   const save = async () => {
+    if (Array.isArray(models) && !chosen) {
+      toast.error('Choose the vendor and model — only the NMS models can read a device.');
+      return;
+    }
     setBusy(true);
     const r = await call('device_save', { id: editing ? devId(device) : undefined, device: f }, { post: true });
     setBusy(false);
@@ -428,12 +475,41 @@ const DeviceForm = ({ visible, device, onClose, onSaved, operators }) => {
       <ScrollView style={{ maxHeight: isWeb ? '65vh' : 520 }}>
         <Text style={s.section}>DEVICE</Text>
         <View style={s.formRow}>
-          {field('type', 'Type', { half: true, select: [['olt', 'OLT'], ['switch', 'Switch'], ['router', 'Router']] })}
-          {field('model', 'Model (command set)', { half: true, ph: 'empty = default for the type' })}
+          <View style={[s.field, s.half]}>
+            <Text style={s.label}>Type</Text>
+            {Select({ value: f.type, onChange: pickType, options: [['olt', 'OLT'], ['switch', 'Switch'], ['router', 'Router']], width: '100%' })}
+          </View>
+          {models === false ? (
+            field('model', 'Model (command set)', { half: true, ph: 'exact NMS model name', hint: 'Could not load the model list from the NMS — type the model name.' })
+          ) : (
+            <>
+              <View style={[s.field, s.half]}>
+                <Text style={s.label}>Vendor *</Text>
+                {models === null ? <ActivityIndicator size="small" color={ACCENT} style={{ alignSelf: 'flex-start', marginTop: 8 }} />
+                  : Select({ value: vendor, onChange: pickVendor, options: vendors.map((v) => [v.key, v.label]), placeholder: vendors.length ? 'Choose vendor' : 'No models for this type', width: '100%' })}
+              </View>
+              <View style={[s.field, s.half]}>
+                <Text style={s.label}>Model *</Text>
+                {Select({ value: chosen ? f.model : '', onChange: pickModel, options: vendorModels.map((m) => [m.name, `${m.name}${m.verified ? '  ✓ verified' : ''}`]), placeholder: vendor ? 'Choose model' : 'Choose a vendor first', width: '100%' })}
+              </View>
+              {chosen ? (
+                <View style={[s.field, s.half, { justifyContent: 'flex-end' }]}>
+                  <View style={[s.modelNote, chosen.verified && { borderColor: '#bbf7d0', backgroundColor: '#f0fdf4' }]}>
+                    <Feather name={chosen.verified ? 'check-circle' : 'info'} size={12} color={chosen.verified ? '#16a34a' : '#64748b'} style={{ marginTop: 1 }} />
+                    <Text style={s.modelNoteText} numberOfLines={3}>{chosen.verified ? 'Checked on a real device. ' : 'Not yet checked on a real device. '}{chosen.description}</Text>
+                  </View>
+                </View>
+              ) : editing && f.model && Array.isArray(models) ? (
+                <View style={[s.field, s.half, { justifyContent: 'flex-end' }]}>
+                  <Text style={[s.hint, { color: '#b45309' }]}>This device uses "{f.model}", which is not in the NMS model list — choose a model.</Text>
+                </View>
+              ) : null}
+            </>
+          )}
           {field('name', 'Name', { half: true })}
           {field('location', 'Location', { half: true })}
           {field('description', 'Description')}
-          {f.type === 'olt' ? field('pons', 'PONs', { ph: 'e.g. 0/1-0/8', hint: 'Only for models whose commands use {pon}' }) : null}
+          {f.type === 'olt' && (!chosen || chosen.uses_pon) ? field('pons', 'PONs', { ph: chosen?.pons ? `e.g. ${chosen.pons}` : 'e.g. 0/1-0/8', hint: chosen ? 'This model reads one PON at a time — list the PONs to read' : 'Only for models whose commands use {pon}' }) : null}
         </View>
         <Text style={s.section}>LOGIN (TELNET / SSH)</Text>
         <View style={s.formRow}>
@@ -1463,6 +1539,8 @@ export const NmsScreen = ({ user, refreshSignal }) => {
 };
 
 const s = StyleSheet.create({
+  modelNote: { flexDirection: 'row', gap: 6, padding: 8, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#f8fafc' },
+  modelNoteText: { flex: 1, fontSize: 11.5, color: '#475569', lineHeight: 16 },
   tabs: { backgroundColor: '#ffffff', borderRadius: 10, borderWidth: 1, borderColor: '#e2e8f0', alignSelf: 'flex-start', maxWidth: '100%' },
   backBtn: { flexDirection: 'row', alignItems: 'center', gap: 8, alignSelf: 'flex-start', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#e2e8f0', backgroundColor: '#ffffff' },
   backText: { fontSize: 13, fontWeight: '700', color: '#0f172a' },

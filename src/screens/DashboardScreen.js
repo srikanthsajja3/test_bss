@@ -29,13 +29,10 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
       if (r.ok) setProviderSyncOpen(Number(r.data?.counts?.open || 0));
     });
   }, [isSuperAdmin, refreshSignal]);
-  const [dashboardSearch, setDashboardSearch] = useState('');
   const [showAddCustomer, setShowAddCustomer] = useState(false); // operator: Add Customer from the dashboard
   const [partnerCounts, setPartnerCounts] = useState({ total: 0, admins: 0, operators: 0 });
 
   const [allPartners, setAllPartners] = useState([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [searchResults, setSearchResults] = useState({ customers: [], partners: [] });
 
   const loadDateSummary = async () => {
     try {
@@ -91,43 +88,6 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
     }
   };
 
-  useEffect(() => {
-    const q = dashboardSearch.trim();
-    if (!q) {
-      setSearchResults({ customers: [], partners: [] });
-      setIsSearching(false);
-      return;
-    }
-    const qLower = q.toLowerCase();
-    const matchedPartners = allPartners.filter((p) => {
-      const name = String(p.partner_name || p.name || '').toLowerCase();
-      const comp = String(p.company_name || '').toLowerCase();
-      const mob = String(p.partner_mobile || p.mobile || '').toLowerCase();
-      const mail = String(p.partner_email || p.email || '').toLowerCase();
-      const id = String(p.partner_id || p.id || '');
-      const reg = String(p.partner_region || '').toLowerCase();
-      return name.includes(qLower) || comp.includes(qLower) || mob.includes(qLower) || mail.includes(qLower) || id.includes(qLower) || reg.includes(qLower);
-    });
-
-    setIsSearching(true);
-    const timer = setTimeout(async () => {
-      try {
-        const res = await OneBssApi.getCustomersList(1, 8, '', q);
-        let custList = [];
-        if (res.ok && res.data) {
-          const raw = Array.isArray(res.data.data) ? res.data.data : (Array.isArray(res.data) ? res.data : (res.data.customers || []));
-          custList = raw.slice(0, 8);
-        }
-        setSearchResults({ customers: custList, partners: matchedPartners });
-      } catch (e) {
-        setSearchResults({ customers: [], partners: matchedPartners });
-      } finally {
-        setIsSearching(false);
-      }
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [dashboardSearch, allPartners]);
 
   // ---- Operator login: show the saved numbers first, then sync in the background ----
   // Internet (RADIUS bulk list) and IPTV (Pioneer, per customer) syncs run without blocking the
@@ -201,50 +161,6 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
 
   const isOperator = currentRole === 'operator';
 
-  const handleSearchNavigate = (filterKey = 'all', range = '', searchVal = '') => {
-    const term = searchVal || dashboardSearch.trim();
-    // If every match is an IPTV account, open the IPTV list instead of Internet
-    const found = searchResults.customers || [];
-    const onlyIptv = found.length > 0 && found.every((c) => c.account_type === 'iptv' || c.type === 'iptv');
-    setDashboardSearch('');
-    if (onNavigateToCustomers) {
-      onNavigateToCustomers(onlyIptv && filterKey === 'all' ? 'iptv_all' : filterKey, range, term);
-    }
-  };
-
-  const handleCustomerClick = (c) => {
-    setDashboardSearch('');
-    const custId = c.cust_id || c.id || c.customer_id;
-    const isIptv = Boolean(c.account_type === 'iptv' || c.type === 'iptv' || c.is_iptv);
-    const tabName = isIptv ? 'iptv_customers' : 'customers';
-
-    if (onNavigateToCustomers) {
-      onNavigateToCustomers(isIptv ? 'iptv_all' : 'all', '', '');
-    }
-
-    if (typeof window !== 'undefined' && custId) {
-      setTimeout(() => {
-        // open the account that was found (not just the customer's overview)
-        const open = isIptv ? (c.iptv_id ? `&open=iptv_${encodeURIComponent(c.iptv_id)}` : '')
-          : (c.internet_id ? `&open=int_${encodeURIComponent(c.internet_id)}` : c.username ? `&open=int_${encodeURIComponent(c.username)}` : '');
-        window.location.hash = `${tabName}?sub_id=${encodeURIComponent(custId)}${open}`;
-      }, 50);
-    }
-  };
-
-  const handlePartnerClick = (p) => {
-    setDashboardSearch('');
-    const pId = p.partner_id || p.id;
-    if (onNavigateToPartners) {
-      onNavigateToPartners();
-    }
-    if (typeof window !== 'undefined' && pId) {
-      setTimeout(() => {
-        window.location.hash = `partners?partner_id=${encodeURIComponent(pId)}`;
-      }, 50);
-    }
-  };
-
   if (showAddCustomer) {
     return (
       <AddCustomerScreen
@@ -316,129 +232,6 @@ export const DashboardScreen = ({ user, onNavigateToCustomers, onNavigateToPartn
         </View>
       ) : null}
 
-      {/* SEARCH INPUT IN DASHBOARD WITH FLOATING DROPDOWN */}
-      <View style={{ position: 'relative', zIndex: 1000, marginBottom: 16 }}>
-        <View style={{ backgroundColor: '#ffffff', borderWidth: 1, borderColor: 'rgba(0, 0, 0, 0.08)', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <Feather name="search" size={18} color="#9ca3af" />
-          <TextInput
-            style={{ flex: 1, fontSize: 14, color: '#000000', outlineStyle: 'none' }}
-            placeholder="Search dashboard metrics, subscribers, partners, mobile..."
-            value={dashboardSearch}
-            onChangeText={setDashboardSearch}
-            onSubmitEditing={() => handleSearchNavigate('all', '', dashboardSearch.trim())}
-            placeholderTextColor="#9ca3af"
-          />
-          {dashboardSearch ? (
-            <TouchableOpacity onPress={() => setDashboardSearch('')}>
-              <Feather name="x" size={16} color="#9ca3af" />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-
-        {/* FLOATING DROPDOWN SEARCH RESULTS */}
-        {dashboardSearch.trim() ? (
-          <View style={{ position: 'absolute', top: '100%', left: 0, right: 0, marginTop: 6, backgroundColor: '#ffffff', borderWidth: 1, borderColor: '#3b82f6', borderRadius: 12, padding: 14, boxShadow: '0 10px 25px rgba(0, 0, 0, 0.15)', zIndex: 2000, maxHeight: 400, overflowY: 'auto', elevation: 10 }}>
-            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Feather name="search" size={14} color="#3b82f6" />
-                <Text style={{ fontSize: 13, fontWeight: '700', color: COLORS.textMain }}>
-                  Search Results for "{dashboardSearch.trim()}"
-                </Text>
-                {isSearching && <ActivityIndicator size="small" color="#3b82f6" style={{ marginLeft: 6 }} />}
-              </View>
-              <TouchableOpacity
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(59, 130, 246, 0.1)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 }}
-                onPress={() => handleSearchNavigate('all', '', dashboardSearch.trim())}
-              >
-                <Text style={{ fontSize: 12, fontWeight: '700', color: '#2563eb' }}>View all in Subscribers</Text>
-                <Feather name="arrow-right" size={13} color="#2563eb" />
-              </TouchableOpacity>
-            </View>
-
-            {/* Matching Subscribers */}
-            {searchResults.customers.length > 0 && (
-              <View style={{ marginBottom: 12 }}>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 6, letterSpacing: 0.5 }}>
-                  MATCHING SUBSCRIBERS ({searchResults.customers.length})
-                </Text>
-                <View style={{ gap: 6 }}>
-                  {searchResults.customers.map((c, i) => {
-                    const uName = c.username || c.name || `User #${c.id || i}`;
-                    const mob = c.mobile || '—';
-                    const sts = (c.status || c.status_text || 'active').toLowerCase();
-                    return (
-                      <TouchableOpacity
-                        key={c.id || `sc_${i}`}
-                        style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 8, borderRadius: 8, backgroundColor: '#f8fafc', borderWidth: 1, borderColor: '#e2e8f0' }}
-                        onPress={() => handleCustomerClick(c)}
-                      >
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                          <Feather name="user" size={14} color="#3b82f6" />
-                          <View>
-                            <Text style={{ fontSize: 13, fontWeight: '700', color: '#0f172a' }}>{uName}</Text>
-                            <Text style={{ fontSize: 11, color: '#64748b' }}>Phone: {mob} • Plan: {c.package_name || c.plan || 'Internet'}</Text>
-                          </View>
-                        </View>
-                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                          <View style={{ paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, backgroundColor: sts === 'active' ? '#dcfce7' : (sts === 'expired' ? '#fee2e2' : '#f1f5f9') }}>
-                            <Text style={{ fontSize: 10, fontWeight: '700', color: sts === 'active' ? '#15803d' : (sts === 'expired' ? '#b91c1c' : '#475569') }}>
-                              {sts.toUpperCase()}
-                            </Text>
-                          </View>
-                          <Feather name="chevron-right" size={14} color="#94a3b8" />
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            )}
-
-            {/* Matching Partners */}
-            {searchResults.partners.length > 0 && (
-              <View>
-                <Text style={{ fontSize: 11, fontWeight: '700', color: COLORS.textMuted, marginBottom: 6, letterSpacing: 0.5 }}>
-                  MATCHING PARTNERS ({searchResults.partners.length})
-                </Text>
-                <View style={{ gap: 6 }}>
-                  {searchResults.partners.slice(0, 5).map((p, i) => (
-                    <TouchableOpacity
-                      key={p.partner_id || `sp_${i}`}
-                      style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 8, borderRadius: 8, backgroundColor: '#f0fdf4', borderWidth: 1, borderColor: '#bbf7d0' }}
-                      onPress={() => handlePartnerClick(p)}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
-                        <Feather name="briefcase" size={14} color="#10b981" />
-                        <View>
-                          <Text style={{ fontSize: 13, fontWeight: '700', color: '#064e3b' }}>
-                            #{p.partner_id || p.id} - {p.partner_name || p.name}
-                          </Text>
-                          <Text style={{ fontSize: 11, color: '#047857' }}>
-                            {p.company_name} • {p.partner_mobile || 'No mobile'}
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={{ paddingHorizontal: 7, paddingVertical: 2, borderRadius: 4, backgroundColor: '#dcfce7' }}>
-                        <Text style={{ fontSize: 10, fontWeight: '700', color: '#15803d' }}>
-                          {(p.account_role || p.role || 'OPERATOR').toUpperCase()}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-              </View>
-            )}
-
-            {!isSearching && searchResults.customers.length === 0 && searchResults.partners.length === 0 && (
-              <View style={{ padding: 14, alignItems: 'center' }}>
-                <Text style={{ fontSize: 12, color: COLORS.textMuted }}>
-                  No subscribers or partners found matching "{dashboardSearch.trim()}".
-                </Text>
-              </View>
-            )}
-          </View>
-        ) : null}
-      </View>
 
       {/* PARTNERS / ADMINS COUNT IN SUPERADMIN DASHBOARD (ITEM 11) */}
       {(isSuperAdmin || currentRole === 'admin') && (

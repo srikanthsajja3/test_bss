@@ -24,7 +24,9 @@
       "shortName": "OneBSS"
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      "expo-asset",
+      "expo-status-bar"
     ]
   }
 }

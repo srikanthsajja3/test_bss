@@ -722,6 +722,8 @@ function MainApp() {
             onOpenCreate={() => handleOpenCreateRole('operator')}
             onToggleSidebar={toggleSidebarCollapse}
             onOpenWallet={() => setActiveTab('wallet')}
+            onNavigateToCustomers={handleNavigateToCustomers}
+            onNavigateToPartners={handleNavigateToPartners}
             user={user}
           />
 

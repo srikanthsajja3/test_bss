@@ -3,7 +3,8 @@ import { View, Text, StyleSheet, TouchableOpacity, Pressable, Modal, useWindowDi
 import { Feather, Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { COLORS, GLASS_STYLE } from '../constants/theme';
 import { OneBssApi, getSwitchBackTargets, switchBackToLevel, switchSession } from '../services/oneBssApi';
-import { can } from '../services/staffAccess';
+import { can, tabAllowed } from '../services/staffAccess';
+import { GlobalSearch } from './GlobalSearch';
 
 export const Header = ({
   title,
@@ -16,10 +17,15 @@ export const Header = ({
   onOpenCreateOperator,
   onToggleSidebar,
   onOpenWallet,
+  onNavigateToCustomers,
+  onNavigateToPartners,
   user,
 }) => {
   const { width } = useWindowDimensions();
   const isMobile = width < 768;
+  // customer search on every page (anyone who can open a subscriber list)
+  const canSearch = !!user && (tabAllowed(user, 'customers') || tabAllowed(user, 'iptv_customers'));
+  const [searchOpen, setSearchOpen] = useState(false); // phones: the bar under the title
 
   const [liveWalletBalance, setLiveWalletBalance] = useState(user?.wallet_balance);
   // "Login as": the accounts we can switch back to, nearest first (kept with the login, so
@@ -98,7 +104,16 @@ export const Header = ({
         </View>
       </View>
 
+      {canSearch && !isMobile ? (
+        <GlobalSearch user={user} onNavigateToCustomers={onNavigateToCustomers} onNavigateToPartners={onNavigateToPartners} />
+      ) : null}
+
       <View style={[styles.actionSection, isMobile && { gap: 6 }]}>
+        {canSearch && isMobile ? (
+          <TouchableOpacity style={[styles.searchIconBtn, searchOpen && styles.searchIconBtnOn]} onPress={() => setSearchOpen((v) => !v)} accessibilityLabel="Search customers">
+            <Feather name="search" size={18} color={searchOpen ? '#0f766e' : COLORS.textMain} />
+          </TouchableOpacity>
+        ) : null}
         {switchTargets.length > 0 && (
           <TouchableOpacity
             ref={switchBtnRef}
@@ -177,6 +192,12 @@ export const Header = ({
           </TouchableOpacity>
         ) : null} */}
       </View>
+      {canSearch && isMobile && searchOpen ? (
+        <View style={{ width: '100%', zIndex: 100 }}>
+          <GlobalSearch user={user} mobile autoFocus onClose={() => setSearchOpen(false)}
+            onNavigateToCustomers={onNavigateToCustomers} onNavigateToPartners={onNavigateToPartners} />
+        </View>
+      ) : null}
     </View>
   );
 };
@@ -184,6 +205,8 @@ export const Header = ({
 const styles = StyleSheet.create({
   headerContainer: {
     width: '100%',
+    position: 'relative',
+    zIndex: 50,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -215,6 +238,15 @@ const styles = StyleSheet.create({
     color: COLORS.textMuted,
     marginTop: 2,
   },
+  searchIconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.04)',
+  },
+  searchIconBtnOn: { backgroundColor: 'rgba(20,184,166,0.12)' },
   actionSection: {
     flexDirection: 'row',
     alignItems: 'center',
